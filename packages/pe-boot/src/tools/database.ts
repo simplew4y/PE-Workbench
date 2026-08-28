@@ -11,6 +11,11 @@ export interface PeDatasetDatabase {
 	workspaceRoot: string;
 }
 
+interface PeDatasetLocation {
+	databasePath: string;
+	workspaceRoot: string;
+}
+
 export interface EvidenceLocator {
 	page_start?: number;
 	page_end?: number;
@@ -72,7 +77,7 @@ export function sourceCitation(row: SqlRow): string {
 	return filename;
 }
 
-export function openPeDataset(cwd: string, expectedDatasetId?: string): PeDatasetDatabase {
+function resolvePeDatasetLocation(cwd: string): PeDatasetLocation {
 	let workspaceRoot: string;
 	try {
 		workspaceRoot = realpathSync(cwd);
@@ -95,12 +100,17 @@ export function openPeDataset(cwd: string, expectedDatasetId?: string): PeDatase
 	if (!statSync(databasePath).isFile()) {
 		throw new Error("meta/collection.sqlite3 is not a file");
 	}
+	return { databasePath, workspaceRoot };
+}
 
-	const database = new DatabaseSync(databasePath, {
-		readOnly: true,
-		timeout: 10_000,
-	});
+function openResolvedPeDataset(
+	location: PeDatasetLocation,
+	expectedDatasetId: string | undefined,
+	readOnly: boolean,
+): PeDatasetDatabase {
+	const database = new DatabaseSync(location.databasePath, { readOnly, timeout: 10_000 });
 	try {
+		database.exec("PRAGMA busy_timeout=10000");
 		const rows = database
 			.prepare(
 				"SELECT DISTINCT dataset_id FROM documents WHERE dataset_id IS NOT NULL AND trim(dataset_id) <> '' ORDER BY dataset_id",
@@ -117,9 +127,17 @@ export function openPeDataset(cwd: string, expectedDatasetId?: string): PeDatase
 		if (expectedDatasetId && expectedDatasetId !== datasetId) {
 			throw new Error(`dataset_id ${expectedDatasetId} does not match the current project dataset ${datasetId}`);
 		}
-		return { database, datasetId, workspaceRoot };
+		return { database, datasetId, workspaceRoot: location.workspaceRoot };
 	} catch (error) {
 		database.close();
 		throw error;
 	}
+}
+
+export function openPeDataset(cwd: string, expectedDatasetId?: string): PeDatasetDatabase {
+	return openResolvedPeDataset(resolvePeDatasetLocation(cwd), expectedDatasetId, true);
+}
+
+export function openWritablePeDataset(cwd: string, expectedDatasetId?: string): PeDatasetDatabase {
+	return openResolvedPeDataset(resolvePeDatasetLocation(cwd), expectedDatasetId, false);
 }
