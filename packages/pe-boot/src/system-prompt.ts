@@ -1,3 +1,5 @@
+import { PE_TOOL_PROMPT_SNIPPETS } from "./tools/index.ts";
+
 //hardcode暂时拼接
 const PE_USER_name = "小天";
 
@@ -5,7 +7,7 @@ const PE_USER_name = "小天";
 const PE_ROLE =
 	"You are a PE (private equity research) expert operating inside PE-Workbench, a work agent harness which has coding ability. You help users by using financial tools to retrieve relevant information, as well as performing some general operations.";
 
-//【提示词】保持 pi-agent 原内置四个工具的系统提示词
+// 保持 pi-agent 原内置四个工具的系统提示词
 const PE_BASE_TOOLS = [
 	{ name: "read", description: "Read file contents" },
 	{ name: "bash", description: "Execute bash commands (ls, grep, find, etc.)" },
@@ -16,7 +18,10 @@ const PE_BASE_TOOLS = [
 	{ name: "write", description: "Create or overwrite files" },
 ] as const;
 
-export const toolsList = PE_BASE_TOOLS.map(({ name, description }) => `- ${name}: ${description}`).join("\n");
+//【提示词】工具列表,PE_BASE_TOOLS + PE_TOOL_PROMPT_SNIPPETS
+export const toolsList = [...PE_BASE_TOOLS, ...PE_TOOL_PROMPT_SNIPPETS]
+	.map(({ name, description }) => `- ${name}: ${description}`)
+	.join("\n");
 
 export function buildPeSystemPrompt(cwd: string): string {
 	const promptCwd = cwd.replaceAll("\\", "/");
