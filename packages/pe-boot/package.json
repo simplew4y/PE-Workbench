@@ -1,0 +1,15 @@
+{
+	"name": "@earendil-works/pe-boot",
+	"version": "0.84.2",
+	"description": "PE-Workbench SDK application built on pi-coding-agent",
+	"type": "module",
+	"bin": {
+		"pe-boot": "src/cli.ts"
+	},
+	"dependencies": {
+		"@earendil-works/pi-coding-agent": "0.84.2"
+	},
+	"engines": {
+		"node": ">=22.19.0"
+	}
+}
