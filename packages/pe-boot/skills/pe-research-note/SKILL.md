@@ -1,11 +1,22 @@
 ---
 name: pe-research-note
-description: Create a one-off, evidence-backed private-equity Research Note as a self-contained HTML asset. Use for requests to generate a research note, metric card, analytical table, or chart from the current PE project.
+description: Create a one-off, evidence-backed private-equity Research Note as a persistent HTML asset. Use only when the current user request explicitly asks for a Research Note or clearly asks to generate or save research as a persistent project asset. Do not use for ordinary questions, retrieval, summaries, or analysis, even when a table or chart could present the answer well.
 ---
 
 # PE Research Note
 
 Create one focused Research Note from evidence in the current project workspace.
+
+## Invocation gate
+
+Load and use this Skill only when the current user request provides one of these signals:
+
+- Explicit: the user asks to create, generate, produce, or save a Research Note, or invokes `/skill:pe-research-note`.
+- Implicit but unambiguous: the user asks to generate, save, archive, or write a persistent research artifact in the project, even without using the term Research Note.
+
+Do not use this Skill for an ordinary question, data lookup, source search, conversational summary, or analysis request. A topic being suitable for metrics, a table, or a chart is not authorization to create a persistent asset. For example, `阳光电源的财务数据` and `阳光电源的主要业务` must be answered in the conversation without creating a Research Note.
+
+If the persistence intent is unclear, answer in the conversation. Do not proactively create an asset.
 
 ## Managed directory
 
