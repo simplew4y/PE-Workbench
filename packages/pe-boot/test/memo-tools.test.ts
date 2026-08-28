@@ -115,6 +115,7 @@ describe("PE Memo tools", () => {
 				name: "pe-memo",
 				description: expect.stringContaining("immutable versions"),
 			}),
+			expect.objectContaining({ name: "pe-research-note" }),
 		]);
 	});
 
