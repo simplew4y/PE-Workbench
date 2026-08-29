@@ -1,27 +1,38 @@
-// NEVER convert to top-level imports - breaks browser/Vite builds
-let _existsSync: typeof import("node:fs").existsSync | null = null;
-let _homedir: typeof import("node:os").homedir | null = null;
-let _join: typeof import("node:path").join | null = null;
+import type * as NodeFs from "node:fs";
+import type * as NodeOs from "node:os";
+import type * as NodePath from "node:path";
 
-type DynamicImport = (specifier: string) => Promise<unknown>;
+type NodeBuiltinModules = {
+	"node:fs": typeof NodeFs;
+	"node:os": typeof NodeOs;
+	"node:path": typeof NodePath;
+};
 
-const dynamicImport: DynamicImport = (specifier) => import(specifier);
-const NODE_FS_SPECIFIER = "node:" + "fs";
-const NODE_OS_SPECIFIER = "node:" + "os";
-const NODE_PATH_SPECIFIER = "node:" + "path";
+type ProcessWithBuiltinModules = typeof process & {
+	getBuiltinModule?: <TId extends keyof NodeBuiltinModules>(id: TId) => NodeBuiltinModules[TId];
+};
 
-// Eagerly load in Node.js/Bun environment only
-if (typeof process !== "undefined" && (process.versions?.node || process.versions?.bun)) {
-	dynamicImport(NODE_FS_SPECIFIER).then((m) => {
-		_existsSync = (m as typeof import("node:fs")).existsSync;
-	});
-	dynamicImport(NODE_OS_SPECIFIER).then((m) => {
-		_homedir = (m as typeof import("node:os")).homedir;
-	});
-	dynamicImport(NODE_PATH_SPECIFIER).then((m) => {
-		_join = (m as typeof import("node:path")).join;
-	});
+function loadNodeBuiltins(): NodeBuiltinModules | null {
+	if (typeof process === "undefined" || !(process.versions?.node || process.versions?.bun)) {
+		return null;
+	}
+
+	const getBuiltinModule = (process as ProcessWithBuiltinModules).getBuiltinModule;
+	if (!getBuiltinModule) return null;
+
+	return {
+		"node:fs": getBuiltinModule("node:fs"),
+		"node:os": getBuiltinModule("node:os"),
+		"node:path": getBuiltinModule("node:path"),
+	};
 }
+
+// Keep runtime Node.js loading browser-safe. Top-level runtime imports of Node.js
+// builtins break browser/Vite builds, while dynamic imports confuse server bundlers.
+const nodeBuiltins = loadNodeBuiltins();
+const _existsSync = nodeBuiltins?.["node:fs"].existsSync ?? null;
+const _homedir = nodeBuiltins?.["node:os"].homedir ?? null;
+const _join = nodeBuiltins?.["node:path"].join ?? null;
 
 import type { KnownProvider, ProviderEnv } from "./types.ts";
 import { getProviderEnvValue } from "./utils/provider-env.ts";
@@ -39,9 +50,8 @@ function hasVertexAdcCredentials(env?: ProviderEnv): boolean {
 	}
 
 	if (cachedVertexAdcCredentialsExists === null) {
-		// If node modules haven't loaded yet (async import race at startup),
-		// return false WITHOUT caching so the next call retries once they're ready.
-		// Only cache false permanently in a browser environment where fs is never available.
+		// Only cache false permanently in a browser environment where Node.js
+		// builtins are never available.
 		if (!_existsSync || !_homedir || !_join) {
 			const isNode = typeof process !== "undefined" && (process.versions?.node || process.versions?.bun);
 			if (!isNode) {

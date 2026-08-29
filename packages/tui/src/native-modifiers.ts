@@ -1,8 +1,12 @@
-import { createRequire } from "node:module";
+import type { createRequire } from "node:module";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const cjsRequire = createRequire(import.meta.url);
+type ProcessWithNodeModule = typeof process & {
+	getBuiltinModule?: (id: "node:module") => { createRequire: typeof createRequire };
+};
+
+const cjsRequire = (process as ProcessWithNodeModule).getBuiltinModule?.("node:module").createRequire(import.meta.url);
 
 export type ModifierKey = "shift" | "command" | "control" | "option";
 
@@ -21,6 +25,7 @@ function isNativeModifiersHelper(value: unknown): value is NativeModifiersHelper
 function loadNativeModifiersHelper(): NativeModifiersHelper | undefined {
 	if (nativeModifiersHelper !== undefined) return nativeModifiersHelper ?? undefined;
 	nativeModifiersHelper = null;
+	if (!cjsRequire) return undefined;
 	const arch = process.arch;
 	if (arch !== "x64" && arch !== "arm64") return undefined;
 

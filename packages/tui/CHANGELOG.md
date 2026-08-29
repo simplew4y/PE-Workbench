@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Fixed server bundlers warning about the optional native modifier helper's dynamic module path.
 - Fixed duplicate fullscreen right-click paste in VS Code-based terminals on Windows ([#8186](https://github.com/earendil-works/pi/issues/8186)).
 - Fixed padded text exceeding narrow terminal widths ([#8252](https://github.com/earendil-works/pi/issues/8252)).
 
