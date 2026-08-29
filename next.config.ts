@@ -4,6 +4,7 @@ import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 
 const configDir = dirname(fileURLToPath(import.meta.url));
+const workspaceRoot = dirname(configDir);
 const { version } = JSON.parse(readFileSync(join(configDir, "package.json"), "utf8")) as { version: string };
 let piVersion = "unknown";
 try {
@@ -12,7 +13,11 @@ try {
 } catch { /* package not found, use default */ }
 
 const nextConfig: NextConfig = {
-  outputFileTracingRoot: configDir,
+  outputFileTracingRoot: workspaceRoot,
+  turbopack: {
+    root: workspaceRoot,
+  },
+  transpilePackages: ["@earendil-works/pe-boot"],
   serverExternalPackages: [
     "undici",
     "@earendil-works/pi-coding-agent",

@@ -1,4 +1,5 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import { buildPeSystemPrompt, registerPeTools } from "@earendil-works/pe-boot";
 import { createAgentSessionFromServices, createAgentSessionServices, getAgentDir, initTheme, SessionManager, SettingsManager, Theme } from "@earendil-works/pi-coding-agent";
 import { KeybindingsManager as TuiKeybindingsManager, TUI_KEYBINDINGS } from "@earendil-works/pi-tui";
 import { randomUUID } from "crypto";
@@ -1616,7 +1617,9 @@ export async function startRpcSession(
       agentDir,
       settingsManager,
       resourceLoaderOptions: {
+        systemPrompt: buildPeSystemPrompt(sessionCwd),
         extensionFactories: [
+          registerPeTools,
           createProjectCommandBashExtension({
             cwd: sessionCwd,
             settings: settingsManager,
