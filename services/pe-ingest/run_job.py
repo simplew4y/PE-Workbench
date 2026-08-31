@@ -35,6 +35,8 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--directory", required=True)
     parser.add_argument("--workspace-root", required=True)
+    parser.add_argument("--project-root", required=True)
+    parser.add_argument("--registry-path", required=True)
     parser.add_argument("--dataset-id", required=True)
     parser.add_argument("--dataset-name", required=True)
     parser.add_argument("--company-name", default="")
@@ -43,26 +45,33 @@ def main() -> int:
     parser.add_argument("--job-file", required=True)
     args = parser.parse_args()
 
+    workspace_root = Path(args.workspace_root).resolve()
+    project_root = Path(args.project_root).resolve()
+    registry_path = Path(args.registry_path).resolve()
     job_file = Path(args.job_file).resolve()
     base = {
         "jobId": args.job_id,
         "datasetId": args.dataset_id,
-        "projectPath": str(Path(args.workspace_root).resolve() / args.dataset_id),
+        "projectPath": str(project_root),
     }
-    write_job(
-        job_file,
-        {
-            **base,
-            "status": "running",
-            "message": "正在解析文档、提取内容并建立检索数据。",
-            "startedAt": now_iso(),
-        },
-    )
-
     try:
+        if project_root != workspace_root / args.dataset_id:
+            raise ValueError("Registered project root does not match workspace and dataset ID")
+        if registry_path != workspace_root.parent / "datasets.sqlite3":
+            raise ValueError("Registered dataset registry is outside the PE workbench root")
+        write_job(
+            job_file,
+            {
+                **base,
+                "status": "running",
+                "message": "正在解析文档、提取内容并建立检索数据。",
+                "startedAt": now_iso(),
+            },
+        )
         result = ingest_directory(
             directory_path=args.directory,
             workspace_root=args.workspace_root,
+            registry_path=registry_path,
             dataset_id=args.dataset_id,
             dataset_name=args.dataset_name,
             company_name=args.company_name,

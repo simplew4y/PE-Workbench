@@ -1067,6 +1067,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               <FileExplorer
                 ref={fileExplorerRef}
                 cwd={selectedRegisteredProject.root}
+                datasetId={selectedRegisteredProject.datasetId}
                 onOpenFile={onOpenFile ?? (() => {})}
                 refreshKey={explorerKey}
                 onAtMention={onAtMention}

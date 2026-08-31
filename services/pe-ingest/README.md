@@ -1,9 +1,26 @@
 # PE ingest runtime
 
 This local worker vendors the deterministic private-fund ingestion pipeline.
-Pi Web writes uploads to the workspace-level `_uploads/<dataset_id>` directory,
-starts `run_job.py`, and polls the durable job JSON under the project `meta/`
-directory. The generated project root is directly consumable by `pe-boot`.
+The PE project registry is the authority for every upload; browser-supplied
+paths never select a dataset. The fixed layout is:
+
+```text
+~/.pi/agent/pe-workbench/  # or $PI_CODING_AGENT_DIR/pe-workbench
+  datasets.sqlite3
+  _uploads/<dataset_id>/
+  projects/<dataset_id>/
+    generated/
+    meta/collection.sqlite3
+    raw/
+```
+
+Pi Web resolves `dataset_id` through the root registry, stages files under
+`_uploads`, and passes the registered project root and registry path to
+`run_job.py`. The worker classifies each document against the project's company
+identity, copies accepted source versions into `raw/`, writes classifications,
+chunks, evidence and structured facts into `meta/collection.sqlite3`, and
+leaves derived artifacts under `generated/`. Company conflicts are preserved
+for review but are not added to searchable chunks.
 
 Set up once in WSL:
 

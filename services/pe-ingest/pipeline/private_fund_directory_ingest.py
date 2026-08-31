@@ -2678,6 +2678,7 @@ def ingest_directory(
     *,
     directory_path: str | Path,
     workspace_root: str | Path | None = None,
+    registry_path: str | Path | None = None,
     dataset_id: Optional[str] = None,
     dataset_name: Optional[str] = None,
     company_name: str = "",
@@ -2697,8 +2698,13 @@ def ingest_directory(
     dataset_root = workspace / dataset_id
     raw_dir = dataset_root / "raw"
     meta_dir = dataset_root / "meta"
+    generated_dir = dataset_root / "generated"
     collection_db_path = meta_dir / "collection.sqlite3"
-    global_db_path = workspace / "datasets.sqlite3"
+    global_db_path = (
+        Path(registry_path).expanduser().resolve()
+        if registry_path
+        else workspace / "datasets.sqlite3"
+    )
     started = now_iso()
     job_id = job_id or sha256_text(f"{dataset_id}\0{source_dir}\0{started}")[:16]
 
@@ -2710,6 +2716,7 @@ def ingest_directory(
     workspace.mkdir(parents=True, exist_ok=True)
     raw_dir.mkdir(parents=True, exist_ok=True)
     meta_dir.mkdir(parents=True, exist_ok=True)
+    generated_dir.mkdir(parents=True, exist_ok=True)
 
     excluded_roots: list[Path] = []
     if dataset_root != source_dir and _path_is_within(dataset_root, source_dir):

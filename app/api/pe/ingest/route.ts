@@ -3,7 +3,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
 import { parseFormDataWithinLimit, RequestBodyTooLargeError } from "@/lib/bounded-form-data";
-import { getAllowedFileRoots, isFilePathAllowed } from "@/lib/file-access";
 import { validateUploadFileNames } from "@/lib/file-upload";
 import {
   PE_SUPPORTED_EXTENSIONS,
@@ -13,6 +12,7 @@ import {
   writeQueuedPeIngestJob,
   type PeIngestJob,
 } from "@/lib/pe-ingest";
+import { getPeProject, peProjectStorePaths } from "@/lib/pe-project-store";
 import { isApiRequestAllowed } from "@/lib/request-security";
 
 const MAX_UPLOAD_FILE_BYTES = 100 * 1024 * 1024;
@@ -31,16 +31,16 @@ export async function POST(request: NextRequest) {
 
   try {
     const form = await parseFormDataWithinLimit(request, MAX_UPLOAD_REQUEST_BYTES);
-    const cwd = textField(form, "cwd");
-    if (!cwd) return NextResponse.json({ error: "cwd is required" }, { status: 400 });
-
-    const allowedRoots = await getAllowedFileRoots();
-    const realCwd = fs.realpathSync(cwd);
-    if (!isFilePathAllowed(realCwd, allowedRoots)) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
+    const datasetId = textField(form, "datasetId").trim();
+    if (!datasetId) return NextResponse.json({ error: "datasetId is required" }, { status: 400 });
+    const project = getPeProject(datasetId);
+    const cwd = textField(form, "cwd").trim();
+    if (cwd && fs.realpathSync(cwd) !== fs.realpathSync(project.root)) {
+      return NextResponse.json({ error: "Project identity does not match cwd" }, { status: 409 });
     }
 
     const files = form.getAll("files").filter((entry): entry is File => typeof entry !== "string");
+    if (files.length === 0) return NextResponse.json({ error: "files are required" }, { status: 400 });
     const names = files.map((file) => file.name);
     const nameError = validateUploadFileNames(names);
     if (nameError) return NextResponse.json({ error: nameError }, { status: 400 });
@@ -56,7 +56,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: `Unsupported research file: ${unsupported[0]}` }, { status: 400 });
     }
 
-    const paths = resolvePeProjectPaths(realCwd);
+    const paths = resolvePeProjectPaths(project, peProjectStorePaths().registryPath);
     const activeJob = findActivePeIngestJob(paths);
     if (activeJob) {
       return NextResponse.json(
@@ -83,9 +83,9 @@ export async function POST(request: NextRequest) {
     };
     writeQueuedPeIngestJob(paths, job);
     startPeIngestJob(paths, job, {
-      datasetName: textField(form, "datasetName"),
-      companyName: textField(form, "companyName"),
-      companyTicker: textField(form, "companyTicker"),
+      datasetName: project.name,
+      companyName: project.companyName,
+      companyTicker: project.companyTicker,
     });
     return NextResponse.json({ job }, { status: 202 });
   } catch (error) {

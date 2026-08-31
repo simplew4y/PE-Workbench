@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import type { PeProjectSummary } from "./pe-project-types";
 
 export const PE_SUPPORTED_EXTENSIONS = new Set([
   ".pdf",
@@ -32,36 +33,36 @@ export interface PeIngestJob {
 export interface PeProjectPaths {
   projectPath: string;
   workspaceRoot: string;
+  registryPath: string;
   datasetId: string;
   uploadsPath: string;
   jobDirectory: string;
 }
 
-function safeDatasetId(value: string): string {
-  return value
-    .normalize("NFKC")
-    .replace(/[^\p{L}\p{N}_.-]+/gu, "_")
-    .replace(/^[._-]+|[._-]+$/gu, "") || "dataset";
-}
-
-export function resolvePeProjectPaths(cwd: string): PeProjectPaths {
-  const projectPath = fs.realpathSync(cwd);
+export function resolvePeProjectPaths(
+  project: Pick<PeProjectSummary, "datasetId" | "root">,
+  registryPath: string,
+): PeProjectPaths {
+  const projectPath = fs.realpathSync(project.root);
   if (!fs.statSync(projectPath).isDirectory()) throw new Error("PE project path is not a directory");
 
   const directoryName = path.basename(projectPath);
-  const datasetId = safeDatasetId(directoryName);
-  if (datasetId !== directoryName) {
-    throw new Error(
-      `PE project directory name must be a stable dataset ID. Rename "${directoryName}" to "${datasetId}" first.`,
-    );
+  if (project.datasetId !== directoryName) {
+    throw new Error("Registered dataset ID does not match its project directory");
   }
 
   const workspaceRoot = path.dirname(projectPath);
+  const peWorkbenchRoot = path.dirname(workspaceRoot);
+  const resolvedRegistry = fs.realpathSync(registryPath);
+  if (resolvedRegistry !== path.join(peWorkbenchRoot, "datasets.sqlite3")) {
+    throw new Error("PE project registry does not match the registered project root");
+  }
   return {
     projectPath,
     workspaceRoot,
-    datasetId,
-    uploadsPath: path.join(workspaceRoot, "_uploads", datasetId),
+    registryPath: resolvedRegistry,
+    datasetId: project.datasetId,
+    uploadsPath: path.join(peWorkbenchRoot, "_uploads", project.datasetId),
     jobDirectory: path.join(projectPath, "meta", "ingest-ui-jobs"),
   };
 }
@@ -126,6 +127,10 @@ export function startPeIngestJob(
     paths.uploadsPath,
     "--workspace-root",
     paths.workspaceRoot,
+    "--project-root",
+    paths.projectPath,
+    "--registry-path",
+    paths.registryPath,
     "--dataset-id",
     paths.datasetId,
     "--dataset-name",

@@ -32,6 +32,7 @@ interface FileNode {
 
 interface Props {
   cwd: string;
+  datasetId: string;
   onOpenFile: (filePath: string, fileName: string, options?: OpenFileOptions) => void;
   refreshKey?: number;
   onAtMention?: (relativePath: string, isDir: boolean) => void;
@@ -87,12 +88,14 @@ const RESEARCH_UPLOAD_SUFFIXES = new Set([
 ]);
 
 function uploadResearchFiles(
+  datasetId: string,
   cwd: string,
   files: File[],
   onProgress: (progress: number) => void,
 ): Promise<ResearchIngestJob> {
   return new Promise((resolve, reject) => {
     const formData = new FormData();
+    formData.append("datasetId", datasetId);
     formData.append("cwd", cwd);
     files.forEach((file) => formData.append("files", file, file.name));
     const xhr = new XMLHttpRequest();
@@ -563,6 +566,7 @@ function ChangeRow({
 
 export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileExplorer({
   cwd,
+  datasetId,
   onOpenFile,
   refreshKey,
   onAtMention,
@@ -729,14 +733,14 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
       setResearchStage("uploading");
       setResearchMessage(t("files.researchUploading"));
       try {
-        let job = await uploadResearchFiles(cwd, files, setUploadProgress);
+        let job = await uploadResearchFiles(datasetId, cwd, files, setUploadProgress);
         setUploadProgress(100);
         while (["queued", "running"].includes(job.status)) {
           setResearchStage(job.status as "queued" | "running");
           setResearchMessage(job.message || t("files.researchRunning"));
           await new Promise((resolve) => window.setTimeout(resolve, 1500));
           const response = await fetch(
-            `/api/pe/ingest/${encodeURIComponent(job.jobId)}?${new URLSearchParams({ cwd }).toString()}`,
+            `/api/pe/ingest/${encodeURIComponent(job.jobId)}?${new URLSearchParams({ datasetId }).toString()}`,
           );
           const body = await response.json().catch(() => ({})) as { job?: ResearchIngestJob; error?: string };
           if (!response.ok || !body.job) {
@@ -756,7 +760,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
         setResearchMessage(researchFailure instanceof Error ? researchFailure.message : String(researchFailure));
       }
     })();
-  }, [cwd, t, uploadBusy]);
+  }, [cwd, datasetId, t, uploadBusy]);
 
   useImperativeHandle(ref, () => ({
     openUploadPicker() {
