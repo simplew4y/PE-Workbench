@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdirSync,
   realpathSync,
+  renameSync,
   rmSync,
   statSync,
 } from "node:fs";
@@ -10,6 +11,7 @@ import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { allowFileRoot } from "./file-access";
+import { disallowFileRoot } from "./allowed-roots";
 import { projectIdentityKey } from "./project-identity";
 import type {
   CreatePeProjectInput,
@@ -70,12 +72,16 @@ const PROJECT_METADATA_SCHEMA = `
 function storePaths(options: PeProjectStoreOptions = {}): {
   registryPath: string;
   projectsRoot: string;
+  storeRoot: string;
+  uploadsRoot: string;
 } {
   const agentDir = resolve(options.agentDir ?? getAgentDir());
   const storeRoot = join(agentDir, "pe-workbench");
   return {
     registryPath: join(storeRoot, "datasets.sqlite3"),
     projectsRoot: resolve(options.projectsRoot ?? join(storeRoot, "projects")),
+    storeRoot,
+    uploadsRoot: join(storeRoot, "_uploads"),
   };
 }
 
@@ -296,6 +302,111 @@ export function createPeProject(
   } catch (error) {
     if (projectCreated && isInside(projectsRoot, projectRoot)) {
       rmSync(projectRoot, { recursive: true, force: true });
+    }
+    throw error;
+  }
+}
+
+export function deletePeProject(
+  datasetId: string,
+  options: PeProjectStoreOptions = {},
+): PeProjectCatalog {
+  const normalizedDatasetId = datasetId.trim();
+  if (!/^dataset_[A-Za-z0-9_-]+$/.test(normalizedDatasetId)) {
+    throw new Error("Invalid datasetId");
+  }
+
+  const paths = storePaths(options);
+  const projectsRoot = resolve(paths.projectsRoot);
+  const expectedProjectRoot = join(projectsRoot, normalizedDatasetId);
+  const expectedUploadsRoot = join(resolve(paths.uploadsRoot), normalizedDatasetId);
+  const database = openRegistry(options);
+  let row: SqlRow | undefined;
+  try {
+    row = database.prepare(`
+      SELECT dataset_id, name, status, dataset_root, company_name, company_ticker,
+             file_count, created_at, updated_at
+      FROM datasets WHERE dataset_id = ?
+    `).get(normalizedDatasetId) as unknown as SqlRow | undefined;
+  } finally {
+    database.close();
+  }
+  if (!row) throw new Error(`Project not found: ${normalizedDatasetId}`);
+  if (resolve(row.dataset_root) !== expectedProjectRoot || dirname(expectedProjectRoot) !== projectsRoot) {
+    throw new Error("Registered project root is outside the PE projects directory");
+  }
+
+  for (const candidate of [expectedProjectRoot, expectedUploadsRoot]) {
+    if (existsSync(candidate) && realpathSync(candidate) !== resolve(candidate)) {
+      throw new Error("Refusing to delete a project path that resolves outside its registered directory");
+    }
+  }
+
+  mkdirSync(paths.storeRoot, { recursive: true });
+  const stagingRoot = join(
+    paths.storeRoot,
+    `.deleting-${normalizedDatasetId}-${randomBytes(6).toString("hex")}`,
+  );
+  const stagedProjectRoot = join(stagingRoot, "project");
+  const stagedUploadsRoot = join(stagingRoot, "uploads");
+  let projectStaged = false;
+  let uploadsStaged = false;
+  let committed = false;
+  try {
+    mkdirSync(stagingRoot);
+    if (existsSync(expectedProjectRoot)) {
+      renameSync(expectedProjectRoot, stagedProjectRoot);
+      projectStaged = true;
+    }
+    if (existsSync(expectedUploadsRoot)) {
+      renameSync(expectedUploadsRoot, stagedUploadsRoot);
+      uploadsStaged = true;
+    }
+
+    const registry = openRegistry(options);
+    try {
+      registry.exec("BEGIN IMMEDIATE");
+      const state = registry.prepare(
+        "SELECT active_dataset_id FROM dataset_state WHERE id = 1",
+      ).get() as { active_dataset_id: string | null } | undefined;
+      const deleted = registry.prepare("DELETE FROM datasets WHERE dataset_id = ?")
+        .run(normalizedDatasetId);
+      if (Number(deleted.changes) !== 1) {
+        throw new Error(`Project not found: ${normalizedDatasetId}`);
+      }
+      if (state?.active_dataset_id === normalizedDatasetId) {
+        const next = registry.prepare(`
+          SELECT dataset_id FROM datasets ORDER BY updated_at DESC, name ASC LIMIT 1
+        `).get() as { dataset_id: string } | undefined;
+        registry.prepare(`
+          UPDATE dataset_state SET active_dataset_id = ?, updated_at = ? WHERE id = 1
+        `).run(next?.dataset_id ?? null, new Date().toISOString());
+      }
+      registry.exec("COMMIT");
+      committed = true;
+    } catch (error) {
+      try {
+        registry.exec("ROLLBACK");
+      } catch {
+        // The transaction may not have started.
+      }
+      throw error;
+    } finally {
+      registry.close();
+    }
+
+    rmSync(stagingRoot, { recursive: true, force: true });
+    disallowFileRoot(expectedProjectRoot);
+    return listPeProjects(options);
+  } catch (error) {
+    if (!committed) {
+      if (uploadsStaged && existsSync(stagedUploadsRoot) && !existsSync(expectedUploadsRoot)) {
+        renameSync(stagedUploadsRoot, expectedUploadsRoot);
+      }
+      if (projectStaged && existsSync(stagedProjectRoot) && !existsSync(expectedProjectRoot)) {
+        renameSync(stagedProjectRoot, expectedProjectRoot);
+      }
+      rmSync(stagingRoot, { recursive: true, force: true });
     }
     throw error;
   }

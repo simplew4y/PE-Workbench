@@ -7,6 +7,8 @@ const source = await readFile(new URL("./SessionSidebar.tsx", import.meta.url), 
 test("uses the PE project registry instead of arbitrary directory selection", () => {
   assert.match(source, /fetch\("\/api\/pe\/projects"/);
   assert.match(source, /<PeProjectCreateDialog/);
+  assert.match(source, /method: "DELETE"/);
+  assert.match(source, /void deleteProject\(selectedRegisteredProject\)/);
   assert.match(source, /projects\.find\(\(project\) => project\.projectKey === selectedProject\.key\)/);
   assert.doesNotMatch(source, /<DirectoryPicker/);
   assert.doesNotMatch(source, /fetch\("\/api\/cwd\/validate"/);

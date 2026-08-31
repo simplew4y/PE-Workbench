@@ -19,8 +19,9 @@ Pi Web resolves `dataset_id` through the root registry, stages files under
 `run_job.py`. The worker classifies each document against the project's company
 identity, copies accepted source versions into `raw/`, writes classifications,
 chunks, evidence and structured facts into `meta/collection.sqlite3`, and
-leaves derived artifacts under `generated/`. Company conflicts are preserved
-for review but are not added to searchable chunks.
+leaves derived artifacts under `generated/`. Company conflicts retain their
+`company_conflict` classification metadata and warning, but are still parsed
+and added to searchable chunks in the selected project.
 
 Set up once in WSL:
 

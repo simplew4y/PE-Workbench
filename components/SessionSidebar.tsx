@@ -249,6 +249,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const [projectsLoading, setProjectsLoading] = useState(true);
   const [projectsError, setProjectsError] = useState<string | null>(null);
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
+  const [deletingDatasetId, setDeletingDatasetId] = useState<string | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [projectFilter, setProjectFilter] = useState("");
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -536,6 +537,40 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       setProjectsError(cause instanceof Error ? cause.message : String(cause));
     }
   }, []);
+
+  const deleteProject = useCallback(async (project: PeProjectSummary) => {
+    const hasRunningSession = allSessions.some(
+      (session) => workspaceKeyOf(session) === project.projectKey && runningSessionIds.has(session.id),
+    );
+    if (explorerUploadBusy || hasRunningSession) {
+      setProjectsError(t("project.deleteBusy"));
+      return;
+    }
+    if (!window.confirm(t("project.deleteConfirm", { name: project.name }))) return;
+
+    setDeletingDatasetId(project.datasetId);
+    setProjectsError(null);
+    try {
+      const response = await fetch("/api/pe/projects", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ datasetId: project.datasetId }),
+      });
+      const data = await response.json().catch(() => ({})) as PeProjectCatalog & { error?: string };
+      if (!response.ok || data.error) throw new Error(data.error ?? `HTTP ${response.status}`);
+      setProjects(data.projects);
+      setActiveDatasetId(data.activeDatasetId);
+      const nextProject = data.projects.find((item) => item.datasetId === data.activeDatasetId)
+        ?? data.projects[0];
+      setSelectedCwd(nextProject?.root ?? null);
+      setProjectFilter("");
+      setDropdownOpen(false);
+    } catch (cause) {
+      setProjectsError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setDeletingDatasetId(null);
+    }
+  }, [allSessions, explorerUploadBusy, runningSessionIds, t]);
 
   // Close dropdowns on outside click
   useEffect(() => {
@@ -878,6 +913,39 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                   </div>
                 )}
               </div>
+
+              {selectedRegisteredProject && (
+                <button
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void deleteProject(selectedRegisteredProject);
+                  }}
+                  disabled={deletingDatasetId === selectedRegisteredProject.datasetId}
+                  title={t("project.deleteTitle", { name: selectedRegisteredProject.name })}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 7,
+                    width: "100%",
+                    padding: "9px 10px",
+                    background: "none",
+                    border: "none",
+                    borderTop: "1px solid var(--border)",
+                    color: "#dc2626",
+                    cursor: deletingDatasetId === selectedRegisteredProject.datasetId ? "wait" : "pointer",
+                    textAlign: "left",
+                    fontSize: 11,
+                  }}
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <polyline points="3 6 5 6 21 6" />
+                    <path d="M19 6l-1 14H6L5 6m3 0V4h8v2" />
+                  </svg>
+                  {deletingDatasetId === selectedRegisteredProject.datasetId
+                    ? t("project.deleting")
+                    : t("project.delete")}
+                </button>
+              )}
 
               <button
                 onClick={(event) => {

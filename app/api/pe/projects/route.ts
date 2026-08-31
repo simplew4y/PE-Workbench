@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import {
   activatePeProject,
   createPeProject,
+  deletePeProject,
   listPeProjects,
 } from "@/lib/pe-project-store";
 
@@ -45,5 +46,22 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ project });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 400 });
+  }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    const body = await request.json() as { datasetId?: unknown };
+    const datasetId = typeof body.datasetId === "string" ? body.datasetId.trim() : "";
+    if (!datasetId) {
+      return NextResponse.json({ error: "datasetId is required" }, { status: 400 });
+    }
+    const catalog = deletePeProject(datasetId);
+    return NextResponse.json(catalog);
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : String(error) },
+      { status: 400 },
+    );
   }
 }

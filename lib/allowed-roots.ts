@@ -29,3 +29,10 @@ export function allowFileRoot(root: string): void {
   getAdditionalAllowedRoots().add(normalizedRoot);
   globalThis.__piAllowedRootsCache?.roots.add(normalizedRoot);
 }
+
+export function disallowFileRoot(root: string): void {
+  if (!root) return;
+  const normalizedRoot = normalizeSlashes(root);
+  getAdditionalAllowedRoots().delete(normalizedRoot);
+  globalThis.__piAllowedRootsCache?.roots.delete(normalizedRoot);
+}

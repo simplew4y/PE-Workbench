@@ -2960,19 +2960,7 @@ def ingest_directory(
                         supersedes_doc_id=supersedes_doc_id,
                     )
                     suffix = stored_path.suffix.lower()
-                    if classification.classification_status == "company_conflict":
-                        doc_result = DocumentIngestResult(
-                            doc_id=doc_id,
-                            filename=stored_path.name,
-                            file_type=suffix.lstrip("."),
-                            status="classification_review_required",
-                            error_message=(
-                                "Company classification conflicts with the active project; "
-                                "the document was preserved but not indexed. "
-                                + "; ".join(classification.evidence[-3:])
-                            ),
-                        )
-                    elif suffix == ".pdf":
+                    if suffix == ".pdf":
                         doc_result = ingest_pdf(
                             conn, dataset_id=dataset_id, doc_id=doc_id, path=stored_path
                         )
@@ -2986,6 +2974,12 @@ def ingest_directory(
                         )
                     else:
                         raise ValueError(f"Unsupported file type: {stored_path.suffix}")
+                    if classification.classification_status == "company_conflict":
+                        doc_result.error_message = (
+                            "Company classification conflicts with the active project; "
+                            "the document was indexed in the selected project. "
+                            + "; ".join(classification.evidence[-3:])
+                        )
                     doc_result.logical_doc_id = logical_id
                     doc_result.version_no = version_no
                     doc_result.supersedes_doc_id = supersedes_doc_id
