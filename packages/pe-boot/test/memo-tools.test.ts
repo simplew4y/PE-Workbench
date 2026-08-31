@@ -113,10 +113,10 @@ describe("PE Memo tools", () => {
 		const result = loadSkillsFromDir({ dir: join(packageDirectory, "skills"), source: "test" });
 		expect(result.diagnostics).toEqual([]);
 		expect(result.skills).toEqual([
-			expect.objectContaining({
-				name: "pe-memo",
-				description: expect.stringContaining("immutable versions"),
-			}),
+				expect.objectContaining({
+					name: "pe-memo",
+					description: expect.stringContaining("persistent, evidence-backed PE Memo"),
+				}),
 			expect.objectContaining({ name: "pe-research-note" }),
 		]);
 	});
@@ -150,10 +150,23 @@ describe("PE Memo tools", () => {
 		const markdown = readFileSync(join(root, result.memo_markdown_path ?? ""), "utf8");
 		const html = readFileSync(join(root, result.memo_html_path ?? ""), "utf8");
 		const pdf = readFileSync(join(root, result.memo_pdf_path ?? ""));
-		expect(markdown).toContain("访谈.pdf p.2 [chunk:chunk-a]");
+		const citationGate = JSON.parse(
+			readFileSync(join(root, result.citation_gate_audit_path ?? ""), "utf8"),
+		) as { claims: Array<{ claim_id: string; text: string; evidence_ids: string[] }> };
+		expect(markdown).toContain("访谈.pdf p.2");
+		expect(markdown).toContain("内容：收入增长20%。");
+		expect(markdown).not.toContain("chunk:chunk-a");
 		expect(markdown).toContain("待复核");
+		expect(html).toContain("访谈.pdf p.2");
+		expect(html).toContain("收入增长20%。");
+		expect(html).not.toContain("chunk:chunk-a");
 		expect(html).toContain("&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;");
 		expect(html).not.toContain("<script>");
+		expect(citationGate.claims[0]).toMatchObject({
+			claim_id: "claim-1",
+			text: "收入增长20%。",
+			evidence_ids: ["chunk:chunk-a"],
+		});
 		expect(pdf.subarray(0, 5).toString("ascii")).toBe("%PDF-");
 		expect(pdf.byteLength).toBeGreaterThan(5_000);
 		expect(pdf.toString("latin1").match(/\/Type \/Page\b/gu)).toHaveLength(1);

@@ -433,7 +433,9 @@ function markdownText(value: string): string {
 function renderClaimMarkdown(claim: ValidatedMemoClaim, evidence: ReadonlyMap<string, EvidenceReference>): string {
 	if (claim.status === "not_covered") return `- 资料未覆盖：${markdownText(claim.text)}`;
 	const sources = claim.evidence_ids
-		.map((evidenceId) => `${evidence.get(evidenceId)?.citation ?? evidenceId} [${evidenceId}]`)
+		.map((evidenceId) => evidence.get(evidenceId))
+		.filter((reference): reference is EvidenceReference => reference !== undefined)
+		.map((reference) => `${reference.citation}；内容：${claim.text}`)
 		.join("；");
 	const sourceSuffix = sources ? `（来源：${markdownText(sources)}）` : "";
 	const reviewSuffix = claim.status === "needs_review" ? " **（待复核）**" : "";
@@ -500,10 +502,12 @@ function renderMemoHtml(options: {
 			const claims = section.claims
 				.map((claim) => {
 					const sources = claim.evidence_ids
-						.map((evidenceId) => {
-							const reference = options.evidence.get(evidenceId);
-							return `<li>${escapeHtml(reference?.citation ?? evidenceId)} <code>${escapeHtml(evidenceId)}</code></li>`;
-						})
+						.map((evidenceId) => options.evidence.get(evidenceId))
+						.filter((reference): reference is EvidenceReference => reference !== undefined)
+						.map(
+							(reference) =>
+								`<li><strong>${escapeHtml(reference.citation)}</strong>：${escapeHtml(claim.text)}</li>`,
+						)
 						.join("");
 					const label =
 						claim.status === "not_covered"
@@ -836,10 +840,10 @@ export async function savePeMemo(cwd: string, options: SavePeMemoOptions, signal
 				claims: section.claims.map((claim) => ({
 					text: claim.text,
 					status: claim.status,
-					sources: claim.evidence_ids.map((evidenceId) => ({
-						evidenceId,
-						citation: evidence.get(evidenceId)?.citation ?? evidenceId,
-					})),
+					sources: claim.evidence_ids
+						.map((evidenceId) => evidence.get(evidenceId))
+						.filter((reference): reference is EvidenceReference => reference !== undefined)
+						.map((reference) => ({ citation: reference.citation, text: claim.text })),
 				})),
 			})),
 		});
