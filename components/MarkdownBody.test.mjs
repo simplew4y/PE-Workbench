@@ -37,6 +37,16 @@ test("keeps local file markdown links in the app", () => {
   assert.doesNotMatch(html, /target=|rel=|\snode=/);
 });
 
+test("renders PE evidence links as an inline source control", () => {
+  const html = renderMarkdown(
+    "结论。[访谈.pdf p.2](#pe-source?evidence_id=chunk%3Achunk-storage)",
+  );
+
+  assert.match(html, /data-pe-source-citation="true"/);
+  assert.match(html, />访谈\.pdf p\.2<\/button>/);
+  assert.doesNotMatch(html, /chunk-storage/);
+});
+
 test("keeps single-tilde CJK numeric ranges literal instead of striking them", () => {
   const html = renderMarkdown("5~7U 保证金 × 100~200倍杠杆");
 

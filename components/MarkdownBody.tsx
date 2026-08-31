@@ -5,7 +5,9 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import { resolveLocalFileHref } from "@/lib/file-links";
 import { encodeFilePathForApi } from "@/lib/file-paths";
 import { markdownRehypePlugins, markdownRemarkPlugins, normalizeDisplayMath } from "@/lib/markdown";
+import { parsePeSourceHref } from "@/lib/pe-source";
 import { MermaidBlock, CodeBlock } from "./MermaidBlock";
+import { PeSourceCitation } from "./PeSourceCitation";
 
 interface MarkdownBodyProps {
   children: string;
@@ -44,6 +46,18 @@ export function MarkdownBody({ children, className, isStreaming, cwd, onOpenFile
     a({ href, children, ...props }) {
       // `node` is react-markdown metadata, not a DOM attribute.
       delete props.node;
+      const peSource = parsePeSourceHref(href);
+      if (peSource && cwd) {
+        return (
+          <PeSourceCitation
+            className={props.className}
+            cwd={cwd}
+            evidenceId={peSource.evidenceId}
+          >
+            {children}
+          </PeSourceCitation>
+        );
+      }
       const filePath = onOpenFile ? resolveLocalFileHref(href, cwd) : null;
       const openFile = onOpenFile;
       if (!filePath || !openFile) {
