@@ -12,8 +12,8 @@ const ACCENT_COLOR = "#283750";
 const REVIEW_COLOR = "#8A4B00";
 
 export interface MemoPdfSource {
-	evidenceId: string;
 	citation: string;
+	text: string;
 }
 
 export interface MemoPdfClaim {
@@ -81,7 +81,11 @@ function writeClaim(document: PDFKit.PDFDocument, claim: MemoPdfClaim): void {
 			.font(FONT_REGULAR)
 			.fontSize(8.5)
 			.fillColor(MUTED_COLOR)
-			.text(`来源：${source.citation} [${source.evidenceId}]`, { indent: 24, paragraphGap: 2, lineGap: 1 });
+			.text(`来源：${source.citation}${source.text ? `；内容：${source.text}` : ""}`, {
+				indent: 24,
+				paragraphGap: 2,
+				lineGap: 1,
+			});
 	}
 	document.moveDown(0.25);
 }
