@@ -1,24 +1,23 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { PE_DATASET_MEMO_PROMPT_SNIPPET, peDatasetMemoTool } from "./dataset-memo.ts";
+import { peDatasetMemoTool } from "./dataset-memo.ts";
 import { PE_DATASET_SEARCH_PROMPT_SNIPPET, peDatasetSearchTool } from "./dataset-search.ts";
-import { PE_HISTORY_COMPARE_PROMPT_SNIPPET, peHistoryCompareTool } from "./history-compare.ts";
-import { PE_RESEARCH_NOTE_SAVE_PROMPT_SNIPPET, peResearchNoteSaveTool } from "./research-note-save.ts";
+import { peHistoryCompareTool } from "./history-compare.ts";
+import { peResearchNoteSaveTool } from "./research-note-save.ts";
 import { PE_SOURCE_DETAIL_PROMPT_SNIPPET, peSourceDetailTool } from "./source-detail.ts";
 
 const toolsDirectory = dirname(fileURLToPath(import.meta.url));
 const memoSkillPath = join(toolsDirectory, "../../skills/pe-memo/SKILL.md");
 const researchNoteSkillPath = join(toolsDirectory, "../../skills/pe-research-note/SKILL.md");
 
+//系统提示词只注入pe核心检索工具相关的提示词，其他的不注入
 export const PE_TOOL_PROMPT_SNIPPETS = [
 	{ name: "pe_dataset_search", description: PE_DATASET_SEARCH_PROMPT_SNIPPET },
 	{ name: "pe_source_detail", description: PE_SOURCE_DETAIL_PROMPT_SNIPPET },
-	{ name: "pe_dataset_memo", description: PE_DATASET_MEMO_PROMPT_SNIPPET },
-	{ name: "pe_history_compare", description: PE_HISTORY_COMPARE_PROMPT_SNIPPET },
-	{ name: "pe_research_note_save", description: PE_RESEARCH_NOTE_SAVE_PROMPT_SNIPPET },
 ] as const;
 
+//注册所有pe工具
 export function registerPeTools(pi: ExtensionAPI): void {
 	pi.registerTool(peDatasetSearchTool);
 	pi.registerTool(peSourceDetailTool);

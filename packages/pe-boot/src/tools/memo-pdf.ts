@@ -1,4 +1,5 @@
-import { createRequire } from "node:module";
+import { realpathSync } from "node:fs";
+import { findPackageJSON } from "node:module";
 import { dirname, join } from "node:path";
 import PDFDocument from "pdfkit";
 
@@ -39,9 +40,11 @@ export interface RenderMemoPdfOptions {
 }
 
 function resolveFontPath(filename: string): string {
-	const require = createRequire(import.meta.url);
-	const packageRoot = dirname(dirname(require.resolve("@embedpdf/fonts-sc")));
-	return join(packageRoot, "fonts", filename);
+	const packageJsonPath = findPackageJSON("@embedpdf/fonts-sc", import.meta.url);
+	if (!packageJsonPath) {
+		throw new Error("Could not resolve the @embedpdf/fonts-sc package required for Memo PDF generation");
+	}
+	return realpathSync(join(dirname(packageJsonPath), "fonts", filename));
 }
 
 function ensureVerticalSpace(document: PDFKit.PDFDocument, height: number): void {

@@ -1,11 +1,22 @@
 ---
 name: pe-memo
-description: Create or revise an evidence-backed private-equity research Memo with Citation Gate, immutable versions, and section-level history comparison. Use for every request to generate, update, correct, extend, version, or compare a focused investment Memo in the current PE project.
+description: Create, revise, version, or compare a persistent, evidence-backed PE Memo. Use only for an explicit or unambiguous Memo request; not for ordinary QA, retrieval, summaries, or analysis.
 ---
 
 # PE Memo
 
 Produce a focused, client-facing Memo from evidence in the current project workspace.
+
+## Invocation gate
+
+Load and use this Skill only when the current user request provides one of these signals:
+
+- Explicit: the user asks to create, generate, produce, save, revise, update, correct, extend, version, or compare a Memo, or invokes `/skill:pe-memo`.
+- Implicit but unambiguous: the user asks to generate, save, revise, version, or compare a persistent investment-research document whose requested form and lifecycle clearly match a Memo, even without using the term Memo.
+
+Do not use this Skill for an ordinary question, data lookup, source search, conversational summary, or analysis request. A topic being suitable for a formal report or having enough evidence is not authorization to create a persistent asset.
+
+If the persistence or Memo intent is unclear, answer in the conversation. Do not proactively create, revise, or version an asset.
 
 ## Managed directory
 

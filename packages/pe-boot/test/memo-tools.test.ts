@@ -104,8 +104,10 @@ describe("PE Memo tools", () => {
 		expect(peDatasetMemoTool.name).toBe("pe_dataset_memo");
 		expect(peHistoryCompareTool.name).toBe("pe_history_compare");
 		const prompt = buildPeSystemPrompt("/workspace");
-		expect(prompt).toContain("- pe_dataset_memo:");
-		expect(prompt).toContain("- pe_history_compare:");
+		expect(prompt).not.toContain("- pe_dataset_memo:");
+		expect(prompt).not.toContain("- pe_history_compare:");
+		expect(prompt).toContain("- pe_dataset_search:");
+		expect(prompt).toContain("- pe_source_detail:");
 
 		const packageDirectory = dirname(dirname(fileURLToPath(import.meta.url)));
 		const result = loadSkillsFromDir({ dir: join(packageDirectory, "skills"), source: "test" });
