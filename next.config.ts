@@ -17,9 +17,9 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: workspaceRoot,
   },
-  transpilePackages: ["@earendil-works/pe-boot"],
   serverExternalPackages: [
     "undici",
+    "@earendil-works/pe-boot",
     "@earendil-works/pi-coding-agent",
     "@earendil-works/pi-agent-core",
     "@earendil-works/pi-ai",

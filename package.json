@@ -28,9 +28,10 @@
     "package.json"
   ],
   "scripts": {
-    "dev": "next dev -H 127.0.0.1 -p 30141",
-    "dev:lan": "next dev -H 0.0.0.0 -p 30141",
-    "build": "next build --webpack",
+    "build:pe-boot": "npm --prefix ../PE-Workbench-pi run build --workspace=@earendil-works/pe-boot",
+    "dev": "npm run build:pe-boot && next dev -H 127.0.0.1 -p 30141",
+    "dev:lan": "npm run build:pe-boot && next dev -H 0.0.0.0 -p 30141",
+    "build": "npm run build:pe-boot && next build --webpack",
     "start": "next start -H 127.0.0.1 -p 30141",
     "start:lan": "next start -H 0.0.0.0 -p 30141",
     "lint": "eslint .",
