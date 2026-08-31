@@ -40,3 +40,8 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 .factory
+
+# local Python ingest runtime
+services/pe-ingest/.venv/
+**/__pycache__/
+*.py[cod]
