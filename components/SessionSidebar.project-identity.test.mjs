@@ -3,17 +3,18 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const source = await readFile(new URL("./SessionSidebar.tsx", import.meta.url), "utf8");
-const customPathStart = source.indexOf("const commitCustomPath = useCallback");
-const customPathEnd = source.indexOf("const handleCustomPathClick", customPathStart);
-const customPathSource = source.slice(customPathStart, customPathEnd);
+const projectSelectionStart = source.indexOf("const selectProject = useCallback");
+const projectSelectionEnd = source.indexOf("// Close dropdowns", projectSelectionStart);
+const projectSelectionSource = source.slice(projectSelectionStart, projectSelectionEnd);
 
-test("custom cwd selection installs validated identity before changing cwd", () => {
-  assert.notEqual(customPathStart, -1);
-  assert.notEqual(customPathEnd, -1);
-  assert.match(customPathSource, /projectRoot\?: string;[\s\S]*?projectKey\?: string;/);
+test("registered project selection is persisted before changing cwd", () => {
+  assert.notEqual(projectSelectionStart, -1);
+  assert.notEqual(projectSelectionEnd, -1);
+  assert.match(projectSelectionSource, /fetch\("\/api\/pe\/projects"/);
+  assert.match(projectSelectionSource, /body: JSON\.stringify\(\{ datasetId: project\.datasetId \}\)/);
 
-  const identityUpdate = customPathSource.indexOf("setValidatedProject(");
-  const cwdUpdate = customPathSource.indexOf("setSelectedCwd(");
-  assert.ok(identityUpdate >= 0, "validated project identity is retained");
-  assert.ok(cwdUpdate > identityUpdate, "identity is retained before cwd changes");
+  const activeProjectUpdate = projectSelectionSource.indexOf("setActiveDatasetId(");
+  const cwdUpdate = projectSelectionSource.indexOf("setSelectedCwd(");
+  assert.ok(activeProjectUpdate >= 0, "active project identity is retained");
+  assert.ok(cwdUpdate > activeProjectUpdate, "project identity is retained before cwd changes");
 });

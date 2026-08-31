@@ -60,7 +60,7 @@ test("manual and lifecycle refreshes bypass the server session-list cache", () =
   assert.match(source, /force \? "\/api\/sessions\?force=1" : "\/api\/sessions"/);
   assert.match(source, /cache: "no-store"/);
   assert.match(source, /loadSessions\(isFirst, !isFirst\)/);
-  assert.match(source, /onClick=\{\(\) => loadSessions\(false, true\)\}/);
+  assert.match(source, /void loadSessions\(false, true\);\s*void loadProjects\(\);/);
   assert.match(source, /loadSessions\(false, true\);[\s\S]*?onBackgroundTaskDone/);
 });
 
