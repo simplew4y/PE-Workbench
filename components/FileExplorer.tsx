@@ -32,6 +32,7 @@ interface FileNode {
 
 interface Props {
   cwd: string;
+  datasetId: string;
   onOpenFile: (filePath: string, fileName: string, options?: OpenFileOptions) => void;
   refreshKey?: number;
   onAtMention?: (relativePath: string, isDir: boolean) => void;
@@ -43,9 +44,11 @@ interface Props {
 
 export interface FileExplorerHandle {
   openUploadPicker: () => void;
+  openResearchUploadPicker: () => void;
 }
 
 type UploadPhase = "idle" | "checking" | "uploading";
+type ResearchIngestStage = "idle" | "uploading" | "queued" | "running" | "completed" | "warning" | "failed";
 type UploadConflictStrategy = "error" | "overwrite" | "skip";
 
 interface UploadError {
@@ -72,6 +75,53 @@ interface PendingConflict {
   files: File[];
   conflicts: string[];
   nonReplaceable: string[];
+}
+
+interface ResearchIngestJob {
+  jobId: string;
+  status: string;
+  message: string;
+}
+
+const RESEARCH_UPLOAD_SUFFIXES = new Set([
+  "pdf", "xlsx", "xlsm", "docx", "pptx", "csv", "md", "markdown", "txt",
+]);
+
+function uploadResearchFiles(
+  datasetId: string,
+  cwd: string,
+  files: File[],
+  onProgress: (progress: number) => void,
+): Promise<ResearchIngestJob> {
+  return new Promise((resolve, reject) => {
+    const formData = new FormData();
+    formData.append("datasetId", datasetId);
+    formData.append("cwd", cwd);
+    files.forEach((file) => formData.append("files", file, file.name));
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/pe/ingest");
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable && event.total > 0) {
+        onProgress(Math.round((event.loaded / event.total) * 100));
+      }
+    };
+    xhr.onerror = () => reject(new Error("Network error while uploading research files"));
+    xhr.onabort = () => reject(new Error("Research upload cancelled"));
+    xhr.onload = () => {
+      let body: { job?: ResearchIngestJob; error?: string } = {};
+      try {
+        body = JSON.parse(xhr.responseText) as typeof body;
+      } catch {
+        // The HTTP status below supplies the fallback error.
+      }
+      if (xhr.status < 200 || xhr.status >= 300 || !body.job) {
+        reject(new Error(body.error ?? `Research upload failed (HTTP ${xhr.status})`));
+        return;
+      }
+      resolve(body.job);
+    };
+    xhr.send(formData);
+  });
 }
 
 async function fetchEntries(dirPath: string): Promise<FileNode[]> {
@@ -516,6 +566,7 @@ function ChangeRow({
 
 export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileExplorer({
   cwd,
+  datasetId,
   onOpenFile,
   refreshKey,
   onAtMention,
@@ -538,10 +589,15 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadSummary, setUploadSummary] = useState<UploadSummary | null>(null);
   const [pendingConflict, setPendingConflict] = useState<PendingConflict | null>(null);
+  const [researchStage, setResearchStage] = useState<ResearchIngestStage>("idle");
+  const [researchMessage, setResearchMessage] = useState("");
   const prevCwdRef = useRef<string | null>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
+  const researchUploadInputRef = useRef<HTMLInputElement>(null);
   const refreshToken = `${refreshKey ?? 0}:${treeRefreshKey}`;
-  const uploadBusy = uploadPhase !== "idle";
+  const fileUploadBusy = uploadPhase !== "idle";
+  const researchBusy = ["uploading", "queued", "running"].includes(researchStage);
+  const uploadBusy = fileUploadBusy || researchBusy;
 
   const gitStatusByPath = useMemo(() => new Map(
     gitFiles.map((status) => [normalizeFilePathSlashes(status.filePath), status]),
@@ -658,9 +714,60 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
     void prepareUpload(files);
   }, [prepareUpload]);
 
+  const handleResearchUploadInput = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = Array.from(event.target.files ?? []);
+    event.target.value = "";
+    if (selected.length === 0 || uploadBusy) return;
+    const files = selected.filter((file) => {
+      const suffix = file.name.split(".").pop()?.toLowerCase() ?? "";
+      return RESEARCH_UPLOAD_SUFFIXES.has(suffix);
+    });
+    if (files.length !== selected.length) {
+      setResearchStage("failed");
+      setResearchMessage(t("files.researchUnsupported"));
+      return;
+    }
+
+    void (async () => {
+      setUploadProgress(0);
+      setResearchStage("uploading");
+      setResearchMessage(t("files.researchUploading"));
+      try {
+        let job = await uploadResearchFiles(datasetId, cwd, files, setUploadProgress);
+        setUploadProgress(100);
+        while (["queued", "running"].includes(job.status)) {
+          setResearchStage(job.status as "queued" | "running");
+          setResearchMessage(job.message || t("files.researchRunning"));
+          await new Promise((resolve) => window.setTimeout(resolve, 1500));
+          const response = await fetch(
+            `/api/pe/ingest/${encodeURIComponent(job.jobId)}?${new URLSearchParams({ datasetId }).toString()}`,
+          );
+          const body = await response.json().catch(() => ({})) as { job?: ResearchIngestJob; error?: string };
+          if (!response.ok || !body.job) {
+            throw new Error(body.error ?? `Pipeline status failed (HTTP ${response.status})`);
+          }
+          job = body.job;
+        }
+        if (job.status === "completed" || job.status === "completed_with_warnings") {
+          setResearchStage(job.status === "completed" ? "completed" : "warning");
+          setResearchMessage(job.message || t("files.researchComplete"));
+          setTreeRefreshKey((key) => key + 1);
+          return;
+        }
+        throw new Error(job.message || t("files.researchFailed"));
+      } catch (researchFailure) {
+        setResearchStage("failed");
+        setResearchMessage(researchFailure instanceof Error ? researchFailure.message : String(researchFailure));
+      }
+    })();
+  }, [cwd, datasetId, t, uploadBusy]);
+
   useImperativeHandle(ref, () => ({
     openUploadPicker() {
       if (!uploadBusy) uploadInputRef.current?.click();
+    },
+    openResearchUploadPicker() {
+      if (!uploadBusy) researchUploadInputRef.current?.click();
     },
   }), [uploadBusy]);
 
@@ -717,7 +824,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
     onChangesCountChange?.(gitFiles.length);
   }, [gitFiles, onChangesCountChange]);
 
-  const showUploadFeedback = uploadBusy || pendingConflict !== null || uploadError !== null || uploadSummary !== null;
+  const showUploadFeedback = fileUploadBusy || pendingConflict !== null || uploadError !== null || uploadSummary !== null;
 
   const addUploadedFilesToChat = useCallback(() => {
     if (!uploadSummary || uploadSummary.uploaded.length === 0) return;
@@ -729,9 +836,45 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   return (
     <div style={{ minHeight: "100%" }}>
       <input ref={uploadInputRef} type="file" multiple hidden onChange={handleUploadInput} />
+      <input
+        ref={researchUploadInputRef}
+        type="file"
+        multiple
+        hidden
+        accept=".pdf,.xlsx,.xlsm,.docx,.pptx,.csv,.md,.markdown,.txt"
+        onChange={handleResearchUploadInput}
+      />
+      {researchStage !== "idle" && (
+        <div
+          role={researchStage === "failed" ? "alert" : "status"}
+          aria-live="polite"
+          style={{ padding: "7px 8px", borderBottom: "1px solid var(--border)", fontSize: 11 }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+            {researchBusy && (
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" style={{ animation: "spin 0.8s linear infinite", flexShrink: 0 }} aria-hidden="true">
+                <path d="M21 12a9 9 0 1 1-5.7-8.4" />
+              </svg>
+            )}
+            <span style={{ color: researchStage === "failed" ? "#ef4444" : researchStage === "warning" ? "#f59e0b" : "var(--text-muted)", lineHeight: 1.4 }}>
+              {researchMessage}
+            </span>
+            {!researchBusy && (
+              <button type="button" onClick={() => setResearchStage("idle")} style={{ marginLeft: "auto", border: 0, background: "transparent", color: "var(--text-dim)", cursor: "pointer" }} aria-label={t("files.dismissUploadResults")}>
+                ×
+              </button>
+            )}
+          </div>
+          {researchStage === "uploading" && (
+            <div style={{ height: 3, marginTop: 5, overflow: "hidden", borderRadius: 2, background: "var(--border)" }}>
+              <div style={{ width: `${uploadProgress}%`, height: "100%", background: "var(--accent)", transition: "width 120ms ease" }} />
+            </div>
+          )}
+        </div>
+      )}
       {showUploadFeedback && (
         <div style={{ padding: "6px 8px", borderBottom: "1px solid var(--border)" }}>
-        {uploadBusy && (
+        {fileUploadBusy && (
           <div role="status" aria-live="polite" aria-label={uploadPhase === "checking" ? t("files.checking") : t("files.uploading", { progress: uploadProgress })}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, minHeight: 14, color: "var(--text-muted)" }}>
               {uploadPhase === "checking" ? (

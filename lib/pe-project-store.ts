@@ -186,6 +186,30 @@ export function activatePeProject(
   }
 }
 
+export function getPeProject(
+  datasetId: string,
+  options: PeProjectStoreOptions = {},
+): PeProjectSummary {
+  const normalizedDatasetId = datasetId.trim();
+  if (!normalizedDatasetId) throw new Error("datasetId is required");
+  const database = openRegistry(options);
+  try {
+    const row = database.prepare(`
+      SELECT dataset_id, name, status, dataset_root, company_name, company_ticker,
+             file_count, created_at, updated_at
+      FROM datasets WHERE dataset_id = ?
+    `).get(normalizedDatasetId) as unknown as SqlRow | undefined;
+    if (!row) throw new Error(`Project not found: ${normalizedDatasetId}`);
+    if (!validExistingProjectRoot(row.dataset_root)) {
+      throw new Error(`Project workspace is unavailable: ${row.name}`);
+    }
+    allowFileRoot(row.dataset_root);
+    return projectFromRow(row);
+  } finally {
+    database.close();
+  }
+}
+
 export function createPeProject(
   input: CreatePeProjectInput,
   options: PeProjectStoreOptions = {},
