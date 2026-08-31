@@ -8,6 +8,7 @@ import {
 	type SqlRow,
 	sourceCitation,
 	sourceFilename,
+	sourceMarkdownCitation,
 	textValue,
 } from "./database.ts";
 import { clipText, normalizeText } from "./search-utils.ts";
@@ -190,6 +191,7 @@ function baseDetail(datasetId: string, evidenceId: string, row: SqlRow, mode: So
 		dataset_id: datasetId,
 		evidence_id: evidenceId,
 		citation: sourceCitation(row),
+		markdown_citation: sourceMarkdownCitation(row, evidenceId),
 		filename: sourceFilename(row),
 		locator: evidenceLocator(row),
 		mode,

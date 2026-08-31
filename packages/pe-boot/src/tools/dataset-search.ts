@@ -8,6 +8,7 @@ import {
 	type SqlRow,
 	sourceCitation,
 	sourceFilename,
+	sourceMarkdownCitation,
 	textValue,
 } from "./database.ts";
 import { bestExcerpt, normalizeText, queryTerms, scoreText } from "./search-utils.ts";
@@ -16,7 +17,7 @@ const DEFAULT_TOP_K = 5;
 const MAX_TOP_K = 30;
 
 export const PE_DATASET_SEARCH_PROMPT_SNIPPET =
-	"Search source-backed PDF and optional Excel evidence cards from meta/collection.sqlite3";
+	"Search source-backed PDF and optional Excel evidence cards with clickable citations";
 
 export interface MetricEvidence {
 	name: string;
@@ -32,6 +33,7 @@ export interface EvidenceCard {
 	score: number;
 	content_type: string;
 	citation: string;
+	markdown_citation: string;
 	excerpt: string;
 	filename: string;
 	locator: EvidenceLocator;
@@ -63,12 +65,14 @@ function activeDocumentPredicate(): string {
 }
 
 function chunkEvidence(row: SqlRow, terms: readonly string[], score: number): EvidenceCard {
+	const evidenceId = `chunk:${textValue(row, "chunk_id")}`;
 	return {
-		evidence_id: `chunk:${textValue(row, "chunk_id")}`,
+		evidence_id: evidenceId,
 		evidence_type: "chunk",
 		score: Math.round(score * 1000) / 1000,
 		content_type: textValue(row, "content_type") ?? "chunk",
 		citation: sourceCitation(row),
+		markdown_citation: sourceMarkdownCitation(row, evidenceId),
 		excerpt: bestExcerpt(textValue(row, "content"), terms),
 		filename: sourceFilename(row),
 		locator: evidenceLocator(row),
@@ -110,13 +114,15 @@ function searchMetricFacts(rows: readonly SqlRow[], terms: readonly string[], si
 		if (valueText) metric.value_text = valueText;
 		if (valueNumeric !== undefined) metric.value_numeric = valueNumeric;
 		if (unit) metric.unit = unit;
+		const evidenceId = `fact:${textValue(row, "fact_id")}`;
 
 		evidence.push({
-			evidence_id: `fact:${textValue(row, "fact_id")}`,
+			evidence_id: evidenceId,
 			evidence_type: "metric_fact",
 			score: Math.round(score * 1000) / 1000,
 			content_type: "excel_metric_fact",
 			citation: sourceCitation(row),
+			markdown_citation: sourceMarkdownCitation(row, evidenceId),
 			excerpt: [metric.name, period ?? "no period", `${valueText ?? ""}${unit ?? ""}`].join(" | "),
 			filename: sourceFilename(row),
 			locator: evidenceLocator(row),
@@ -144,12 +150,14 @@ function searchCells(rows: readonly SqlRow[], terms: readonly string[], signal?:
 			.join(" ");
 		const score = scoreText(searchable, terms);
 		if (score <= 0) continue;
+		const evidenceId = `cell:${textValue(row, "cell_id")}`;
 		evidence.push({
-			evidence_id: `cell:${textValue(row, "cell_id")}`,
+			evidence_id: evidenceId,
 			evidence_type: "excel_cell",
 			score: Math.round(score * 1000) / 1000,
 			content_type: "excel_cell",
 			citation: sourceCitation(row),
+			markdown_citation: sourceMarkdownCitation(row, evidenceId),
 			excerpt: [
 				textValue(row, "row_label"),
 				textValue(row, "col_label"),
@@ -228,7 +236,7 @@ export function searchPeDataset(
 			evidence_count: limited.length,
 			...(options.includeExpandedTerms ? { expanded_terms: terms.slice(0, 30) } : {}),
 			answer_contract:
-				"Answer only from returned evidence. Cite each material claim with its citation. If evidence is insufficient, say so.",
+				"Answer only from returned evidence. Put the exact markdown_citation immediately after each material claim. Never show a bare evidence_id. If evidence is insufficient, say so.",
 			hint: "Use pe_source_detail with an evidence_id to verify decisive PDF text, Excel values, and formulas.",
 		};
 	} finally {

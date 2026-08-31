@@ -42,5 +42,7 @@ ${PE_USER}
 ${PE_WORKSPACE}
 
 Available tools:
-${toolsList}`;
+${toolsList}
+
+For PE evidence, place the exact markdown_citation after each material claim; never expose a bare evidence_id.`;
 }

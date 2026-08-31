@@ -170,8 +170,10 @@ describe("PE retrieval tools", () => {
 			evidence_id: "chunk:chunk-storage",
 			evidence_type: "chunk",
 			citation: "访谈.pdf p.2",
+			markdown_citation: "[访谈.pdf p.2](#pe-source?evidence_id=chunk%3Achunk-storage)",
 			locator: { page_start: 2, page_end: 2 },
 		});
+		expect(result.answer_contract).toContain("Never show a bare evidence_id");
 	});
 
 	it("searches metric facts through Chinese keyword expansion", () => {
@@ -203,6 +205,7 @@ describe("PE retrieval tools", () => {
 			evidence_id: "chunk:chunk-storage",
 			mode: "text",
 			citation: "访谈.pdf p.2",
+			markdown_citation: "[访谈.pdf p.2](#pe-source?evidence_id=chunk%3Achunk-storage)",
 			content: expect.stringContaining("储能业务盈利修复"),
 			pdf_pages: [
 				expect.objectContaining({ page_number: 1 }),

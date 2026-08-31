@@ -24,6 +24,8 @@ export interface EvidenceLocator {
 	heading_path?: string;
 }
 
+const PE_SOURCE_HASH = "#pe-source";
+
 export function textValue(row: SqlRow, key: string): string | undefined {
 	const value = row[key];
 	return typeof value === "string" && value.length > 0 ? value : undefined;
@@ -75,6 +77,20 @@ export function sourceCitation(row: SqlRow): string {
 	}
 	if (locator.sheet_name) return `${filename} ${locator.sheet_name}`;
 	return filename;
+}
+
+function escapeMarkdownLinkText(value: string): string {
+	return value.replaceAll("\\", "\\\\").replaceAll("[", "\\[").replaceAll("]", "\\]");
+}
+
+export function evidenceSourceUrl(evidenceId: string): string {
+	const params = new URLSearchParams({ evidence_id: evidenceId });
+	return `${PE_SOURCE_HASH}?${params.toString()}`;
+}
+
+export function sourceMarkdownCitation(row: SqlRow, evidenceId: string): string {
+	const citation = sourceCitation(row);
+	return `[${escapeMarkdownLinkText(citation)}](${evidenceSourceUrl(evidenceId)})`;
 }
 
 function resolvePeDatasetLocation(cwd: string): PeDatasetLocation {
