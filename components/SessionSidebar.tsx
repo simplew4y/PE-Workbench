@@ -3,73 +3,13 @@
 import { useEffect, useState, useCallback, useMemo, useRef, type CSSProperties, type ReactNode } from "react";
 import type { SessionInfo } from "@/lib/types";
 import type { PeProjectCatalog, PeProjectSummary } from "@/lib/pe-project-types";
-import { loadExplorerOpen, saveExplorerOpen } from "@/lib/file-explorer-state";
 import { dispatchSessionRowContextMenu } from "@/lib/session-row-context-menu";
 import { skillExpansionToCommand } from "@/lib/slash-display";
 import { getProjectActivity, sessionsForProject } from "@/lib/project-groups";
 import { workspaceKeyOf } from "@/lib/workspace-memory";
 import { useI18n } from "@/hooks/useI18n";
-import { FileExplorer, type FileExplorerHandle } from "./FileExplorer";
-import { PeProjectCreateDialog } from "./PeProjectCreateDialog";
-
-function ToolbarIconButton({
-  onClick,
-  title,
-  disabled,
-  skipHover,
-  color,
-  background = "none",
-  marginRight,
-  ariaPressed,
-  children,
-}: {
-  onClick: () => void;
-  title: string;
-  disabled?: boolean;
-  skipHover?: boolean;
-  color: string;
-  background?: string;
-  marginRight?: number;
-  ariaPressed?: boolean;
-  children: ReactNode;
-}) {
-  const enter = (e: React.MouseEvent<HTMLButtonElement>) => {
-    if (disabled || skipHover) return;
-    e.currentTarget.style.color = "var(--text-muted)";
-    e.currentTarget.style.background = "var(--bg-hover)";
-  };
-  const leave = (e: React.MouseEvent<HTMLButtonElement>) => {
-    if (disabled || skipHover) return;
-    e.currentTarget.style.color = color;
-    e.currentTarget.style.background = background;
-  };
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      title={title}
-      aria-label={title}
-      aria-pressed={ariaPressed}
-      style={{
-        position: "relative",
-        display: "flex", alignItems: "center", justifyContent: "center",
-        width: 26, height: 26, padding: 0, marginRight,
-        background,
-        border: "none",
-        color,
-        cursor: disabled ? "default" : "pointer",
-        borderRadius: 5,
-        flexShrink: 0,
-        opacity: disabled ? 0.6 : 1,
-        transition: "color 0.3s, background 0.3s",
-      }}
-      onMouseEnter={enter}
-      onMouseLeave={leave}
-    >
-      {children}
-    </button>
-  );
-}
+import { PeAutoResearchUpload } from "./PeAutoResearchUpload";
+import { PeProjectDeleteDialog } from "./PeProjectDeleteDialog";
 
 interface Props {
   selectedSessionId: string | null;
@@ -238,7 +178,7 @@ function buildSessionTree(sessions: SessionInfo[]): SessionTreeNode[] {
   return roots;
 }
 
-export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onExplorerRefresh, onAtMention, onAtMentions, onBackgroundTaskDone, onRunningSessionIdsChange }: Props) {
+export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onBackgroundTaskDone, onRunningSessionIdsChange }: Props) {
   const { t } = useI18n();
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -248,18 +188,14 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const [activeDatasetId, setActiveDatasetId] = useState<string | null>(null);
   const [projectsLoading, setProjectsLoading] = useState(true);
   const [projectsError, setProjectsError] = useState<string | null>(null);
-  const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [deletingDatasetId, setDeletingDatasetId] = useState<string | null>(null);
+  const [projectPendingDelete, setProjectPendingDelete] = useState<PeProjectSummary | null>(null);
+  const [deleteProjectError, setDeleteProjectError] = useState<string | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [projectFilter, setProjectFilter] = useState("");
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const [explorerOpen, setExplorerOpen] = useState(true);
-  const [explorerKey, setExplorerKey] = useState(0);
-  const [explorerUploadBusy, setExplorerUploadBusy] = useState(false);
-  const [changesCount, setChangesCount] = useState(0);
-  const [changesCollapsed, setChangesCollapsed] = useState(true);
+  const [researchUploadBusy, setResearchUploadBusy] = useState(false);
   const [sessionRefreshDone, setSessionRefreshDone] = useState(false);
-  const [explorerRefreshDone, setExplorerRefreshDone] = useState(false);
   const [runningSessionIds, setRunningSessionIds] = useState<Set<string>>(() => new Set());
   const [unreadSessionIds, setUnreadSessionIds] = useState<Set<string>>(() => loadUnreadSessionIds());
   const previousRunningSessionIdsRef = useRef<Set<string>>(new Set());
@@ -267,8 +203,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   // running state; late /api/sessions responses must not overwrite it.
   const runningPollAuthoritativeRef = useRef(false);
   const sessionRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const explorerRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const fileExplorerRef = useRef<FileExplorerHandle>(null);
 
   const loadSessions = useCallback(async (showLoading = false, force = false) => {
     try {
@@ -311,11 +245,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     loadSessions(isFirst, !isFirst);
   }, [loadSessions, refreshKey]);
 
-  // Browser storage is unavailable during server rendering. Restore the panel
-  // preference after hydration so a collapsed explorer stays collapsed on reload.
-  useEffect(() => {
-    setExplorerOpen(loadExplorerOpen());
-  }, []);
 
   // Persist unread markers so they survive a browser refresh before the user
   // has actually opened the completed session.
@@ -421,10 +350,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       return next;
     });
   }, [selectedSessionId]);
-
-  useEffect(() => {
-    if (explorerRefreshKey !== undefined) setExplorerKey((k) => k + 1);
-  }, [explorerRefreshKey]);
 
   const loadProjects = useCallback(async () => {
     setProjectsLoading(true);
@@ -538,18 +463,32 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     }
   }, []);
 
+  const requestDeleteProject = useCallback((project: PeProjectSummary) => {
+    const hasRunningSession = allSessions.some(
+      (session) => workspaceKeyOf(session) === project.projectKey && runningSessionIds.has(session.id),
+    );
+    if (researchUploadBusy || hasRunningSession) {
+      setProjectsError(t("project.deleteBusy"));
+      return;
+    }
+
+    setProjectsError(null);
+    setDeleteProjectError(null);
+    setProjectPendingDelete(project);
+    setDropdownOpen(false);
+  }, [allSessions, researchUploadBusy, runningSessionIds, t]);
+
   const deleteProject = useCallback(async (project: PeProjectSummary) => {
     const hasRunningSession = allSessions.some(
       (session) => workspaceKeyOf(session) === project.projectKey && runningSessionIds.has(session.id),
     );
-    if (explorerUploadBusy || hasRunningSession) {
-      setProjectsError(t("project.deleteBusy"));
+    if (researchUploadBusy || hasRunningSession) {
+      setDeleteProjectError(t("project.deleteBusy"));
       return;
     }
-    if (!window.confirm(t("project.deleteConfirm", { name: project.name }))) return;
 
     setDeletingDatasetId(project.datasetId);
-    setProjectsError(null);
+    setDeleteProjectError(null);
     try {
       const response = await fetch("/api/pe/projects", {
         method: "DELETE",
@@ -565,12 +504,13 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       setSelectedCwd(nextProject?.root ?? null);
       setProjectFilter("");
       setDropdownOpen(false);
+      setProjectPendingDelete(null);
     } catch (cause) {
-      setProjectsError(cause instanceof Error ? cause.message : String(cause));
+      setDeleteProjectError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setDeletingDatasetId(null);
     }
-  }, [allSessions, explorerUploadBusy, runningSessionIds, t]);
+  }, [allSessions, researchUploadBusy, runningSessionIds, t]);
 
   // Close dropdowns on outside click
   useEffect(() => {
@@ -642,15 +582,17 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
-      <PeProjectCreateDialog
-        open={createProjectOpen}
-        onClose={() => setCreateProjectOpen(false)}
-        onCreated={(project) => {
-          setProjects((current) => [project, ...current.filter((item) => item.datasetId !== project.datasetId)]);
-          setActiveDatasetId(project.datasetId);
-          setSelectedCwd(project.root);
-          setProjectsError(null);
-          setDropdownOpen(false);
+      <PeProjectDeleteDialog
+        project={projectPendingDelete}
+        busy={projectPendingDelete !== null && deletingDatasetId === projectPendingDelete.datasetId}
+        error={deleteProjectError}
+        onClose={() => {
+          if (deletingDatasetId !== null) return;
+          setProjectPendingDelete(null);
+          setDeleteProjectError(null);
+        }}
+        onConfirm={() => {
+          if (projectPendingDelete && deletingDatasetId === null) void deleteProject(projectPendingDelete);
         }}
       />
       {/* Header */}
@@ -918,7 +860,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                 <button
                   onClick={(event) => {
                     event.stopPropagation();
-                    void deleteProject(selectedRegisteredProject);
+                    requestDeleteProject(selectedRegisteredProject);
                   }}
                   disabled={deletingDatasetId === selectedRegisteredProject.datasetId}
                   title={t("project.deleteTitle", { name: selectedRegisteredProject.name })}
@@ -947,41 +889,25 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                 </button>
               )}
 
-              <button
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setCreateProjectOpen(true);
-                  setDropdownOpen(false);
-                }}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 7,
-                  width: "100%",
-                  padding: "9px 10px",
-                  background: "none",
-                  border: "none",
-                  borderTop: "1px solid var(--border)",
-                  color: "var(--text-muted)",
-                  cursor: "pointer",
-                  textAlign: "left",
-                  fontSize: 11,
-                  fontWeight: 600,
-                }}
-              >
-                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" aria-hidden="true" style={{ flexShrink: 0 }}>
-                  <line x1="5" y1="1" x2="5" y2="9" />
-                  <line x1="1" y1="5" x2="9" y2="5" />
-                </svg>
-                <span>{t("project.create")}</span>
-              </button>
           </AnimatedDropdown>
         </div>
+
+        <PeAutoResearchUpload
+          onBusyChange={setResearchUploadBusy}
+          onProjectsChanged={(affectedProjects) => {
+            setProjects((current) => [
+              ...affectedProjects,
+              ...current.filter((item) => !affectedProjects.some((affected) => affected.datasetId === item.datasetId)),
+            ]);
+            setProjectsError(null);
+          }}
+          onComplete={() => void loadProjects()}
+        />
 
       </div>
 
       {/* Session list */}
-      <div style={{ flex: explorerOpen && selectedRegisteredProject ? "1 1 0" : "1 1 auto", overflowY: "auto", padding: "0", minHeight: 80 }}>
+      <div style={{ flex: "1 1 auto", overflowY: "auto", padding: "0", minHeight: 80 }}>
         {loading && (
           <div style={{ padding: "16px 14px", color: "var(--text-muted)", fontSize: 12 }}>
             {t("sidebar.loading")}
@@ -1015,139 +941,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         ))}
       </div>
 
-      {/* File Explorer section */}
-      {selectedRegisteredProject && (
-        <div
-          style={{
-            borderTop: "1px solid var(--border)",
-            display: "flex",
-            flexDirection: "column",
-            flex: explorerOpen ? "1 1 0" : "0 0 auto",
-            minHeight: 0,
-            overflow: "hidden",
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", flexShrink: 0 }}>
-            <button
-              onClick={() => setExplorerOpen((open) => {
-                const next = !open;
-                saveExplorerOpen(next);
-                return next;
-              })}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                flex: 1,
-                padding: "6px 10px",
-                background: "none",
-                border: "none",
-                color: "var(--text-muted)",
-                cursor: "pointer",
-                fontSize: 11,
-                fontWeight: 600,
-                letterSpacing: "0.05em",
-                textTransform: "uppercase",
-                textAlign: "left",
-              }}
-            >
-              <svg
-                width="9" height="9" viewBox="0 0 10 10" fill="none"
-                stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"
-                style={{ transform: explorerOpen ? "rotate(90deg)" : "none", transition: "transform 0.15s", flexShrink: 0 }}
-              >
-                <polyline points="3 2 7 5 3 8" />
-              </svg>
-              {t("files.explorer")}
-            </button>
-            {explorerOpen && changesCount > 0 && (
-              <ToolbarIconButton
-                onClick={() => setChangesCollapsed((v) => !v)}
-                title={t("sidebar.changedFiles", { count: changesCount })}
-                ariaPressed={!changesCollapsed}
-                color={changesCollapsed ? "var(--text-dim)" : "var(--accent)"}
-                background={changesCollapsed ? "none" : "var(--bg-selected)"}
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <circle cx="12" cy="12" r="3" />
-                  <path d="M3 12h6" />
-                  <path d="M15 12h6" />
-                </svg>
-              </ToolbarIconButton>
-            )}
-            {explorerOpen && (
-              <ToolbarIconButton
-                onClick={() => fileExplorerRef.current?.openResearchUploadPicker()}
-                disabled={explorerUploadBusy}
-                title={t("sidebar.ingestResearchFilesTitle")}
-                color="var(--text-dim)"
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-                  <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z" />
-                  <path d="M12 6v7" />
-                  <path d="m9 10 3 3 3-3" />
-                </svg>
-              </ToolbarIconButton>
-            )}
-            {explorerOpen && (
-              <ToolbarIconButton
-                onClick={() => fileExplorerRef.current?.openUploadPicker()}
-                disabled={explorerUploadBusy}
-                title={t("sidebar.uploadFilesTitle")}
-                color="var(--text-dim)"
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                  <path d="m17 8-5-5-5 5" />
-                  <path d="M12 3v12" />
-                </svg>
-              </ToolbarIconButton>
-            )}
-            <ToolbarIconButton
-              onClick={() => {
-                if (onExplorerRefresh) onExplorerRefresh();
-                else setExplorerKey((k) => k + 1);
-                setExplorerRefreshDone(true);
-                if (explorerRefreshTimerRef.current) clearTimeout(explorerRefreshTimerRef.current);
-                explorerRefreshTimerRef.current = setTimeout(() => setExplorerRefreshDone(false), 2000);
-              }}
-              title={t("sidebar.refreshExplorer")}
-              skipHover={explorerRefreshDone}
-              color={explorerRefreshDone ? "#4ade80" : "var(--text-dim)"}
-              background={explorerRefreshDone ? "rgba(74,222,128,0.18)" : "none"}
-              marginRight={6}
-            >
-              {explorerRefreshDone ? (
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="20 6 9 17 4 12" />
-                </svg>
-              ) : (
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-                  <path d="M3 3v5h5" />
-                </svg>
-              )}
-            </ToolbarIconButton>
-          </div>
-          {explorerOpen && (
-            <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden" }}>
-              <FileExplorer
-                ref={fileExplorerRef}
-                cwd={selectedRegisteredProject.root}
-                datasetId={selectedRegisteredProject.datasetId}
-                onOpenFile={onOpenFile ?? (() => {})}
-                refreshKey={explorerKey}
-                onAtMention={onAtMention}
-                onAtMentions={onAtMentions}
-                onUploadBusyChange={setExplorerUploadBusy}
-                changesCollapsed={changesCollapsed}
-                onChangesCountChange={setChangesCount}
-              />
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 }

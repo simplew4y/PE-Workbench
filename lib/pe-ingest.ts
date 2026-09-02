@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import type { PeProjectSummary } from "./pe-project-types";
@@ -110,6 +110,58 @@ function pythonExecutable(root: string): string {
   if (configured) return configured;
   const virtualEnvironmentPython = path.join(root, ".venv", "bin", "python");
   return fs.existsSync(virtualEnvironmentPython) ? virtualEnvironmentPython : "python3";
+}
+
+export interface PeUploadIdentity {
+  company_name: string;
+  company_ticker: string;
+  company_confidence: number;
+  ticker_confidence: number;
+  method: string;
+}
+
+export interface PeIdentifiedUploadItem {
+  itemId: string;
+  originalFilename: string;
+  stagedPath: string;
+  identity: PeUploadIdentity;
+}
+
+export interface PeUploadIdentification {
+  groups: Array<{ identity: PeUploadIdentity; items: PeIdentifiedUploadItem[] }>;
+  failed: Array<{ itemId: string; originalFilename: string; stagedPath: string; error: string }>;
+}
+
+export function parsePeUploadIdentificationOutput(stdout: string): PeUploadIdentification {
+  const jsonLine = stdout.trim().split(/\r?\n/u).reverse().find(
+    (line) => line.trimStart().startsWith("{"),
+  );
+  if (!jsonLine) throw new Error("PE upload identifier returned invalid JSON");
+  return JSON.parse(jsonLine) as PeUploadIdentification;
+}
+
+export function identifyPeUploads(manifestPath: string): Promise<PeUploadIdentification> {
+  const root = serviceRoot();
+  const identifier = path.join(root, "identify_uploads.py");
+  if (!fs.existsSync(identifier)) throw new Error(`PE upload identifier is missing: ${identifier}`);
+  return new Promise((resolve, reject) => {
+    execFile(
+      pythonExecutable(root),
+      [identifier, manifestPath],
+      { cwd: root, env: { ...process.env, PYTHONUNBUFFERED: "1" }, maxBuffer: 4 * 1024 * 1024 },
+      (error, stdout, stderr) => {
+        if (error) {
+          reject(new Error(stderr.trim() || error.message));
+          return;
+        }
+        try {
+          resolve(parsePeUploadIdentificationOutput(stdout));
+        } catch {
+          reject(new Error("PE upload identifier returned invalid JSON"));
+        }
+      },
+    );
+  });
 }
 
 export function startPeIngestJob(
