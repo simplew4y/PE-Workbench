@@ -869,8 +869,8 @@ def _validate_source_output_layout(
         )
     if source == dataset:
         raise ValueError(
-            "directory_path must not equal dataset_root; use a dedicated source subdirectory "
-            "such as dataset_root/_uploads"
+            "directory_path must not equal dataset_root; use its canonical raw subdirectory "
+            "at dataset_root/raw"
         )
 
 

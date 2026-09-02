@@ -73,7 +73,6 @@ function storePaths(options: PeProjectStoreOptions = {}): {
   registryPath: string;
   projectsRoot: string;
   storeRoot: string;
-  uploadsRoot: string;
 } {
   const agentDir = resolve(options.agentDir ?? getAgentDir());
   const storeRoot = join(agentDir, "pe-workbench");
@@ -81,7 +80,6 @@ function storePaths(options: PeProjectStoreOptions = {}): {
     registryPath: join(storeRoot, "datasets.sqlite3"),
     projectsRoot: resolve(options.projectsRoot ?? join(storeRoot, "projects")),
     storeRoot,
-    uploadsRoot: join(storeRoot, "_uploads"),
   };
 }
 
@@ -319,7 +317,6 @@ export function deletePeProject(
   const paths = storePaths(options);
   const projectsRoot = resolve(paths.projectsRoot);
   const expectedProjectRoot = join(projectsRoot, normalizedDatasetId);
-  const expectedUploadsRoot = join(resolve(paths.uploadsRoot), normalizedDatasetId);
   const database = openRegistry(options);
   let row: SqlRow | undefined;
   try {
@@ -336,7 +333,7 @@ export function deletePeProject(
     throw new Error("Registered project root is outside the PE projects directory");
   }
 
-  for (const candidate of [expectedProjectRoot, expectedUploadsRoot]) {
+  for (const candidate of [expectedProjectRoot]) {
     if (existsSync(candidate) && realpathSync(candidate) !== resolve(candidate)) {
       throw new Error("Refusing to delete a project path that resolves outside its registered directory");
     }
@@ -348,9 +345,7 @@ export function deletePeProject(
     `.deleting-${normalizedDatasetId}-${randomBytes(6).toString("hex")}`,
   );
   const stagedProjectRoot = join(stagingRoot, "project");
-  const stagedUploadsRoot = join(stagingRoot, "uploads");
   let projectStaged = false;
-  let uploadsStaged = false;
   let committed = false;
   try {
     mkdirSync(stagingRoot);
@@ -358,11 +353,6 @@ export function deletePeProject(
       renameSync(expectedProjectRoot, stagedProjectRoot);
       projectStaged = true;
     }
-    if (existsSync(expectedUploadsRoot)) {
-      renameSync(expectedUploadsRoot, stagedUploadsRoot);
-      uploadsStaged = true;
-    }
-
     const registry = openRegistry(options);
     try {
       registry.exec("BEGIN IMMEDIATE");
@@ -400,9 +390,6 @@ export function deletePeProject(
     return listPeProjects(options);
   } catch (error) {
     if (!committed) {
-      if (uploadsStaged && existsSync(stagedUploadsRoot) && !existsSync(expectedUploadsRoot)) {
-        renameSync(stagedUploadsRoot, expectedUploadsRoot);
-      }
       if (projectStaged && existsSync(stagedProjectRoot) && !existsSync(expectedProjectRoot)) {
         renameSync(stagedProjectRoot, expectedProjectRoot);
       }

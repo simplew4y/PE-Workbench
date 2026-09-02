@@ -1,4 +1,5 @@
 import { execFile, spawn } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type { PeProjectSummary } from "./pe-project-types";
@@ -35,7 +36,7 @@ export interface PeProjectPaths {
   workspaceRoot: string;
   registryPath: string;
   datasetId: string;
-  uploadsPath: string;
+  rawPath: string;
   jobDirectory: string;
 }
 
@@ -62,9 +63,41 @@ export function resolvePeProjectPaths(
     workspaceRoot,
     registryPath: resolvedRegistry,
     datasetId: project.datasetId,
-    uploadsPath: path.join(peWorkbenchRoot, "_uploads", project.datasetId),
+    rawPath: path.join(projectPath, "raw"),
     jobDirectory: path.join(projectPath, "meta", "ingest-ui-jobs"),
   };
+}
+
+export function writePeRawFile(
+  rawPath: string,
+  filename: string,
+  content: Buffer,
+): { path: string; duplicate: boolean } {
+  fs.mkdirSync(rawPath, { recursive: true });
+  const digest = createHash("sha256").update(content).digest("hex");
+  const parsed = path.parse(filename);
+  const candidates = [
+    path.join(rawPath, filename),
+    path.join(rawPath, `${parsed.name}_${digest.slice(0, 8)}${parsed.ext}`),
+    path.join(rawPath, `${parsed.name}_${digest}${parsed.ext}`),
+  ];
+
+  for (const candidate of candidates) {
+    if (!fs.existsSync(candidate)) {
+      const temporary = path.join(rawPath, `.${path.basename(candidate)}.${randomUUID()}.tmp`);
+      fs.writeFileSync(temporary, content, { flag: "wx" });
+      try {
+        fs.linkSync(temporary, candidate);
+      } finally {
+        fs.rmSync(temporary, { force: true });
+      }
+      return { path: candidate, duplicate: false };
+    }
+    const existingDigest = createHash("sha256").update(fs.readFileSync(candidate)).digest("hex");
+    if (existingDigest === digest) return { path: candidate, duplicate: true };
+  }
+
+  throw new Error(`Unable to allocate a collision-safe raw filename for ${filename}`);
 }
 
 function jobFile(paths: PeProjectPaths, jobId: string): string {
@@ -176,7 +209,7 @@ export function startPeIngestJob(
   const args = [
     runner,
     "--directory",
-    paths.uploadsPath,
+    paths.rawPath,
     "--workspace-root",
     paths.workspaceRoot,
     "--project-root",

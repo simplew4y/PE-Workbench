@@ -15,6 +15,7 @@ import {
   identifyPeUploads,
   resolvePeProjectPaths,
   startPeIngestJob,
+  writePeRawFile,
   writeQueuedPeIngestJob,
   type PeIdentifiedUploadItem,
   type PeIngestJob,
@@ -66,12 +67,8 @@ async function uploadToExistingProject(
   const paths = resolvePeProjectPaths(project, peProjectStorePaths().registryPath);
   const activeJob = findActivePeIngestJob(paths);
   if (activeJob) throw new Error("A research indexing job is already running for this project");
-  fs.mkdirSync(paths.uploadsPath, { recursive: true });
   for (const file of files) {
-    const target = path.join(paths.uploadsPath, file.name);
-    const temporary = path.join(paths.uploadsPath, `.${file.name}.${crypto.randomUUID()}.tmp`);
-    fs.writeFileSync(temporary, Buffer.from(await file.arrayBuffer()), { flag: "wx" });
-    fs.renameSync(temporary, target);
+    writePeRawFile(paths.rawPath, file.name, Buffer.from(await file.arrayBuffer()));
   }
   return queuedJob(project).job;
 }
@@ -150,20 +147,17 @@ async function handleGlobalUpload(files: File[]) {
       }
       continue;
     }
-    fs.mkdirSync(paths.uploadsPath, { recursive: true });
     let changed = false;
     for (const item of items) {
-      const target = path.join(paths.uploadsPath, item.originalFilename);
-      const sourceDigest = crypto.createHash("sha256").update(fs.readFileSync(item.stagedPath)).digest("hex");
-      const duplicate = fs.existsSync(target)
-        && crypto.createHash("sha256").update(fs.readFileSync(target)).digest("hex") === sourceDigest;
-      if (duplicate) {
+      const persisted = writePeRawFile(
+        paths.rawPath,
+        item.originalFilename,
+        fs.readFileSync(item.stagedPath),
+      );
+      if (persisted.duplicate) {
         duplicateFiles.push(item.originalFilename);
         continue;
       }
-      const temporary = path.join(paths.uploadsPath, `.${item.originalFilename}.${crypto.randomUUID()}.tmp`);
-      fs.copyFileSync(item.stagedPath, temporary, fs.constants.COPYFILE_EXCL);
-      fs.renameSync(temporary, target);
       changed = true;
     }
     if (changed) jobs.push(queuedJob(project).job);

@@ -47,10 +47,9 @@ class PipelineSmokeTest(unittest.TestCase):
             root = Path(temporary)
             workbench = root / "pe-workbench"
             projects = workbench / "projects"
-            uploads = workbench / "_uploads" / "dataset_sungrow"
-            uploads.mkdir(parents=True)
             project_root = projects / "dataset_sungrow"
-            (project_root / "raw").mkdir(parents=True)
+            raw = project_root / "raw"
+            raw.mkdir(parents=True)
             (project_root / "meta").mkdir()
             (project_root / "generated").mkdir()
 
@@ -102,7 +101,7 @@ class PipelineSmokeTest(unittest.TestCase):
             pdf = fitz.open()
             page = pdf.new_page()
             page.insert_text((72, 72), "Sungrow revenue and energy storage margin improved in 2026.")
-            pdf.save(uploads / "research.pdf")
+            pdf.save(raw / "research.pdf")
             pdf.close()
 
             conflicting_pdf = fitz.open()
@@ -111,7 +110,7 @@ class PipelineSmokeTest(unittest.TestCase):
                 (72, 72),
                 "Acme Corporation annual report revenue increased in 2026.",
             )
-            conflicting_pdf.save(uploads / "conflicting-company-annual-report.pdf")
+            conflicting_pdf.save(raw / "conflicting-company-annual-report.pdf")
             conflicting_pdf.close()
 
             workbook = Workbook()
@@ -119,14 +118,14 @@ class PipelineSmokeTest(unittest.TestCase):
             sheet.title = "Forecast"
             sheet.append(["Metric", "2025A", "2026E"])
             sheet.append(["Revenue", 1000, 1200])
-            workbook.save(uploads / "valuation.xlsx")
+            workbook.save(raw / "valuation.xlsx")
 
             job_file = project_root / "meta" / "ingest-ui-jobs" / "0123456789abcdef.json"
             completed = subprocess.run(
                 [
                     sys.executable,
                     str(Path(__file__).resolve().parent / "run_job.py"),
-                    "--directory", str(uploads),
+                    "--directory", str(raw),
                     "--workspace-root", str(projects),
                     "--project-root", str(project_root),
                     "--registry-path", str(registry_path),
