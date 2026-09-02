@@ -47,10 +47,9 @@ class PipelineSmokeTest(unittest.TestCase):
             root = Path(temporary)
             workbench = root / "pe-workbench"
             projects = workbench / "projects"
-            uploads = workbench / "_uploads" / "dataset_sungrow"
-            uploads.mkdir(parents=True)
             project_root = projects / "dataset_sungrow"
-            (project_root / "raw").mkdir(parents=True)
+            raw = project_root / "raw"
+            raw.mkdir(parents=True)
             (project_root / "meta").mkdir()
             (project_root / "generated").mkdir()
 
@@ -102,22 +101,31 @@ class PipelineSmokeTest(unittest.TestCase):
             pdf = fitz.open()
             page = pdf.new_page()
             page.insert_text((72, 72), "Sungrow revenue and energy storage margin improved in 2026.")
-            pdf.save(uploads / "research.pdf")
+            pdf.save(raw / "research.pdf")
             pdf.close()
+
+            conflicting_pdf = fitz.open()
+            conflicting_page = conflicting_pdf.new_page()
+            conflicting_page.insert_text(
+                (72, 72),
+                "Acme Corporation annual report revenue increased in 2026.",
+            )
+            conflicting_pdf.save(raw / "conflicting-company-annual-report.pdf")
+            conflicting_pdf.close()
 
             workbook = Workbook()
             sheet = workbook.active
             sheet.title = "Forecast"
             sheet.append(["Metric", "2025A", "2026E"])
             sheet.append(["Revenue", 1000, 1200])
-            workbook.save(uploads / "valuation.xlsx")
+            workbook.save(raw / "valuation.xlsx")
 
             job_file = project_root / "meta" / "ingest-ui-jobs" / "0123456789abcdef.json"
             completed = subprocess.run(
                 [
                     sys.executable,
                     str(Path(__file__).resolve().parent / "run_job.py"),
-                    "--directory", str(uploads),
+                    "--directory", str(raw),
                     "--workspace-root", str(projects),
                     "--project-root", str(project_root),
                     "--registry-path", str(registry_path),
@@ -152,7 +160,7 @@ class PipelineSmokeTest(unittest.TestCase):
                 )
                 self.assertEqual(
                     connection.execute("SELECT COUNT(*) FROM documents").fetchone()[0],
-                    2,
+                    3,
                 )
                 self.assertGreater(
                     connection.execute("SELECT COUNT(*) FROM chunks").fetchone()[0],
@@ -163,22 +171,33 @@ class PipelineSmokeTest(unittest.TestCase):
                     0,
                 )
                 classifications = connection.execute(
-                    "SELECT company_name, classification_status, status FROM documents "
+                    "SELECT original_filename, company_name, classification_status, status "
+                    "FROM documents "
                     "ORDER BY original_filename"
                 ).fetchall()
-                self.assertEqual(len(classifications), 2)
-                self.assertTrue(all(row[0] == "Sungrow" for row in classifications))
-                self.assertTrue(
-                    all(row[1] in {"accepted", "needs_review"} for row in classifications)
+                self.assertEqual(len(classifications), 3)
+                conflicting = next(
+                    row for row in classifications
+                    if row[0] == "conflicting-company-annual-report.pdf"
                 )
-                self.assertTrue(all(row[2] == "indexed" for row in classifications))
+                self.assertEqual(conflicting[1], "Acme Corporation")
+                self.assertEqual(conflicting[2], "company_conflict")
+                self.assertEqual(conflicting[3], "indexed")
+                self.assertGreater(
+                    connection.execute(
+                        "SELECT COUNT(*) FROM chunks c JOIN documents d ON d.doc_id = c.doc_id "
+                        "WHERE d.original_filename = 'conflicting-company-annual-report.pdf'"
+                    ).fetchone()[0],
+                    0,
+                )
+                self.assertTrue(all(row[3] == "indexed" for row in classifications))
             with sqlite3.connect(registry_path) as registry:
                 self.assertEqual(
                     registry.execute(
                         "SELECT dataset_root, company_name, company_ticker, file_count "
                         "FROM datasets WHERE dataset_id = 'dataset_sungrow'"
                     ).fetchone(),
-                    (str(project_root), "Sungrow", "300274", 2),
+                    (str(project_root), "Sungrow", "300274", 3),
                 )
 
 

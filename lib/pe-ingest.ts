@@ -1,4 +1,5 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type { PeProjectSummary } from "./pe-project-types";
@@ -35,7 +36,7 @@ export interface PeProjectPaths {
   workspaceRoot: string;
   registryPath: string;
   datasetId: string;
-  uploadsPath: string;
+  rawPath: string;
   jobDirectory: string;
 }
 
@@ -62,9 +63,41 @@ export function resolvePeProjectPaths(
     workspaceRoot,
     registryPath: resolvedRegistry,
     datasetId: project.datasetId,
-    uploadsPath: path.join(peWorkbenchRoot, "_uploads", project.datasetId),
+    rawPath: path.join(projectPath, "raw"),
     jobDirectory: path.join(projectPath, "meta", "ingest-ui-jobs"),
   };
+}
+
+export function writePeRawFile(
+  rawPath: string,
+  filename: string,
+  content: Buffer,
+): { path: string; duplicate: boolean } {
+  fs.mkdirSync(rawPath, { recursive: true });
+  const digest = createHash("sha256").update(content).digest("hex");
+  const parsed = path.parse(filename);
+  const candidates = [
+    path.join(rawPath, filename),
+    path.join(rawPath, `${parsed.name}_${digest.slice(0, 8)}${parsed.ext}`),
+    path.join(rawPath, `${parsed.name}_${digest}${parsed.ext}`),
+  ];
+
+  for (const candidate of candidates) {
+    if (!fs.existsSync(candidate)) {
+      const temporary = path.join(rawPath, `.${path.basename(candidate)}.${randomUUID()}.tmp`);
+      fs.writeFileSync(temporary, content, { flag: "wx" });
+      try {
+        fs.linkSync(temporary, candidate);
+      } finally {
+        fs.rmSync(temporary, { force: true });
+      }
+      return { path: candidate, duplicate: false };
+    }
+    const existingDigest = createHash("sha256").update(fs.readFileSync(candidate)).digest("hex");
+    if (existingDigest === digest) return { path: candidate, duplicate: true };
+  }
+
+  throw new Error(`Unable to allocate a collision-safe raw filename for ${filename}`);
 }
 
 function jobFile(paths: PeProjectPaths, jobId: string): string {
@@ -112,6 +145,58 @@ function pythonExecutable(root: string): string {
   return fs.existsSync(virtualEnvironmentPython) ? virtualEnvironmentPython : "python3";
 }
 
+export interface PeUploadIdentity {
+  company_name: string;
+  company_ticker: string;
+  company_confidence: number;
+  ticker_confidence: number;
+  method: string;
+}
+
+export interface PeIdentifiedUploadItem {
+  itemId: string;
+  originalFilename: string;
+  stagedPath: string;
+  identity: PeUploadIdentity;
+}
+
+export interface PeUploadIdentification {
+  groups: Array<{ identity: PeUploadIdentity; items: PeIdentifiedUploadItem[] }>;
+  failed: Array<{ itemId: string; originalFilename: string; stagedPath: string; error: string }>;
+}
+
+export function parsePeUploadIdentificationOutput(stdout: string): PeUploadIdentification {
+  const jsonLine = stdout.trim().split(/\r?\n/u).reverse().find(
+    (line) => line.trimStart().startsWith("{"),
+  );
+  if (!jsonLine) throw new Error("PE upload identifier returned invalid JSON");
+  return JSON.parse(jsonLine) as PeUploadIdentification;
+}
+
+export function identifyPeUploads(manifestPath: string): Promise<PeUploadIdentification> {
+  const root = serviceRoot();
+  const identifier = path.join(root, "identify_uploads.py");
+  if (!fs.existsSync(identifier)) throw new Error(`PE upload identifier is missing: ${identifier}`);
+  return new Promise((resolve, reject) => {
+    execFile(
+      pythonExecutable(root),
+      [identifier, manifestPath],
+      { cwd: root, env: { ...process.env, PYTHONUNBUFFERED: "1" }, maxBuffer: 4 * 1024 * 1024 },
+      (error, stdout, stderr) => {
+        if (error) {
+          reject(new Error(stderr.trim() || error.message));
+          return;
+        }
+        try {
+          resolve(parsePeUploadIdentificationOutput(stdout));
+        } catch {
+          reject(new Error("PE upload identifier returned invalid JSON"));
+        }
+      },
+    );
+  });
+}
+
 export function startPeIngestJob(
   paths: PeProjectPaths,
   job: PeIngestJob,
@@ -124,7 +209,7 @@ export function startPeIngestJob(
   const args = [
     runner,
     "--directory",
-    paths.uploadsPath,
+    paths.rawPath,
     "--workspace-root",
     paths.workspaceRoot,
     "--project-root",

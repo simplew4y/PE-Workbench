@@ -14,6 +14,11 @@ try {
 
 const nextConfig: NextConfig = {
   outputFileTracingRoot: workspaceRoot,
+  experimental: {
+    // Keep the proxy ceiling above the route's 300 MiB aggregate upload limit
+    // so multipart framing is validated by the bounded route parser, not truncated.
+    proxyClientMaxBodySize: "320mb",
+  },
   turbopack: {
     root: workspaceRoot,
   },
