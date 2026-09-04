@@ -17,6 +17,7 @@ import { isPromptRejectedError, sendAgentCommand } from "@/lib/agent-client";
 import { clearDraft, rekeyDraft, restoreDraftSubmission } from "@/lib/draft-store";
 import { getPreferredToolPreset, setPreferredToolPreset } from "@/lib/tool-preset-preference";
 import { getToolNamesForPreset, type ToolEntry, type ToolPreset } from "@/lib/tool-presets";
+import type { AttachedDocument } from "@/lib/session-attachments";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 import { userMessageKey } from "@/lib/prompt-recovery";
 import { AgentEventConnection } from "@/lib/agent-event-connection";
@@ -235,7 +236,7 @@ export interface ChatInputHandle {
   prependText: (text: string) => void;
   addImages: (files: File[]) => void;
   rekeyDraft: (previousKey: string, nextKey: string) => void;
-  restoreSubmission: (text: string, images?: Array<{ data: string; mimeType: string }>, targetDraftKey?: string) => void;
+  restoreSubmission: (text: string, images?: Array<{ data: string; mimeType: string }>, targetDraftKey?: string, documents?: AttachedDocument[]) => void;
 }
 
 export interface AttachedImage {
@@ -245,7 +246,7 @@ export interface AttachedImage {
 }
 
 type SelectedModel = { provider: string; modelId: string };
-type ModelEntry = { id: string; name: string; provider: string };
+type ModelEntry = { id: string; name: string; provider: string; input: Array<"text" | "image"> };
 type ModelsResponse = {
   models: Record<string, string>;
   modelList?: ModelEntry[];
@@ -402,6 +403,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     text: string,
     images: AttachedImage[] | undefined,
     targetDraftKey: string | undefined,
+    documents?: AttachedDocument[],
   ) => {
     const draftImages = images?.map(({ data, mimeType }) => ({ data, mimeType }));
     const destinationDraftKey = resolveComposerDraftKey(targetDraftKey);
@@ -412,7 +414,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     ) return;
     const input = opts.chatInputRef?.current;
     if (input) {
-      input.restoreSubmission(text, draftImages, destinationDraftKey);
+      input.restoreSubmission(text, draftImages, destinationDraftKey, documents);
     } else if (destinationDraftKey) {
       restoreDraftSubmission(destinationDraftKey, text, draftImages);
     }
@@ -1250,21 +1252,21 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   }, [addNotice, cancelEventStreamGrace, handleExtensionUiRequest, loadSession, notifyPromptStage, onAgentEnd, scheduleEventStreamClose, scrollToBottom, settleUiStage]);
   handleAgentEventRef.current = handleAgentEvent;
 
-  const handleSend = useCallback(async (message: string, images?: AttachedImage[]) => {
+  const handleSend = useCallback(async (message: string, images?: AttachedImage[], documents?: AttachedDocument[]) => {
     const trimmedMessage = message.trim();
-    if (!trimmedMessage && !images?.length) return;
+    if (!trimmedMessage && !images?.length && !documents?.length) return;
     if (agentRunningRef.current || bashRunningRef.current) {
-      restoreSubmission(message, images, composerDraftKey);
+      restoreSubmission(message, images, composerDraftKey, documents);
       return;
     }
-    const isSlashCommandPrompt = !images?.length && trimmedMessage.startsWith("/");
+    const isSlashCommandPrompt = !images?.length && !documents?.length && trimmedMessage.startsWith("/");
 
-    const isBashCommand = !images?.length && trimmedMessage.startsWith("!");
+    const isBashCommand = !images?.length && !documents?.length && trimmedMessage.startsWith("!");
     if (isBashCommand) {
       const isExcluded = trimmedMessage.startsWith("!!");
       const bashCmd = (isExcluded ? trimmedMessage.slice(2) : trimmedMessage.slice(1)).trim();
       if (!bashCmd) {
-        restoreSubmission(message, images, composerDraftKey);
+        restoreSubmission(message, images, composerDraftKey, documents);
         return;
       }
       await executeBashRef.current?.(bashCmd, isExcluded);
@@ -1279,8 +1281,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     const userMsg: AgentMessage = {
       role: "user",
       content: imageBlocks?.length
-        ? [...(message.trim() ? [{ type: "text" as const, text: message }] : []), ...imageBlocks]
-        : message,
+        ? [...((message.trim() || documents?.length) ? [{ type: "text" as const, text: [message, ...(documents?.map((document) => `[附件: ${document.name}]`) ?? [])].filter(Boolean).join("\n") }] : []), ...imageBlocks]
+        : [message, ...(documents?.map((document) => `[附件: ${document.name}]`) ?? [])].filter(Boolean).join("\n"),
       timestamp: Date.now(),
     };
     setMessages((prev) => [...prev, userMsg]);
@@ -1317,6 +1319,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           type: "prompt",
           message,
           ...(piImages?.length ? { images: piImages } : {}),
+          ...(documents?.length ? { documents } : {}),
         });
         promoteNewSession(1, message);
       } else if (session) {
@@ -1327,6 +1330,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           type: "prompt",
           message,
           ...(piImages?.length ? { images: piImages } : {}),
+          ...(documents?.length ? { documents } : {}),
         });
       } else {
         throw new Error("No active session for the prompt");
@@ -1352,7 +1356,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           : [...prev.slice(0, optimisticIndex), ...prev.slice(optimisticIndex + 1)];
       });
       addNotice({ type: "error", message: e instanceof Error ? e.message : String(e) });
-      restoreSubmission(message, images, composerDraftKey);
+      restoreSubmission(message, images, composerDraftKey, documents);
       optimisticUserMessageKeyRef.current = null;
       // Rejection only describes this submission. Another tab or an event we
       // missed may still have a real run active for the same session, so keep
@@ -1637,9 +1641,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     message: string,
     behavior: "steer" | "followUp",
     images?: AttachedImage[],
+    documents?: AttachedDocument[],
   ) => {
     const sid = sessionIdRef.current;
-    const restore = () => restoreSubmission(message, images, composerDraftKey);
+    const restore = () => restoreSubmission(message, images, composerDraftKey, documents);
     if (!sid) {
       restore();
       addNotice({ type: "error", message: "No active session for the queued message" });
@@ -1652,6 +1657,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         message,
         streamingBehavior: behavior,
         ...(piImages?.length ? { images: piImages } : {}),
+        ...(documents?.length ? { documents } : {}),
       });
     } catch (e) {
       console.error("Failed to submit streaming prompt:", e);
@@ -1666,20 +1672,21 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, [addNotice, composerDraftKey, restoreSubmission]);
 
-  const handleSteer = useCallback(async (message: string, images?: AttachedImage[]) => {
-    await sendStreamingPrompt(message, "steer", images);
+  const handleSteer = useCallback(async (message: string, images?: AttachedImage[], documents?: AttachedDocument[]) => {
+    await sendStreamingPrompt(message, "steer", images, documents);
   }, [sendStreamingPrompt]);
 
   const handlePromptWithStreamingBehavior = useCallback(async (
     message: string,
     behavior: "steer" | "followUp",
     images?: AttachedImage[],
+    documents?: AttachedDocument[],
   ) => {
-    await sendStreamingPrompt(message, behavior, images);
+    await sendStreamingPrompt(message, behavior, images, documents);
   }, [sendStreamingPrompt]);
 
-  const handleFollowUp = useCallback(async (message: string, images?: AttachedImage[]) => {
-    await sendStreamingPrompt(message, "followUp", images);
+  const handleFollowUp = useCallback(async (message: string, images?: AttachedImage[], documents?: AttachedDocument[]) => {
+    await sendStreamingPrompt(message, "followUp", images, documents);
   }, [sendStreamingPrompt]);
 
   const handleAbortCompaction = useCallback(async () => {

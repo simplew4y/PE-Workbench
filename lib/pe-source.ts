@@ -57,8 +57,19 @@ export type PeSourcePayload = PePdfSource | PeExcelSource | PeTextSource;
 export function parsePeSourceHref(href: string | undefined): PeSourceReference | null {
   if (!href) return null;
   const hashIndex = href.indexOf(PE_SOURCE_HASH);
-  if (hashIndex < 0) return null;
-  const suffix = href.slice(hashIndex + PE_SOURCE_HASH.length);
+  let suffix: string;
+  if (hashIndex >= 0) {
+    suffix = href.slice(hashIndex + PE_SOURCE_HASH.length);
+  } else {
+    // Some model replies expanded the internal fragment into this fictitious
+    // app URL. Recover its evidence identity locally; never fetch that host or
+    // trust a cwd embedded in the link. Other external URLs remain ordinary links.
+    try {
+      const url = new URL(href, "https://pe-workbench.local");
+      if (!/^https?:$/.test(url.protocol) || url.hostname !== "pe-workbench.local" || url.port || url.username || url.password || url.pathname !== "/pe-source") return null;
+      suffix = url.search;
+    } catch { return null; }
+  }
   if (!suffix.startsWith("?")) return null;
   const evidenceId = new URLSearchParams(suffix.slice(1)).get("evidence_id")?.trim();
   if (!evidenceId || !/^(?:chunk|fact|cell):[^\s:]+$/u.test(evidenceId)) return null;

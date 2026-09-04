@@ -17,6 +17,8 @@ export interface ContextUsage {
 export interface ModelLike {
   id: string;
   provider: string;
+  name?: string;
+  input?: Array<"text" | "image">;
 }
 
 export interface ToolInfo {

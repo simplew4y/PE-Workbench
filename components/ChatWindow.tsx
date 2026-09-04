@@ -6,6 +6,7 @@ import { normalizeCustomPanelLines, parseAnsiLine } from "@/lib/ansi";
 import { asBracketedPaste, toTerminalKeyData } from "@/lib/terminal-input";
 import { countToolCallBlocks, getAssistantErrorMessage, getDisplayableAssistantBlocks, splitFinalAssistantBlocks } from "@/lib/message-display";
 import { extractTurnWrittenFiles, type WrittenFile } from "@/lib/turn-written-files";
+import { hasGenerativeUiToolCall } from "@/lib/generative-ui/tool";
 import { MessageView } from "./MessageView";
 import { ChatInput, type ChatInputHandle } from "./ChatInput";
 import { ChatMinimap, useMessageRefs } from "./ChatMinimap";
@@ -742,7 +743,9 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
                 for (let processIdx = userIdx + 1; processIdx < finalAssistantIdx; processIdx++) {
                   processIndices.push(processIdx);
                 }
-                const visibleProcessIndices = processIndices.filter((processIdx) => hasDisplayableProcessMessage(messages[processIdx]));
+                const uiProcessIndices = processIndices.filter((processIdx) => hasGenerativeUiToolCall(messages[processIdx]));
+                const uiProcessIndexSet = new Set(uiProcessIndices);
+                const visibleProcessIndices = processIndices.filter((processIdx) => !uiProcessIndexSet.has(processIdx) && hasDisplayableProcessMessage(messages[processIdx]));
                 const finalAssistant = messages[finalAssistantIdx] as AssistantMessage;
                 const finalSplit = splitFinalAssistantBlocks(finalAssistant);
                 const finalProcessMessage = finalSplit.processBlocks.length > 0
@@ -777,6 +780,10 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
                       {processGroup}
                     </div>,
                   );
+                }
+
+                for (const uiProcessIdx of uiProcessIndices) {
+                  rendered.push(renderMessage(uiProcessIdx, { keyPrefix: "generative-ui" }));
                 }
 
                 if (finalAnswerMessage) {

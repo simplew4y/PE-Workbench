@@ -11,3 +11,9 @@ test("expands process details when a completed turn has no final answer", () => 
     /<ProcessDetailsGroup[\s\S]*?defaultExpanded=\{!finalAnswerMessage\}/,
   );
 });
+
+test("renders generative UI tool messages outside collapsed process details", () => {
+  assert.match(source, /const uiProcessIndices = processIndices\.filter/);
+  assert.match(source, /!uiProcessIndexSet\.has\(processIdx\) && hasDisplayableProcessMessage/);
+  assert.match(source, /for \(const uiProcessIdx of uiProcessIndices\)[\s\S]*?keyPrefix: "generative-ui"/);
+});

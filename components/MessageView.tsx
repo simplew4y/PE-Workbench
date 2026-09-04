@@ -2,6 +2,8 @@
 
 import { memo, useState, useRef, useEffect, useMemo } from "react";
 import { MarkdownBody } from "./MarkdownBody";
+import { GenerativeSurface } from "./generative-ui/GenerativeSurface";
+import { isGenerativeUiToolCall } from "@/lib/generative-ui/tool";
 import { ImagePreview } from "./ImagePreview";
 import { copyText } from "@/lib/clipboard";
 import { useI18n } from "@/hooks/useI18n";
@@ -12,6 +14,11 @@ import { isEditToolName } from "@/lib/tool-names";
 import { TurnWrittenFiles } from "./TurnWrittenFiles";
 import type { WrittenFile } from "@/lib/turn-written-files";
 import { skillExpansionToCommand } from "@/lib/slash-display";
+import {
+  parseSessionAttachmentReferences,
+  stripSessionAttachmentContext,
+  stripSessionAttachmentLabels,
+} from "@/lib/session-attachments";
 import type {
   AgentMessage,
   UserMessage,
@@ -301,13 +308,15 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
   const [copied, setCopied] = useState(false);
   const [expanded, setExpanded] = useState(false);
 
-  const content =
+  const rawContent =
     typeof message.content === "string"
       ? message.content
       : message.content
           .filter((b): b is TextContent => b.type === "text")
           .map((b) => b.text)
           .join("\n");
+  const attachmentReferences = parseSessionAttachmentReferences(rawContent);
+  const content = stripSessionAttachmentLabels(rawContent);
 
   const imageBlocks: ImageContent[] =
     typeof message.content === "string"
@@ -326,7 +335,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
   const time = formatTime(message.timestamp);
   const canFork = !!entryId && !!onFork;
   const copyTarget = commandText ?? content;
-  const editTarget = commandText ? replaceUserMessageText(message, commandText) : message;
+  const editTarget = replaceUserMessageText(message, commandText ?? content);
 
   const imageBlocksNode = imageBlocks.length > 0 && (
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: content ? 8 : 0 }}>
@@ -350,6 +359,45 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
               style={{ maxWidth: 240, maxHeight: 240, borderRadius: 6, objectFit: "contain", display: "block", border: "1px solid rgba(59,130,246,0.15)" }}
             />
           </ImagePreview>
+        );
+      })}
+    </div>
+  );
+  const attachmentBlocksNode = attachmentReferences.length > 0 && (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: content ? 8 : 0 }}>
+      {attachmentReferences.map((attachment) => {
+        const canOpen = Boolean(attachment.path && onOpenFile);
+        return (
+          <button
+            key={`${attachment.name}:${attachment.path ?? "pending"}`}
+            type="button"
+            disabled={!canOpen}
+            title={canOpen ? `预览 ${attachment.name}` : attachment.name}
+            onClick={() => {
+              if (attachment.path) onOpenFile?.(attachment.path);
+            }}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              width: "100%",
+              maxWidth: 360,
+              padding: "8px 10px",
+              border: "1px solid rgba(59,130,246,0.24)",
+              borderRadius: 7,
+              background: "rgba(59,130,246,0.06)",
+              color: "var(--text)",
+              cursor: canOpen ? "pointer" : "default",
+              textAlign: "left",
+              opacity: canOpen ? 1 : 0.75,
+            }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }} aria-hidden="true">
+              <path d="M21.44 11.05 12.25 20.24a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+            </svg>
+            <span style={{ minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{attachment.name}</span>
+            {canOpen && <span style={{ color: "var(--text-dim)", fontSize: 11, flexShrink: 0 }}>预览</span>}
+          </button>
         );
       })}
     </div>
@@ -389,6 +437,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
           {commandText ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
               {imageBlocksNode}
+              {attachmentBlocksNode}
               <div style={{ display: "flex", alignItems: "flex-start", gap: 8, flexWrap: "wrap" }}>
                 <button
                   onClick={() => setExpanded((prev) => !prev)}
@@ -448,6 +497,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
           ) : (
           <>
           {imageBlocksNode}
+          {attachmentBlocksNode}
           {content && <SafeMarkdownBody className="markdown-user-message" cwd={cwd} onOpenFile={onOpenFile}>{content}</SafeMarkdownBody>}
           </>
           )}
@@ -855,6 +905,9 @@ function BlockView({ block, toolResults, isStreaming, streamingDuration, toolCal
   if (block.type === "toolCall") {
     const tc = block as ToolCallContent;
     const result = toolResults?.get(tc.toolCallId);
+    if (isGenerativeUiToolCall(tc)) {
+      return <GenerativeSurface input={tc.input} isStreaming={isStreaming && tc.rawInput !== undefined} isError={result?.isError} cwd={cwd} onOpenFile={onOpenFile} />;
+    }
     const duration = toolCallDurations?.get(tc.toolCallId);
     return <ToolCallBlock block={tc} result={result} duration={duration} />;
   }
@@ -1562,11 +1615,11 @@ function CustomMessageView({ message, cwd, onOpenFile }: { message: CustomMessag
 }
 
 function getMessageText(content: CustomMessage["content"] | UserMessage["content"]): string {
-  if (typeof content === "string") return content;
-  return content
+  if (typeof content === "string") return stripSessionAttachmentContext(content);
+  return stripSessionAttachmentContext(content
     .filter((b): b is TextContent => b.type === "text")
     .map((b) => b.text)
-    .join("\n");
+    .join("\n"));
 }
 
 function getMessageImages(content: CustomMessage["content"] | UserMessage["content"]): ImageContent[] {

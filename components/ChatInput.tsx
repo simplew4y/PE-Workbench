@@ -19,6 +19,15 @@ import {
   isBase64ImageWithinLimits,
 } from "@/lib/image-attachments";
 import {
+  MAX_SESSION_DOCUMENT_BYTES,
+  MAX_SESSION_DOCUMENTS,
+  MAX_SESSION_DOCUMENT_TOTAL_BYTES,
+  SESSION_DOCUMENT_ACCEPT,
+  isSupportedSessionDocument,
+  stripSessionAttachmentLabels,
+  type AttachedDocument,
+} from "@/lib/session-attachments";
+import {
   buildEntriesFromFiles, buildAtInsertText, extractAtQuery, filterFileEntries,
   type AtQueryMatch, type FileIndexEntry,
 } from "@/lib/file-fuzzy";
@@ -37,19 +46,20 @@ interface ModelOption {
   provider: string;
   modelId: string;
   name: string;
+  input?: Array<"text" | "image">;
 }
 
 interface Props {
-  onSend: (message: string, images?: AttachedImage[]) => void;
+  onSend: (message: string, images?: AttachedImage[], documents?: AttachedDocument[]) => void;
   onAbort: () => void;
-  onSteer?: (message: string, images?: AttachedImage[]) => void;
-  onFollowUp?: (message: string, images?: AttachedImage[]) => void;
-  onPromptWithStreamingBehavior?: (message: string, behavior: "steer" | "followUp", images?: AttachedImage[]) => void;
+  onSteer?: (message: string, images?: AttachedImage[], documents?: AttachedDocument[]) => void;
+  onFollowUp?: (message: string, images?: AttachedImage[], documents?: AttachedDocument[]) => void;
+  onPromptWithStreamingBehavior?: (message: string, behavior: "steer" | "followUp", images?: AttachedImage[], documents?: AttachedDocument[]) => void;
   isStreaming: boolean;
   model?: { provider: string; modelId: string } | null;
   isAutoModelSelection?: boolean;
   modelNames?: Record<string, string>;
-  modelList?: { id: string; name: string; provider: string }[];
+  modelList?: { id: string; name: string; provider: string; input: Array<"text" | "image"> }[];
   modelError?: string | null;
   /** Diagnostics from resolving `enabledModels`, e.g. a pattern that matched nothing. */
   modelScopeWarnings?: string[];
@@ -89,7 +99,7 @@ export interface ChatInputHandle {
   prependText: (text: string) => void;
   addImages: (files: File[]) => void;
   rekeyDraft: (previousKey: string, nextKey: string) => void;
-  restoreSubmission: (text: string, images?: ChatDraftImage[], targetDraftKey?: string) => void;
+  restoreSubmission: (text: string, images?: ChatDraftImage[], targetDraftKey?: string, documents?: AttachedDocument[]) => void;
 }
 
 const TOOL_PRESETS = ["off", "read-only", "default", "full"] as const;
@@ -258,11 +268,11 @@ export function canRestoreUserMessage(
 }
 
 export function getUserMessageText(message: UserMessage): string {
-  if (typeof message.content === "string") return message.content;
-  return message.content
+  if (typeof message.content === "string") return stripSessionAttachmentLabels(message.content);
+  return stripSessionAttachmentLabels(message.content
     .filter((block): block is TextContent => block.type === "text")
     .map((block) => block.text)
-    .join("\n");
+    .join("\n"));
 }
 
 export function getUserMessageDraftImages(message: UserMessage): ChatDraftImage[] {
@@ -405,8 +415,10 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const [attachedImages, setAttachedImages] = useState<AttachedImage[]>(() => (
     draftKey ? draftImagesToAttachedImages(getDraft(draftKey)?.images) : []
   ));
+  const [attachedDocuments, setAttachedDocuments] = useState<AttachedDocument[]>([]);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const trimmedValue = value.trimStart();
-  const bashMode = attachedImages.length === 0 && trimmedValue.startsWith("!");
+  const bashMode = attachedImages.length === 0 && attachedDocuments.length === 0 && trimmedValue.startsWith("!");
   const bashExcluded = bashMode && trimmedValue.startsWith("!!");
   const [slashMenuOpen, setSlashMenuOpen] = useState(false);
   const [slashActiveIndex, setSlashActiveIndex] = useState(0);
@@ -447,9 +459,11 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const draftKeyRef = useRef(draftKey);
   const valueRef = useRef(value);
   const attachedImagesRef = useRef(attachedImages);
+  const attachedDocumentsRef = useRef(attachedDocuments);
   const pendingImageCountRef = useRef(0);
   valueRef.current = value;
   attachedImagesRef.current = attachedImages;
+  attachedDocumentsRef.current = attachedDocuments;
 
   useImperativeHandle(ref, () => ({
     insertIfEmpty(text: string) {
@@ -539,8 +553,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       setAtQuery(null);
       setHistoryMenuOpen(false);
     },
-    restoreSubmission(text: string, images?: ChatDraftImage[], targetDraftKey?: string) {
-      if (!text.trim() && !images?.length) return;
+    restoreSubmission(text: string, images?: ChatDraftImage[], targetDraftKey?: string, documents?: AttachedDocument[]) {
+      if (!text.trim() && !images?.length && !documents?.length) return;
 
       // clearInput is queued before the submission handler runs. Compose with
       // that queued state so a fast rejection cannot observe stale DOM text and
@@ -577,6 +591,11 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       // functional updates below, so update the imperative snapshot first.
       valueRef.current = restoredDraft.value;
       attachedImagesRef.current = restoredImages;
+      if (documents?.length) {
+        const restoredDocuments = [...documents, ...attachedDocumentsRef.current].slice(0, MAX_SESSION_DOCUMENTS);
+        attachedDocumentsRef.current = restoredDocuments;
+        setAttachedDocuments(restoredDocuments);
+      }
       setValue((current) => {
         const restored = mergeRestoredSubmissionText(text, current);
         valueRef.current = restored;
@@ -671,6 +690,48 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     }
   }, []);
 
+  const processAttachmentFiles = useCallback(async (files: File[]) => {
+    setAttachmentError(null);
+    const images = files.filter((file) => file.type.startsWith("image/"));
+    if (images.length) await processImageFiles(images);
+    const unsupported = files.filter((file) => !file.type.startsWith("image/") && !isSupportedSessionDocument(file.name));
+    if (unsupported.length) {
+      setAttachmentError(`不支持的附件格式：${unsupported.map((file) => file.name).join("、")}`);
+      return;
+    }
+    const available = Math.max(0, MAX_SESSION_DOCUMENTS - attachedDocumentsRef.current.length);
+    const candidates = files.filter((file) => !file.type.startsWith("image/") && isSupportedSessionDocument(file.name));
+    const oversized = candidates.find((file) => file.size > MAX_SESSION_DOCUMENT_BYTES);
+    if (oversized) {
+      setAttachmentError(`${oversized.name} 超过 20 MB 的会话附件限制`);
+      return;
+    }
+    const selected = candidates.slice(0, available);
+    if (candidates.length > selected.length) setAttachmentError(`每次最多附加 ${MAX_SESSION_DOCUMENTS} 个文档`);
+    const totalBytes = attachedDocumentsRef.current.reduce((sum, document) => sum + document.size, 0)
+      + selected.reduce((sum, file) => sum + file.size, 0);
+    if (totalBytes > MAX_SESSION_DOCUMENT_TOTAL_BYTES) {
+      setAttachmentError("会话文档附件总大小不能超过 40 MB");
+      return;
+    }
+    const documents = await Promise.all(selected.map((file) => new Promise<AttachedDocument>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve({
+        name: file.name,
+        mimeType: file.type || "application/octet-stream",
+        data: String(reader.result).split(",")[1] || "",
+        size: file.size,
+      });
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    })));
+    setAttachedDocuments((previous) => {
+      const next = [...previous, ...documents].slice(0, MAX_SESSION_DOCUMENTS);
+      attachedDocumentsRef.current = next;
+      return next;
+    });
+  }, [processImageFiles]);
+
   const removeImage = useCallback((index: number) => {
     setAttachedImages((prev) => {
       const next = [...prev];
@@ -697,6 +758,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     if (draftKey) clearDraft(draftKey);
     if (draftKeyRef.current && draftKeyRef.current !== draftKey) clearDraft(draftKeyRef.current);
     clearImages();
+    attachedDocumentsRef.current = [];
+    setAttachedDocuments([]);
+    setAttachmentError(null);
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
@@ -751,10 +815,15 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
 
   const handleSend = useCallback(async () => {
     const msg = value.trim();
-    if (!msg && !attachedImages.length) return;
+    if (!msg && !attachedImages.length && !attachedDocuments.length) return;
     if (isStreaming) return;
+    const selectedModel = modelList?.find((entry) => entry.provider === model?.provider && entry.id === model?.modelId);
+    if (attachedImages.length && selectedModel && !selectedModel.input.includes("image")) {
+      setAttachmentError(`当前模型 ${selectedModel.name || selectedModel.id} 不支持图片输入，请先切换到支持图片的模型。`);
+      return;
+    }
     onAudioUnlock?.();
-    if (!attachedImages.length && msg.startsWith("/") && onBuiltinCommand) {
+    if (!attachedImages.length && !attachedDocuments.length && msg.startsWith("/") && onBuiltinCommand) {
       const result = await onBuiltinCommand(msg);
       if (result.handled) {
         if (!result.error) clearInput();
@@ -762,8 +831,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       }
     }
     clearInput();
-    onSend(msg, attachedImages.length ? attachedImages : undefined);
-  }, [value, attachedImages, isStreaming, onBuiltinCommand, onSend, clearInput, onAudioUnlock]);
+    onSend(msg, attachedImages.length ? attachedImages : undefined, attachedDocuments.length ? attachedDocuments : undefined);
+  }, [value, attachedImages, attachedDocuments, isStreaming, model, modelList, onBuiltinCommand, onSend, clearInput, onAudioUnlock]);
 
   const slashQuery = value.startsWith("/") && !/\s/.test(value.slice(1))
     ? value.slice(1).toLowerCase()
@@ -795,7 +864,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     ? t(slashQuery ? "chat.match" : "chat.command")
     : t(slashQuery ? "chat.matches" : "chat.commands", { count: filteredSlashCommands.length });
   const hasInputText = Boolean(value.trim());
-  const canQueueStreamingMessage = hasInputText || attachedImages.length > 0;
+  const canQueueStreamingMessage = hasInputText || attachedImages.length > 0 || attachedDocuments.length > 0;
 
   // ── @ file autocomplete ──────────────────────────────────────────────────
   // Recomputed from the text before the caret on every change/caret move.
@@ -981,21 +1050,21 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
 
   const sendQueued = useCallback((mode: "steer" | "followup") => {
     const msg = value.trim();
-    if (!msg && !attachedImages.length) return;
+    if (!msg && !attachedImages.length && !attachedDocuments.length) return;
     onAudioUnlock?.();
     const streamingBehavior = mode === "steer" ? "steer" : "followUp";
     if (msg.startsWith("/") && onPromptWithStreamingBehavior) {
       clearInput();
-      onPromptWithStreamingBehavior(msg, streamingBehavior, attachedImages.length ? attachedImages : undefined);
+      onPromptWithStreamingBehavior(msg, streamingBehavior, attachedImages.length ? attachedImages : undefined, attachedDocuments.length ? attachedDocuments : undefined);
       return;
     }
     clearInput();
     if (mode === "steer" && onSteer) {
-      onSteer(msg, attachedImages.length ? attachedImages : undefined);
+      onSteer(msg, attachedImages.length ? attachedImages : undefined, attachedDocuments.length ? attachedDocuments : undefined);
     } else if (mode === "followup" && onFollowUp) {
-      onFollowUp(msg, attachedImages.length ? attachedImages : undefined);
+      onFollowUp(msg, attachedImages.length ? attachedImages : undefined, attachedDocuments.length ? attachedDocuments : undefined);
     }
-  }, [value, attachedImages, onPromptWithStreamingBehavior, onSteer, onFollowUp, clearInput, onAudioUnlock]);
+  }, [value, attachedImages, attachedDocuments, onPromptWithStreamingBehavior, onSteer, onFollowUp, clearInput, onAudioUnlock]);
 
   const getNextSlashIndex = useCallback((direction: "up" | "down" | "left" | "right") => {
     const lastIndex = displayedSlashCommands.length - 1;
@@ -1287,7 +1356,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   // Build model options: prefer modelList (has provider info), fallback to modelNames
   const modelOptions: ModelOption[] = (() => {
     if (modelList && modelList.length > 0) {
-      return modelList.map((m) => ({ provider: m.provider, modelId: m.id, name: m.name })).sort(compareModelOptions);
+      return modelList.map((m) => ({ provider: m.provider, modelId: m.id, name: m.name, input: m.input })).sort(compareModelOptions);
     }
     return Object.entries(modelNames ?? {}).map(([modelId, name]) => ({
       provider: model?.provider ?? "unknown",
@@ -1370,18 +1439,23 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/*"
+        accept={`image/*,${SESSION_DOCUMENT_ACCEPT}`}
         multiple
         style={{ display: "none" }}
         onChange={(e) => {
           const files = Array.from(e.target.files ?? []);
-          processImageFiles(files);
+          void processAttachmentFiles(files);
           e.target.value = "";
         }}
       />
       <div style={{ maxWidth: 820, margin: "0 auto" }}>
         <ModelErrorBanner error={modelError} />
         <ModelScopeWarningBanner warnings={modelScopeWarnings} />
+        {attachmentError && (
+          <div style={{ marginBottom: 8, padding: "7px 10px", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 6, color: "#ef4444", fontSize: 12 }}>
+            {attachmentError}
+          </div>
+        )}
         {/* Queued steering / follow-up messages (delivered by pi on upcoming turns) */}
         {((queuedMessages?.steering.length ?? 0) + (queuedMessages?.followUp.length ?? 0)) > 0 && (
           <div style={{
@@ -1523,6 +1597,24 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                     <line x1="1" y1="1" x2="7" y2="7" /><line x1="7" y1="1" x2="1" y2="7" />
                   </svg>
                 </button>
+              </div>
+            ))}
+          </div>
+        )}
+        {attachedDocuments.length > 0 && (
+          <div style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
+            {attachedDocuments.map((document, index) => (
+              <div key={`${document.name}-${index}`} style={{ display: "flex", alignItems: "center", gap: 6, maxWidth: 280, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg-panel)", fontSize: 12 }}>
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{document.name}</span>
+                <button
+                  aria-label={`Remove ${document.name}`}
+                  onClick={() => setAttachedDocuments((previous) => {
+                    const next = previous.filter((_, itemIndex) => itemIndex !== index);
+                    attachedDocumentsRef.current = next;
+                    return next;
+                  })}
+                  style={{ border: 0, background: "transparent", color: "var(--text-muted)", cursor: "pointer", padding: 0 }}
+                >×</button>
               </div>
             ))}
           </div>
@@ -1984,21 +2076,21 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
           ) : (
             <button
               onClick={handleSend}
-              disabled={!value.trim() && !attachedImages.length}
+              disabled={!value.trim() && !attachedImages.length && !attachedDocuments.length}
               style={{
                 flexShrink: 0,
                 alignSelf: "flex-end",
                 display: "flex", alignItems: "center", gap: 6,
                 padding: "7px 14px",
-                background: (value.trim() || attachedImages.length) ? "var(--accent)" : "var(--bg-panel)",
+                background: (value.trim() || attachedImages.length || attachedDocuments.length) ? "var(--accent)" : "var(--bg-panel)",
                 border: "none",
                 borderRadius: 8,
-                color: (value.trim() || attachedImages.length) ? "#fff" : "var(--text-dim)",
-                cursor: (value.trim() || attachedImages.length) ? "pointer" : "not-allowed",
+                color: (value.trim() || attachedImages.length || attachedDocuments.length) ? "#fff" : "var(--text-dim)",
+                cursor: (value.trim() || attachedImages.length || attachedDocuments.length) ? "pointer" : "not-allowed",
                 fontSize: 13,
                 fontWeight: 600,
                 letterSpacing: "-0.01em",
-                boxShadow: (value.trim() || attachedImages.length) ? "0 1px 3px rgba(37,99,235,0.25)" : "none",
+                boxShadow: (value.trim() || attachedImages.length || attachedDocuments.length) ? "0 1px 3px rgba(37,99,235,0.25)" : "none",
                 transition: "background 0.15s, box-shadow 0.15s",
               }}
             >
@@ -2032,30 +2124,28 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
           <div style={{ flex: isMobile ? "1 1 auto" : "0 0 auto", minWidth: 0, display: "flex", alignItems: "center", gap: 2 }}>
             <button
               onClick={() => fileInputRef.current?.click()}
-             title={t("chat.attachImage")}
+              title="附加图片或文档"
               style={{
                 flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
                 width: 32, height: 32, padding: 0,
                 background: "none", border: "none",
                 borderRadius: 9,
-                color: attachedImages.length ? "var(--accent)" : "var(--text-muted)",
+                color: (attachedImages.length || attachedDocuments.length) ? "var(--accent)" : "var(--text-muted)",
                 cursor: "pointer",
                 opacity: 1,
                 transition: "background 0.12s, color 0.12s",
               }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.background = "var(--bg-hover)";
-                e.currentTarget.style.color = attachedImages.length ? "var(--accent)" : "var(--text)";
+                e.currentTarget.style.color = (attachedImages.length || attachedDocuments.length) ? "var(--accent)" : "var(--text)";
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.background = "none";
-                e.currentTarget.style.color = attachedImages.length ? "var(--accent)" : "var(--text-muted)";
+                e.currentTarget.style.color = (attachedImages.length || attachedDocuments.length) ? "var(--accent)" : "var(--text-muted)";
               }}
             >
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                <circle cx="8.5" cy="8.5" r="1.5" />
-                <polyline points="21 15 16 10 5 21" />
+                <path d="M21.44 11.05 12.25 20.24a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
               </svg>
             </button>
             {/* Model selector — visible always, disabled while the session or switch is busy */}
@@ -2211,7 +2301,10 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                                   {isActive
                                     ? <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><polyline points="1.5 5 4 7.5 8.5 2.5" /></svg>
                                     : <span style={{ width: 10, flexShrink: 0 }} />}
-                                  {opt.name}
+                                  <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>{opt.name}</span>
+                                  {opt.input?.includes("image") && (
+                                    <span title="支持图片输入" style={{ color: "var(--text-dim)", fontSize: 10 }}>图片</span>
+                                  )}
                                 </button>
                               );
                             })}
