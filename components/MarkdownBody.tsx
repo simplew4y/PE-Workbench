@@ -8,6 +8,7 @@ import { markdownRehypePlugins, markdownRemarkPlugins, normalizeDisplayMath } fr
 import { parsePeSourceHref } from "@/lib/pe-source";
 import { MermaidBlock, CodeBlock } from "./MermaidBlock";
 import { PeSourceCitation } from "./PeSourceCitation";
+import { PeUiBlock } from "./pe-ui/PeUiBlock";
 
 interface MarkdownBodyProps {
   children: string;
@@ -28,6 +29,16 @@ export function MarkdownBody({ children, className, isStreaming, cwd, onOpenFile
       if (isBlock) {
         if (lang === "mermaid") {
           return <MermaidBlock code={raw.replace(/\n$/, "")} isStreaming={isStreaming} />;
+        }
+        if (lang === "pe-ui") {
+          return (
+            <PeUiBlock
+              code={raw.replace(/\n$/, "")}
+              isStreaming={isStreaming}
+              cwd={cwd}
+              onOpenFile={onOpenFile}
+            />
+          );
         }
         return <CodeBlock code={raw.replace(/\n$/, "")} lang={lang} isStreaming={isStreaming} />;
       }

@@ -10,13 +10,18 @@ const jiti = createJiti(import.meta.url, {
 });
 const { MarkdownBody } = await jiti.import("./MarkdownBody.tsx");
 const { normalizeDisplayMath } = await jiti.import("../lib/markdown.ts");
+const { I18nProvider } = await jiti.import("../hooks/useI18n.tsx");
 
 function renderMarkdown(markdown) {
   return renderToStaticMarkup(
-    React.createElement(MarkdownBody, {
-      cwd: "/home/me/project",
-      onOpenFile() {},
-    }, markdown),
+    React.createElement(
+      I18nProvider,
+      null,
+      React.createElement(MarkdownBody, {
+        cwd: "/home/me/project",
+        onOpenFile() {},
+      }, markdown),
+    ),
   );
 }
 
@@ -45,6 +50,44 @@ test("renders PE evidence links as an inline source control", () => {
   assert.match(html, /data-pe-source-citation="true"/);
   assert.match(html, />访谈\.pdf p\.2<\/button>/);
   assert.doesNotMatch(html, /chunk-storage/);
+});
+
+test("restores the green source control for expanded citation URLs in existing answers", () => {
+  const html = renderMarkdown("结论。[年报 p.11](https://pe-workbench.local/pe-source?evidence_id=chunk%3A79ec64a5c48325c412a23d00d979e354216d1598)");
+  assert.match(html, /data-pe-source-citation="true"/);
+  assert.match(html, /border-emerald-600/);
+  assert.doesNotMatch(html, /target="_blank"|href="https:\/\/pe-workbench/);
+});
+
+test("renders a valid pe-ui entity card as native UI", () => {
+  const markdown = `\`\`\`pe-ui
+{"version":1,"type":"entity-card","entity":"company","name":"比亚迪","metrics":[{"label":"收入","value":"8,210亿元"}]}
+\`\`\``;
+  const html = renderMarkdown(markdown);
+
+  assert.match(html, /aria-label="company: 比亚迪"/);
+  assert.match(html, />公司</);
+  assert.match(html, />8,210亿元</);
+  assert.doesNotMatch(html, /language-pe-ui/);
+});
+
+test("renders a chart with an editorial summary as native UI", () => {
+  const markdown = `\`\`\`pe-ui
+{"version":1,"type":"chart","chart":"line","title":"增长正在失速","categories":["2024","2025"],"series":[{"name":"营业收入","values":[7771.02,8039.65],"unit":"亿元"}]}
+\`\`\``;
+  const html = renderMarkdown(markdown);
+
+  assert.match(html, /增长正在失速/);
+  assert.match(html, /aria-label="折线图"/);
+  assert.match(html, /较上期/);
+  assert.doesNotMatch(html, /language-pe-ui/);
+});
+
+test("falls back to source code for an invalid completed pe-ui block", () => {
+  const html = renderMarkdown("```pe-ui\n{invalid}\n```");
+
+  assert.match(html, /markdown-code-lang[^>]*>pe-ui</);
+  assert.match(html, /\{invalid\}/);
 });
 
 test("keeps single-tilde CJK numeric ranges literal instead of striking them", () => {

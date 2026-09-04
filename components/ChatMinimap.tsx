@@ -8,6 +8,7 @@ import {
   normalizeDisplayMath,
 } from "@/lib/markdown";
 import { splitFinalAssistantBlocks } from "@/lib/message-display";
+import { stripSessionAttachmentLabels } from "@/lib/session-attachments";
 import type { AgentMessage, AssistantMessage, TextContent, UserMessage } from "@/lib/types";
 import styles from "./ChatMinimap.module.css";
 
@@ -43,11 +44,11 @@ interface NodeInfo {
 }
 
 function getUserPreview(message: UserMessage): string {
-  if (typeof message.content === "string") return message.content.trim();
-  return message.content
+  if (typeof message.content === "string") return stripSessionAttachmentLabels(message.content).trim();
+  return stripSessionAttachmentLabels(message.content
     .filter((block): block is TextContent => block.type === "text")
     .map((block) => block.text)
-    .join("\n")
+    .join("\n"))
     .trim();
 }
 

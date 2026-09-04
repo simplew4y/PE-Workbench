@@ -1,4 +1,5 @@
 import type { AssistantContentBlock, AssistantMessage, ThinkingContent, ToolCallContent } from "./types";
+import { isGenerativeUiToolCall } from "./generative-ui/tool.ts";
 
 interface DisplayOptions {
   isStreaming?: boolean;
@@ -24,7 +25,7 @@ export function getAssistantErrorMessage(
 }
 
 function isFinalAnswerBlock(block: AssistantContentBlock): boolean {
-  return block.type === "text" || block.type === "image";
+  return block.type === "text" || block.type === "image" || (block.type === "toolCall" && isGenerativeUiToolCall(block));
 }
 
 export function splitFinalAssistantBlocks(

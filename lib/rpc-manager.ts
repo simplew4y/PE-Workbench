@@ -6,6 +6,8 @@ import { randomUUID } from "crypto";
 import { existsSync, realpathSync, writeFileSync } from "fs";
 import { resolve } from "path";
 import { validateAgentImages } from "./image-attachments";
+import { prepareSessionDocuments, validateSessionDocuments } from "./session-document-processor";
+import type { AttachedDocument } from "./session-attachments";
 import { invalidateModelsCache } from "./models-cache";
 import { resolveVisibleModels, selectInitialModelScope } from "./model-scope";
 import {
@@ -407,6 +409,21 @@ export class AgentSessionWrapper {
     if (type === "prompt" || type === "steer" || type === "follow_up") {
       const imageError = validateAgentImages(command.images);
       if (imageError) throw new Error(imageError);
+      const documentError = validateSessionDocuments(command.documents);
+      if (documentError) throw new Error(documentError);
+      if (Array.isArray(command.images) && command.images.length > 0 && !this.inner.model?.input?.includes("image")) {
+        const modelName = this.inner.model?.name || this.inner.model?.id || "The selected model";
+        throw new Error(`${modelName} does not support image input. Switch to a vision-capable model before sending this image.`);
+      }
+      if (Array.isArray(command.documents) && command.documents.length > 0) {
+        const attachmentContext = await prepareSessionDocuments(
+          this.cwd,
+          this.sessionId,
+          command.documents as AttachedDocument[],
+        );
+        const message = typeof command.message === "string" ? command.message.trim() : "";
+        command.message = [message, attachmentContext].filter(Boolean).join("\n\n");
+      }
     }
 
     switch (type) {

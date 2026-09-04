@@ -48,6 +48,37 @@ test("keeps streamed tool input out of collapsed markup while counting it", () =
   assert.equal(getTokenEstimateText(block), block.rawInput);
 });
 
+test("renders pe_render_ui as a native standalone surface instead of tool chrome", () => {
+  const html = renderMessage({
+    role: "assistant",
+    provider: "test",
+    model: "test-model",
+    content: [{
+      type: "toolCall",
+      toolCallId: "call-ui-1",
+      toolName: "pe_render_ui",
+      input: {
+        version: 1,
+        component: {
+          kind: "company_overview",
+          name: "比亚迪",
+          metrics: [
+            { label: "营业收入", value: "8,039.65 亿元" },
+            { label: "归母净利润", value: "326.19 亿元" },
+            { label: "员工", value: "869,622 人" },
+          ],
+        },
+      },
+    }],
+  });
+
+  assert.match(html, /aria-label="company: 比亚迪"/);
+  assert.match(html, /data-pe-palette=/);
+  assert.match(html, /data-pe-variant=/);
+  assert.match(html, /8,039\.65 亿元/);
+  assert.doesNotMatch(html, />pe_render_ui</);
+});
+
 const COMPLETE_SKILL_EXPANSION = `<skill name="review" location="/skills/review/SKILL.md">
 References are relative to /skills/review.
 
