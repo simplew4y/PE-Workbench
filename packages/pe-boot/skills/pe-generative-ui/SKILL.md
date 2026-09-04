@@ -22,6 +22,10 @@ Use `pe_render_ui` for a high-value visual surface. Keep the surrounding answer 
 5. Call `pe_render_ui` after its data has been verified.
 6. Continue with interpretation that is not already visible in the surface.
 
+Before selecting a component, read `references/component-selection.md` for relationship-based candidates and paired boundary examples. Compare prose/small Markdown table against the best eligible visual, and one alternative when genuinely plausible. Evaluate comprehension gain, evidence fit, reading effort and interaction cost. A tie goes to the simpler presentation. Do not output internal deliberation or invented selection scores.
+
+Check the entire answer, including multiple tool calls, for duplication and unnecessary interaction before emitting. Reusing an appropriate component is correct; novelty, equal usage frequency and palette variation are not selection objectives. Choose color/skin after content and structure. The reference examples are illustrative, never evidence for a user's research question.
+
 Use Markdown only for quick factual answers, definitions, short reasoning, code, or when the data is incomplete. Do not create UI merely because the tool exists.
 
 ## Component routing

@@ -2,6 +2,16 @@ import { describe, expect, it } from "vitest";
 import { buildPeSystemPrompt } from "../src/system-prompt.ts";
 
 describe("PE presentation prompt", () => {
+	it("compares relationship-based alternatives without another model or diversity quota", () => {
+		const prompt = buildPeSystemPrompt("/workspace");
+		expect(prompt).toContain("A tie goes to prose/Markdown");
+		expect(prompt).toContain("Schema eligibility is necessary but never sufficient");
+		expect(prompt).toContain("signed reconciliation from start to end");
+		expect(prompt).toContain("No diversity quota, random routing");
+		expect(prompt).toContain("all tool calls in the answer as one composition");
+		expect(prompt.indexOf("Presentation decision policy")).toBeLessThan(prompt.indexOf("Component capabilities"));
+	});
+
 	it("documents the native UI contract without allowing arbitrary markup", () => {
 		const prompt = buildPeSystemPrompt("/workspace");
 		expect(prompt).toContain("`pe_render_ui` tool");

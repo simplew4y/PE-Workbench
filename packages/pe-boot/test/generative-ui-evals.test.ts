@@ -9,6 +9,8 @@ type EvaluationCase = {
 	expected: "prose" | "leaf" | "brief" | "adaptive" | "safe-alternative";
 	required: string[];
 	forbidden: string[];
+	relation: string;
+	acceptedPresentations?: { mode: string; kinds?: string[] }[];
 };
 
 const packageDirectory = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -32,6 +34,13 @@ const knownKinds = new Set([
 	"valuation_range",
 	"peer_quadrant",
 	"catalyst_calendar",
+	"image_gallery",
+	"entity_cards",
+	"place_map",
+	"scenario_calculator",
+	"sankey_chart",
+	"radar_chart",
+	"candlestick_chart",
 ]);
 
 describe("PE generative UI evaluation corpus", () => {
@@ -44,10 +53,37 @@ describe("PE generative UI evaluation corpus", () => {
 	});
 
 	it("references only registered component kinds", () => {
+		const covered = new Set<string>();
 		for (const evaluation of cases) {
 			expect(evaluation.prompt.trim().length).toBeGreaterThan(0);
-			for (const kind of [...evaluation.required, ...evaluation.forbidden]) expect(knownKinds.has(kind)).toBe(true);
+			expect(evaluation.relation.trim().length).toBeGreaterThan(0);
+			const alternatives = evaluation.acceptedPresentations?.flatMap((item) => item.kinds ?? []) ?? [];
+			for (const kind of [...evaluation.required, ...alternatives]) covered.add(kind);
+			for (const kind of [...evaluation.required, ...evaluation.forbidden, ...alternatives])
+				expect(knownKinds.has(kind)).toBe(true);
 			if (evaluation.expected === "brief") expect(evaluation.required).toContain("research_brief");
+		}
+		expect(covered).toEqual(knownKinds);
+	});
+
+	it("includes boundary pairs instead of optimizing uniform component frequency", () => {
+		for (const relation of [
+			"change",
+			"lookup",
+			"bridge",
+			"composition",
+			"geography",
+			"appearance",
+			"assumptions",
+			"ohlc",
+			"sequence",
+			"risk",
+			"profile",
+			"identity",
+		]) {
+			const group = cases.filter((item) => item.relation === relation);
+			expect(group.some((item) => item.expected === "prose" || item.expected === "safe-alternative")).toBe(true);
+			expect(group.some((item) => item.expected === "leaf")).toBe(true);
 		}
 	});
 });

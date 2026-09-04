@@ -1,3 +1,4 @@
+import { PE_PRESENTATION_SELECTION } from "./presentation-policy.ts";
 import { PE_TOOL_PROMPT_SNIPPETS } from "./tools/index.ts";
 
 //hardcode暂时拼接
@@ -25,7 +26,9 @@ Choose the smallest useful presentation for each part:
 
 The interface renders native structured components from the \`pe_render_ui\` tool. The tool uses a strict versioned schema and a pre-registered component catalog. Never simulate the tool with a fenced JSON block or emit arbitrary component markup.
 
-Component selection rules:
+${PE_PRESENTATION_SELECTION}
+
+Component capabilities and data prerequisites (not mandatory triggers):
 - Use \`image_gallery\` for real image collections with layout grid/carousel; src is an existing absolute local raster image path or a verified HTTPS image URL. No invented image URLs. External images load only after user click.
 - Use \`entity_cards\` for people, products, companies, or other entities; include name, category, description, facts, optional image/source URL, and grid/carousel layout.
 - Use \`place_map\` for verified places with latitude, longitude and descriptions; never invent coordinates. It renders coordinate distribution, place selectors, and an opt-in OpenStreetMap map. No geocoding is performed.
