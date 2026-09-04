@@ -113,10 +113,14 @@ describe("PE Memo tools", () => {
 		const result = loadSkillsFromDir({ dir: join(packageDirectory, "skills"), source: "test" });
 		expect(result.diagnostics).toEqual([]);
 		expect(result.skills).toEqual([
-				expect.objectContaining({
-					name: "pe-memo",
-					description: expect.stringContaining("persistent, evidence-backed PE Memo"),
-				}),
+			expect.objectContaining({
+				name: "pe-generative-ui",
+				description: expect.stringContaining("pre-registered native UI surfaces"),
+			}),
+			expect.objectContaining({
+				name: "pe-memo",
+				description: expect.stringContaining("persistent, evidence-backed PE Memo"),
+			}),
 			expect.objectContaining({ name: "pe-research-note" }),
 		]);
 	});
@@ -150,9 +154,9 @@ describe("PE Memo tools", () => {
 		const markdown = readFileSync(join(root, result.memo_markdown_path ?? ""), "utf8");
 		const html = readFileSync(join(root, result.memo_html_path ?? ""), "utf8");
 		const pdf = readFileSync(join(root, result.memo_pdf_path ?? ""));
-		const citationGate = JSON.parse(
-			readFileSync(join(root, result.citation_gate_audit_path ?? ""), "utf8"),
-		) as { claims: Array<{ claim_id: string; text: string; evidence_ids: string[] }> };
+		const citationGate = JSON.parse(readFileSync(join(root, result.citation_gate_audit_path ?? ""), "utf8")) as {
+			claims: Array<{ claim_id: string; text: string; evidence_ids: string[] }>;
+		};
 		expect(markdown).toContain("访谈.pdf p.2");
 		expect(markdown).toContain("内容：收入增长20%。");
 		expect(markdown).not.toContain("chunk:chunk-a");

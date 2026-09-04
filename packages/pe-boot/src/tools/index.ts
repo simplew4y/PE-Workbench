@@ -4,17 +4,20 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { peDatasetMemoTool } from "./dataset-memo.ts";
 import { PE_DATASET_SEARCH_PROMPT_SNIPPET, peDatasetSearchTool } from "./dataset-search.ts";
 import { peHistoryCompareTool } from "./history-compare.ts";
+import { PE_RENDER_UI_PROMPT_SNIPPET, peRenderUiTool } from "./render-ui.ts";
 import { peResearchNoteSaveTool } from "./research-note-save.ts";
 import { PE_SOURCE_DETAIL_PROMPT_SNIPPET, peSourceDetailTool } from "./source-detail.ts";
 
 const toolsDirectory = dirname(fileURLToPath(import.meta.url));
 const memoSkillPath = join(toolsDirectory, "../../skills/pe-memo/SKILL.md");
 const researchNoteSkillPath = join(toolsDirectory, "../../skills/pe-research-note/SKILL.md");
+const generativeUiSkillPath = join(toolsDirectory, "../../skills/pe-generative-ui/SKILL.md");
 
 //系统提示词只注入pe核心检索工具相关的提示词，其他的不注入
 export const PE_TOOL_PROMPT_SNIPPETS = [
 	{ name: "pe_dataset_search", description: PE_DATASET_SEARCH_PROMPT_SNIPPET },
 	{ name: "pe_source_detail", description: PE_SOURCE_DETAIL_PROMPT_SNIPPET },
+	{ name: "pe_render_ui", description: PE_RENDER_UI_PROMPT_SNIPPET },
 ] as const;
 
 //注册所有pe工具
@@ -24,7 +27,15 @@ export function registerPeTools(pi: ExtensionAPI): void {
 	pi.registerTool(peDatasetMemoTool);
 	pi.registerTool(peHistoryCompareTool);
 	pi.registerTool(peResearchNoteSaveTool);
-	pi.on("resources_discover", () => ({ skillPaths: [memoSkillPath, researchNoteSkillPath] }));
+	pi.registerTool(peRenderUiTool);
+	pi.on("resources_discover", () => ({ skillPaths: [memoSkillPath, researchNoteSkillPath, generativeUiSkillPath] }));
 }
 
-export { peDatasetMemoTool, peDatasetSearchTool, peHistoryCompareTool, peResearchNoteSaveTool, peSourceDetailTool };
+export {
+	peDatasetMemoTool,
+	peDatasetSearchTool,
+	peHistoryCompareTool,
+	peRenderUiTool,
+	peResearchNoteSaveTool,
+	peSourceDetailTool,
+};
