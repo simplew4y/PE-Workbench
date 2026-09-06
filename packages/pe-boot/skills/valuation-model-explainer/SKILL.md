@@ -32,7 +32,7 @@ DCF：自由现金流折现 → 企业价值 → 股权价值 ÷ 稀释后股数
 4. 调用 `pe_valuation_output_locate` 生成和评分估值输出候选，不要用通用搜索结果或第一个关键词命中替代它。`selected` 表示确定性规则选出了首选候选，但不表示数值已经重算验证；`ambiguous` 时保留全部 `conflicting_candidate_ids`，分别检查公式链，不能擅自选择第一名；`missing` 时使用 `pe_document_open` 打开同一 `doc_id`，再用 pi 原生 `grep` / `read` 检查该文件的文字视图，并明确仍未定位主输出。
 5. 定位器返回 `selected` 后，调用 `pe_valuation_date_resolve`，将 `selected_output.candidate_id`、`selected_output.sheet_name`、`selected_output.cell_ref` 分别传入 `output_candidate_id`、`output_sheet`、`output_cell_ref`。如果输出仍为 `ambiguous`，应使用 `conflicting_outputs` 分别在每个冲突输出上下文中解析日期，不得把不同输出的日期合并成一个全局估值日。分别保留估值日、市场价格日、财务数据截止日、报告日、模型更新时间、目标期限和预测期。
 6. 只有 `pe_valuation_date_resolve.status=verified` 才能写“已确认估值日”。`inferred` 必须披露推断依据；`ambiguous` 必须列出冲突日期；`missing` 必须写明模型无法确定估值日。默认不得启用文件时间 fallback。
-   工作簿由读取工具按需解析；缓存缺失时自动重建。解析失败时说明无法读取，不得退回按文件名或文件时间猜测。
+   工作簿由上传后台准备；读取工具等待准备完成，缓存缺失时自动重建。解析失败时说明无法读取，不得退回按文件名或文件时间猜测。
 7. 调用 `pe_formula_trace` 反向追踪上游。对链条中的关键范围使用 `pe_excel_range` 精确读取公式、缓存值、数字格式、期间和单位。
 8. 调用 `pe_model_validate` 检查缓存覆盖、公式断链、外链、错误值和指标质量。必须区分 `structural_status` 与 `calculation_validation.status`；简答用一句话说明影响结论的核验限制，详细核验报告再分别列出状态，不得把结构通过表述为数值已经重算验证。
 9. `pe_source_detail` 继续用于核验检索得到的 PDF、指标事实和单元格证据，但不得用局部窗口代替公式追踪。

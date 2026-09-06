@@ -58,7 +58,7 @@ export const peDatasetMemoTool = defineTool({
 				status: Type.Union([Type.Literal("supported"), Type.Literal("not_covered"), Type.Literal("needs_review")]),
 				evidence_ids: Type.Array(Type.String({ minLength: 3, maxLength: 2048 }), {
 					description:
-						"Exact source: IDs returned by the document reader. Leave empty for not_covered or needs_review.",
+						"Exact page: PDF or source: document-location evidence IDs. Legacy cell: and fact: IDs are accepted. Leave empty for not_covered or needs_review.",
 					maxItems: 20,
 				}),
 			}),

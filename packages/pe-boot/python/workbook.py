@@ -1,15 +1,10 @@
-"""On-demand workbook cache, extracted from the former upload pipeline.
-
-Only the requested immutable document version is parsed. These tables support
-financial calculations; no text chunks, retrieval index, or upload jobs exist.
-"""
+"""Pure workbook parser. The TypeScript owner validates and publishes its rows."""
 from __future__ import annotations
 
 import bisect
 import hashlib
 import json
 import re
-import sqlite3
 import unicodedata
 from dataclasses import replace
 from datetime import date, datetime, timezone
@@ -25,168 +20,6 @@ from excel_date_candidates import (
 from excel_formula_parser import extract_formula_references
 
 DEFAULT_MAX_REGION_LABELS = 30
-
-WORKBOOK_SCHEMA = """
-CREATE TABLE IF NOT EXISTS excel_workbooks (
-            workbook_id TEXT PRIMARY KEY,
-            dataset_id TEXT NOT NULL,
-            doc_id TEXT NOT NULL,
-            workbook_type TEXT NOT NULL,
-            sheet_count INTEGER NOT NULL,
-            visible_sheet_count INTEGER NOT NULL,
-            formula_count INTEGER NOT NULL,
-            non_empty_cell_count INTEGER NOT NULL,
-            formula_density REAL NOT NULL,
-            metadata_json TEXT
-        );
-CREATE TABLE IF NOT EXISTS excel_sheets (
-            sheet_id TEXT PRIMARY KEY,
-            dataset_id TEXT NOT NULL,
-            doc_id TEXT NOT NULL,
-            sheet_index INTEGER NOT NULL,
-            sheet_name TEXT NOT NULL,
-            sheet_role TEXT NOT NULL,
-            sheet_state TEXT,
-            used_range TEXT,
-            row_count INTEGER NOT NULL,
-            col_count INTEGER NOT NULL,
-            non_empty_cell_count INTEGER NOT NULL,
-            formula_count INTEGER NOT NULL,
-            formula_density REAL NOT NULL,
-            summary TEXT,
-            header_json TEXT,
-            metadata_json TEXT
-        );
-CREATE TABLE IF NOT EXISTS excel_regions (
-            region_id TEXT PRIMARY KEY,
-            dataset_id TEXT NOT NULL,
-            doc_id TEXT NOT NULL,
-            sheet_name TEXT NOT NULL,
-            region_index INTEGER NOT NULL,
-            region_type TEXT NOT NULL,
-            cell_range TEXT NOT NULL,
-            row_count INTEGER NOT NULL,
-            col_count INTEGER NOT NULL,
-            non_empty_cell_count INTEGER NOT NULL,
-            formula_count INTEGER NOT NULL,
-            formula_density REAL NOT NULL,
-            summary TEXT,
-            header_json TEXT,
-            metadata_json TEXT
-        );
-CREATE TABLE IF NOT EXISTS excel_cells (
-            cell_id TEXT PRIMARY KEY,
-            dataset_id TEXT NOT NULL,
-            doc_id TEXT NOT NULL,
-            sheet_name TEXT NOT NULL,
-            cell_ref TEXT NOT NULL,
-            row_index INTEGER NOT NULL,
-            col_index INTEGER NOT NULL,
-            value_type TEXT NOT NULL,
-            display_value TEXT,
-            raw_value TEXT,
-            numeric_value REAL,
-            formula TEXT,
-            cached_value TEXT,
-            number_format TEXT,
-            row_label TEXT,
-            col_label TEXT,
-            period TEXT,
-            unit TEXT,
-            is_formula INTEGER NOT NULL DEFAULT 0,
-            formula_type TEXT,
-            formula_cache_status TEXT NOT NULL DEFAULT 'not_applicable',
-            metadata_json TEXT
-        );
-CREATE TABLE IF NOT EXISTS excel_defined_names (
-            defined_name_id TEXT PRIMARY KEY,
-            dataset_id TEXT NOT NULL,
-            doc_id TEXT NOT NULL,
-            name TEXT NOT NULL,
-            scope_sheet TEXT,
-            name_type TEXT,
-            attr_text TEXT,
-            hidden INTEGER NOT NULL DEFAULT 0,
-            metadata_json TEXT
-        );
-CREATE TABLE IF NOT EXISTS excel_formula_references (
-            reference_id TEXT PRIMARY KEY,
-            dataset_id TEXT NOT NULL,
-            doc_id TEXT NOT NULL,
-            source_cell_id TEXT NOT NULL,
-            source_sheet TEXT NOT NULL,
-            source_cell_ref TEXT NOT NULL,
-            reference_index INTEGER NOT NULL,
-            raw_reference TEXT NOT NULL,
-            reference_kind TEXT NOT NULL,
-            target_sheet TEXT,
-            target_range TEXT,
-            defined_name TEXT,
-            external_workbook TEXT,
-            parse_status TEXT NOT NULL,
-            metadata_json TEXT
-        );
-CREATE TABLE IF NOT EXISTS valuation_date_candidates (
-            candidate_id TEXT PRIMARY KEY,
-            schema_version TEXT NOT NULL DEFAULT '1.0',
-            dataset_id TEXT NOT NULL,
-            doc_id TEXT NOT NULL,
-            normalized_date TEXT,
-            raw_text TEXT NOT NULL,
-            role TEXT NOT NULL,
-            source_type TEXT NOT NULL,
-            evidence_id TEXT,
-            sheet_name TEXT,
-            cell_ref TEXT,
-            row_index INTEGER,
-            col_index INTEGER,
-            nearby_label TEXT,
-            parse_method TEXT NOT NULL,
-            date_precision TEXT NOT NULL,
-            is_forecast INTEGER NOT NULL DEFAULT 0,
-            priority_score REAL NOT NULL,
-            confidence REAL NOT NULL,
-            rejection_reason TEXT,
-            metadata_json TEXT
-        );
-CREATE TABLE IF NOT EXISTS metric_facts (
-            fact_id TEXT PRIMARY KEY,
-            dataset_id TEXT NOT NULL,
-            doc_id TEXT NOT NULL,
-            metric_name TEXT NOT NULL,
-            metric_alias TEXT,
-            period TEXT,
-            value_text TEXT,
-            value_numeric REAL,
-            unit TEXT,
-            sheet_name TEXT NOT NULL,
-            cell_ref TEXT NOT NULL,
-            source_range TEXT,
-            formula TEXT,
-            confidence REAL NOT NULL DEFAULT 0.5,
-            fact_status TEXT NOT NULL DEFAULT 'candidate',
-            quality_status TEXT NOT NULL DEFAULT 'review_required',
-            quality_issues_json TEXT,
-            metadata_json TEXT
-        );
-CREATE INDEX IF NOT EXISTS idx_excel_sheets_doc ON excel_sheets(doc_id, sheet_name);
-CREATE INDEX IF NOT EXISTS idx_excel_regions_doc ON excel_regions(doc_id, sheet_name, cell_range);
-CREATE INDEX IF NOT EXISTS idx_excel_cells_doc_sheet ON excel_cells(doc_id, sheet_name, cell_ref);
-CREATE INDEX IF NOT EXISTS idx_excel_cells_doc_sheet_position
-            ON excel_cells(doc_id, sheet_name, row_index, col_index);
-CREATE INDEX IF NOT EXISTS idx_excel_defined_names_doc_name
-            ON excel_defined_names(doc_id, name, scope_sheet);
-CREATE INDEX IF NOT EXISTS idx_excel_formula_references_source
-            ON excel_formula_references(doc_id, source_sheet, source_cell_ref, reference_index);
-CREATE INDEX IF NOT EXISTS idx_excel_formula_references_target
-            ON excel_formula_references(doc_id, target_sheet, target_range);
-CREATE INDEX IF NOT EXISTS idx_valuation_date_candidates_doc_role
-            ON valuation_date_candidates(doc_id, role, normalized_date);
-CREATE INDEX IF NOT EXISTS idx_metric_facts_metric ON metric_facts(doc_id, metric_name, period);
-CREATE INDEX IF NOT EXISTS idx_metric_facts_source ON metric_facts(doc_id, sheet_name, cell_ref);
-"""
-
-WORKBOOK_TABLES = ('excel_cells', 'excel_defined_names', 'excel_formula_references', 'excel_regions', 'excel_sheets', 'excel_workbooks', 'metric_facts', 'valuation_date_candidates')
 
 def sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8", errors="replace")).hexdigest()
@@ -571,13 +404,11 @@ def _sample_labels(cells: dict[tuple[int, int], Any], max_items: int = DEFAULT_M
     return labels
 
 
-def prepare_workbook(conn: sqlite3.Connection, *, dataset_id: str, doc_id: str, path: Path) -> dict[str, Any]:
+def _parse_loaded_workbook(wb_formula, wb_values, *, dataset_id: str, doc_id: str, path: Path, source_modified_at: Optional[str] = None) -> dict[str, Any]:
 
     parser_name = "openpyxl"
     parser_version = str(getattr(openpyxl, "__version__", "unknown"))
 
-    wb_formula = load_workbook(path, data_only=False, read_only=False, keep_links=True)
-    wb_values = load_workbook(path, data_only=True, read_only=False, keep_links=True)
 
     sheet_rows: list[dict[str, Any]] = []
     region_rows: list[dict[str, Any]] = []
@@ -669,7 +500,7 @@ def prepare_workbook(conn: sqlite3.Connection, *, dataset_id: str, doc_id: str, 
                 metadata={"property_name": property_name},
             )
     file_modified_observation = workbook_property_date_candidate(
-        datetime.fromtimestamp(path.stat().st_mtime, timezone.utc),
+        datetime.fromisoformat(source_modified_at.replace("Z", "+00:00")) if source_modified_at else datetime.fromtimestamp(path.stat().st_mtime, timezone.utc),
         role="file_modified_at",
     )
     if file_modified_observation:
@@ -1133,162 +964,61 @@ def prepare_workbook(conn: sqlite3.Connection, *, dataset_id: str, doc_id: str, 
         status = str(row["quality_status"])
         fact_quality_counts[status] = fact_quality_counts.get(status, 0) + 1
 
-    conn.execute(
-        """
-        INSERT INTO excel_workbooks (
-            workbook_id, dataset_id, doc_id, workbook_type, sheet_count,
-            visible_sheet_count, formula_count, non_empty_cell_count,
-            formula_density, metadata_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            sha256_text(f"{doc_id}\0workbook")[:40],
-            dataset_id,
-            doc_id,
-            workbook_type,
-            len(sheet_rows),
-            sum(1 for ws in wb_formula.worksheets if ws.sheet_state == "visible"),
-            total_formulas,
-            total_cells,
-            total_formulas / max(1, total_cells),
-            dumps_json(
-                {
-                    "source": "on_demand_workbook",
-                    "parser_name": parser_name,
-                    "parser_version": parser_version,
-                    "formula_cache_status_counts": formula_cache_counts,
-                    "formula_reference_count": len(formula_reference_rows),
-                    "formula_reference_status_counts": formula_reference_status_counts,
-                    "defined_name_count": len(defined_name_rows),
-                    "valuation_date_candidate_count": len(date_candidate_rows),
-                    "valuation_date_candidate_role_counts": date_candidate_role_counts,
-                    "date_epoch": json_safe(getattr(wb_formula, "epoch", None)),
-                    "calculation": json_safe(getattr(wb_formula, "calculation", None)),
-                    "external_link_count": len(getattr(wb_formula, "_external_links", ())),
-                    "fact_status": "candidate",
-                    "fact_quality_status_counts": fact_quality_counts,
-                }
-            ),
-        ),
-    )
-    if sheet_rows:
-        conn.executemany(
-            """
-            INSERT INTO excel_sheets (
-                sheet_id, dataset_id, doc_id, sheet_index, sheet_name, sheet_role,
-                sheet_state, used_range, row_count, col_count, non_empty_cell_count,
-                formula_count, formula_density, summary, header_json, metadata_json
-            ) VALUES (
-                :sheet_id, :dataset_id, :doc_id, :sheet_index, :sheet_name, :sheet_role,
-                :sheet_state, :used_range, :row_count, :col_count, :non_empty_cell_count,
-                :formula_count, :formula_density, :summary, :header_json, :metadata_json
-            )
-            """,
-            sheet_rows,
-        )
-    if region_rows:
-        conn.executemany(
-            """
-            INSERT INTO excel_regions (
-                region_id, dataset_id, doc_id, sheet_name, region_index, region_type,
-                cell_range, row_count, col_count, non_empty_cell_count, formula_count,
-                formula_density, summary, header_json, metadata_json
-            ) VALUES (
-                :region_id, :dataset_id, :doc_id, :sheet_name, :region_index, :region_type,
-                :cell_range, :row_count, :col_count, :non_empty_cell_count, :formula_count,
-                :formula_density, :summary, :header_json, :metadata_json
-            )
-            """,
-            region_rows,
-        )
-    if cell_rows:
-        conn.executemany(
-            """
-            INSERT INTO excel_cells (
-                cell_id, dataset_id, doc_id, sheet_name, cell_ref, row_index, col_index,
-                value_type, display_value, raw_value, numeric_value, formula, cached_value,
-                number_format, row_label, col_label, period, unit, is_formula,
-                formula_type, formula_cache_status, metadata_json
-            ) VALUES (
-                :cell_id, :dataset_id, :doc_id, :sheet_name, :cell_ref, :row_index, :col_index,
-                :value_type, :display_value, :raw_value, :numeric_value, :formula, :cached_value,
-                :number_format, :row_label, :col_label, :period, :unit, :is_formula,
-                :formula_type, :formula_cache_status, :metadata_json
-            )
-            """,
-            cell_rows,
-        )
-    if defined_name_rows:
-        conn.executemany(
-            """
-            INSERT INTO excel_defined_names (
-                defined_name_id, dataset_id, doc_id, name, scope_sheet,
-                name_type, attr_text, hidden, metadata_json
-            ) VALUES (
-                :defined_name_id, :dataset_id, :doc_id, :name, :scope_sheet,
-                :name_type, :attr_text, :hidden, :metadata_json
-            )
-            """,
-            defined_name_rows,
-        )
-    if formula_reference_rows:
-        conn.executemany(
-            """
-            INSERT INTO excel_formula_references (
-                reference_id, dataset_id, doc_id, source_cell_id, source_sheet,
-                source_cell_ref, reference_index, raw_reference, reference_kind,
-                target_sheet, target_range, defined_name, external_workbook,
-                parse_status, metadata_json
-            ) VALUES (
-                :reference_id, :dataset_id, :doc_id, :source_cell_id, :source_sheet,
-                :source_cell_ref, :reference_index, :raw_reference, :reference_kind,
-                :target_sheet, :target_range, :defined_name, :external_workbook,
-                :parse_status, :metadata_json
-            )
-            """,
-            formula_reference_rows,
-        )
-    if date_candidate_rows:
-        conn.executemany(
-            """
-            INSERT INTO valuation_date_candidates (
-                candidate_id, schema_version, dataset_id, doc_id, normalized_date, raw_text,
-                role, source_type, evidence_id, sheet_name, cell_ref,
-                row_index, col_index, nearby_label, parse_method, date_precision,
-                is_forecast, priority_score, confidence, rejection_reason, metadata_json
-            ) VALUES (
-                :candidate_id, :schema_version, :dataset_id, :doc_id, :normalized_date, :raw_text,
-                :role, :source_type, :evidence_id, :sheet_name, :cell_ref,
-                :row_index, :col_index, :nearby_label, :parse_method, :date_precision,
-                :is_forecast, :priority_score, :confidence, :rejection_reason, :metadata_json
-            )
-            """,
-            date_candidate_rows,
-        )
-    if fact_rows:
-        conn.executemany(
-            """
-            INSERT INTO metric_facts (
-                fact_id, dataset_id, doc_id, metric_name, metric_alias, period,
-                value_text, value_numeric, unit, sheet_name, cell_ref, source_range,
-                formula, confidence, fact_status, quality_status, quality_issues_json,
-                metadata_json
-            ) VALUES (
-                :fact_id, :dataset_id, :doc_id, :metric_name, :metric_alias, :period,
-                :value_text, :value_numeric, :unit, :sheet_name, :cell_ref, :source_range,
-                :formula, :confidence, :fact_status, :quality_status, :quality_issues_json,
-                :metadata_json
-            )
-            """,
-            fact_rows,
-        )
-
-    wb_formula.close()
-    wb_values.close()
+    workbook = {
+        "workbook_id": sha256_text(f"{doc_id}\0workbook")[:40],
+        "dataset_id": dataset_id,
+        "doc_id": doc_id,
+        "workbook_type": workbook_type,
+        "sheet_count": len(sheet_rows),
+        "visible_sheet_count": sum(1 for ws in wb_formula.worksheets if ws.sheet_state == "visible"),
+        "formula_count": total_formulas,
+        "non_empty_cell_count": total_cells,
+        "formula_density": total_formulas / max(1, total_cells),
+        "metadata_json": dumps_json({
+            "source": "on_demand_workbook",
+            "parser_name": parser_name,
+            "parser_version": parser_version,
+            "formula_cache_status_counts": formula_cache_counts,
+            "formula_reference_count": len(formula_reference_rows),
+            "formula_reference_status_counts": formula_reference_status_counts,
+            "defined_name_count": len(defined_name_rows),
+            "valuation_date_candidate_count": len(date_candidate_rows),
+            "valuation_date_candidate_role_counts": date_candidate_role_counts,
+            "date_epoch": json_safe(getattr(wb_formula, "epoch", None)),
+            "calculation": json_safe(getattr(wb_formula, "calculation", None)),
+            "external_link_count": len(getattr(wb_formula, "_external_links", ())),
+            "fact_status": "candidate",
+            "fact_quality_status_counts": fact_quality_counts,
+        }),
+    }
     return {
         "parser_name": parser_name,
         "parser_version": parser_version,
         "sheet_count": len(sheet_rows),
         "cell_count": len(cell_rows),
         "formula_count": total_formulas,
+        "warnings": [],
+        "tables": {
+            "excel_workbooks": [workbook],
+            "excel_sheets": sheet_rows,
+            "excel_regions": region_rows,
+            "excel_cells": cell_rows,
+            "excel_defined_names": defined_name_rows,
+            "excel_formula_references": formula_reference_rows,
+            "valuation_date_candidates": date_candidate_rows,
+            "metric_facts": fact_rows,
+        },
     }
+
+
+def parse_workbook(*, dataset_id: str, doc_id: str, path: Path, source_modified_at: Optional[str] = None) -> dict[str, Any]:
+    """Read formula expressions and stored values without recalculating or writing."""
+    wb_formula = load_workbook(path, data_only=False, read_only=False, keep_links=True)
+    wb_values = None
+    try:
+        wb_values = load_workbook(path, data_only=True, read_only=False, keep_links=True)
+        return _parse_loaded_workbook(wb_formula, wb_values, dataset_id=dataset_id, doc_id=doc_id, path=path, source_modified_at=source_modified_at)
+    finally:
+        wb_formula.close()
+        if wb_values is not None:
+            wb_values.close()

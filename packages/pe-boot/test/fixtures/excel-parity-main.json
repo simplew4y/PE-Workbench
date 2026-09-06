@@ -1,0 +1,2721 @@
+{
+  "readable_sha256": "054778a7270d849bbe6c53571e2f4c354b201198ac2095334cc165e47c0b4d71",
+  "tables": {
+    "excel_workbooks": {
+      "count": 1,
+      "sha256": "6bf6fd91eeb819e4446186bd0772e72f86f2b024cf411d54935de4ebe35f4185"
+    },
+    "excel_sheets": {
+      "count": 7,
+      "sha256": "e7e8f6aedb94d2ffb45e9483e07afac062a7a0ba85255fadf49aa37ac6e32bb6"
+    },
+    "excel_regions": {
+      "count": 7,
+      "sha256": "325ebaffbd23dc58d55a60e5bfa1755435a3172ea5e8e330be296991f7fb49a2"
+    },
+    "excel_cells": {
+      "count": 64,
+      "sha256": "286ac656f657648779b6ddbbb25afc8c2d5928f457d05b4d42e4ef9928ac4622"
+    },
+    "excel_defined_names": {
+      "count": 2,
+      "sha256": "463515856c0bab994a60439fe3e4faf9cf4d59e4c7193209302b8263d46d73f5"
+    },
+    "excel_formula_references": {
+      "count": 23,
+      "sha256": "f1e7dfab904d702c235020d742f0e2a40b1ea9bdd6621a6e9512f0fb4dd4a42d"
+    },
+    "valuation_date_candidates": {
+      "count": 9,
+      "sha256": "0aeeff3904064084847d2ccefbbb7579d0e956d4f6bad720c56e29c0f7c3fd82"
+    },
+    "metric_facts": {
+      "count": 13,
+      "sha256": "1e39a6b26f31ac14e23500f687f0c0f073be4e717eaea3383e65596df311ae78"
+    }
+  },
+  "inspect": {
+    "dataset_id": "parity-dataset",
+    "active_workbook_count": 1,
+    "selection_required": false,
+    "selected_doc_id": "7ad214e4d713852a1201a95135e146b2f8df0d49",
+    "warnings": [],
+    "workbooks": [
+      {
+        "doc_id": "7ad214e4d713852a1201a95135e146b2f8df0d49",
+        "prepared": true,
+        "logical_doc_id": "b30a9927288a33ee213636d2d4a52b40106d815a",
+        "version_no": 1,
+        "filename": "excel-parity.xlsx",
+        "file_type": "xlsx",
+        "parser_name": "openpyxl",
+        "parser_version": "3.1.5",
+        "workbook_type": "valuation_model",
+        "sheet_count": 7,
+        "visible_sheet_count": 6,
+        "non_empty_cell_count": 64,
+        "formula_count": 19,
+        "formula_density": 0.296875,
+        "metadata": {
+          "calculation": {
+            "attributes": {
+              "calcCompleted": null,
+              "calcId": 124519,
+              "calcMode": null,
+              "calcOnSave": null,
+              "concurrentCalc": null,
+              "concurrentManualCount": null,
+              "forceFullCalc": null,
+              "fullCalcOnLoad": true,
+              "fullPrecision": null,
+              "iterate": null,
+              "iterateCount": null,
+              "iterateDelta": null,
+              "refMode": null
+            },
+            "type": "CalcProperties"
+          },
+          "date_epoch": "1899-12-30T00:00:00",
+          "defined_name_count": 2,
+          "external_link_count": 0,
+          "fact_quality_status_counts": {
+            "candidate_complete": 1,
+            "review_required": 12
+          },
+          "fact_status": "candidate",
+          "formula_cache_status_counts": {
+            "missing": 16,
+            "present": 3
+          },
+          "formula_reference_count": 23,
+          "formula_reference_status_counts": {
+            "external": 1,
+            "resolved": 21,
+            "unresolved": 1
+          },
+          "parser_name": "openpyxl",
+          "parser_version": "3.1.5",
+          "source": "on_demand_workbook",
+          "valuation_date_candidate_count": 9,
+          "valuation_date_candidate_role_counts": {
+            "file_created_at": 1,
+            "file_modified_at": 2,
+            "forecast_period": 1,
+            "market_price_date": 1,
+            "unknown": 1,
+            "valuation_date": 3
+          }
+        },
+        "formula_cache_status_counts": {
+          "missing": 16,
+          "present": 3
+        },
+        "valuation_date_candidate_index_available": true,
+        "valuation_date_candidate_role_counts": {
+          "file_created_at": 1,
+          "file_modified_at": 2,
+          "forecast_period": 1,
+          "market_price_date": 1,
+          "unknown": 1,
+          "valuation_date": 3
+        },
+        "distinct_valuation_date_candidate_count": 3,
+        "hidden_sheet_count": 1,
+        "warnings": [
+          "1 hidden or very-hidden sheet(s)",
+          "3 distinct valuation-date candidates require output-context resolution",
+          "16 formula cache(s) are missing"
+        ],
+        "sheets": [
+          {
+            "index": 1,
+            "name": "Valuation",
+            "role": "valuation_dcf",
+            "state": "visible",
+            "used_range": "A1:D12",
+            "row_count": 12,
+            "col_count": 4,
+            "non_empty_cell_count": 17,
+            "formula_count": 3,
+            "formula_density": 0.17647058823529413
+          },
+          {
+            "index": 2,
+            "name": "Hidden assumptions",
+            "role": "driver_model",
+            "state": "veryHidden",
+            "used_range": "A1:B2",
+            "row_count": 2,
+            "col_count": 2,
+            "non_empty_cell_count": 3,
+            "formula_count": 1,
+            "formula_density": 0.3333333333333333
+          },
+          {
+            "index": 3,
+            "name": "Formula cases",
+            "role": "worksheet",
+            "state": "visible",
+            "used_range": "A1:K3",
+            "row_count": 3,
+            "col_count": 11,
+            "non_empty_cell_count": 12,
+            "formula_count": 10,
+            "formula_density": 0.8333333333333334
+          },
+          {
+            "index": 4,
+            "name": "Date cases",
+            "role": "valuation_dcf",
+            "state": "visible",
+            "used_range": "A1:B5",
+            "row_count": 5,
+            "col_count": 2,
+            "non_empty_cell_count": 10,
+            "formula_count": 0,
+            "formula_density": 0
+          },
+          {
+            "index": 5,
+            "name": "DCF",
+            "role": "valuation_dcf",
+            "state": "visible",
+            "used_range": "A1:B7",
+            "row_count": 7,
+            "col_count": 2,
+            "non_empty_cell_count": 14,
+            "formula_count": 3,
+            "formula_density": 0.21428571428571427
+          },
+          {
+            "index": 6,
+            "name": "SOTP",
+            "role": "worksheet",
+            "state": "visible",
+            "used_range": "A1:B3",
+            "row_count": 3,
+            "col_count": 2,
+            "non_empty_cell_count": 6,
+            "formula_count": 1,
+            "formula_density": 0.16666666666666666
+          },
+          {
+            "index": 7,
+            "name": "Sensitivity",
+            "role": "sensitivity",
+            "state": "visible",
+            "used_range": "A1:B1",
+            "row_count": 1,
+            "col_count": 2,
+            "non_empty_cell_count": 2,
+            "formula_count": 1,
+            "formula_density": 0.5
+          }
+        ]
+      }
+    ],
+    "answer_contract": "Use one selected doc_id for all subsequent model reads. Do not combine workbooks when selection_required is true. Next call pe_valuation_output_locate; resolve dates only after it selects an output or while preserving each ambiguous output context. Cache presence does not prove recalculation freshness."
+  },
+  "ranges": [
+    {
+      "dataset_id": "parity-dataset",
+      "document": {
+        "doc_id": "7ad214e4d713852a1201a95135e146b2f8df0d49",
+        "logical_doc_id": "b30a9927288a33ee213636d2d4a52b40106d815a",
+        "filename": "excel-parity.xlsx",
+        "file_type": "xlsx",
+        "version_no": 1,
+        "parser_name": "openpyxl",
+        "parser_version": "3.1.5"
+      },
+      "sheet": {
+        "name": "Valuation",
+        "index": 1,
+        "role": "valuation_dcf",
+        "state": "visible",
+        "used_range": "A1:D12",
+        "row_count": 12,
+        "col_count": 4,
+        "non_empty_cell_count": 17,
+        "formula_count": 3,
+        "formula_density": 0.17647058823529413
+      },
+      "cell_range": "A1:D12",
+      "citation": "excel-parity.xlsx Valuation!A1:D12",
+      "requested_cell_count": 48,
+      "matching_cell_count": 17,
+      "blank_cell_count": 31,
+      "returned_cell_count": 17,
+      "truncated": false,
+      "cells": [
+        {
+          "cell_id": "f0bce5bf4cc3b85c2ada71a184be6294af268df2",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJBMSJd",
+          "citation": "excel-parity.xlsx Valuation!A1",
+          "markdown_citation": "[excel-parity.xlsx Valuation!A1](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJBMSJd)",
+          "sheet_name": "Valuation",
+          "cell_ref": "A1",
+          "row_index": 1,
+          "col_index": 1,
+          "is_formula": false,
+          "display_value": "Valuation Date",
+          "raw_value": "Valuation Date",
+          "number_format": "General",
+          "formula_cache_status": "not_applicable"
+        },
+        {
+          "cell_id": "920ae527db04300b130e1ddb830bc0ced79f8f28",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJCMSJd",
+          "citation": "excel-parity.xlsx Valuation!B1",
+          "markdown_citation": "[excel-parity.xlsx Valuation!B1](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJCMSJd)",
+          "sheet_name": "Valuation",
+          "cell_ref": "B1",
+          "row_index": 1,
+          "col_index": 2,
+          "is_formula": false,
+          "display_value": "2026-08-31T00:00:00",
+          "raw_value": "\"2026-08-31T00:00:00\"",
+          "number_format": "yyyy-mm-dd",
+          "row_label": "Valuation Date",
+          "period": "2026",
+          "formula_cache_status": "not_applicable"
+        },
+        {
+          "cell_id": "9d1dad5e35b14c97e848ed644d8e9be132e751ea",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJBMyJd",
+          "citation": "excel-parity.xlsx Valuation!A3",
+          "markdown_citation": "[excel-parity.xlsx Valuation!A3](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJBMyJd)",
+          "sheet_name": "Valuation",
+          "cell_ref": "A3",
+          "row_index": 3,
+          "col_index": 1,
+          "is_formula": false,
+          "display_value": "Revenue segment A",
+          "raw_value": "Revenue segment A",
+          "number_format": "General",
+          "col_label": "Valuation Date",
+          "formula_cache_status": "not_applicable"
+        },
+        {
+          "cell_id": "c03a235caa03eb5344a3c434a876a9b9963122c5",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJCMyJd",
+          "citation": "excel-parity.xlsx Valuation!B3",
+          "markdown_citation": "[excel-parity.xlsx Valuation!B3](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJCMyJd)",
+          "sheet_name": "Valuation",
+          "cell_ref": "B3",
+          "row_index": 3,
+          "col_index": 2,
+          "is_formula": false,
+          "display_value": "500",
+          "raw_value": "500",
+          "number_format": "General",
+          "row_label": "Revenue segment A",
+          "col_label": "2026-08-31T00:00:00",
+          "period": "2026",
+          "formula_cache_status": "not_applicable",
+          "numeric_value": 500
+        },
+        {
+          "cell_id": "5ea33a76a7ef85c95372ef9ff8eb1d80a4ab3a30",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJEMyJd",
+          "citation": "excel-parity.xlsx Valuation!D3",
+          "markdown_citation": "[excel-parity.xlsx Valuation!D3](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJEMyJd)",
+          "sheet_name": "Valuation",
+          "cell_ref": "D3",
+          "row_index": 3,
+          "col_index": 4,
+          "is_formula": false,
+          "display_value": "Merged annotation",
+          "raw_value": "Merged annotation",
+          "number_format": "General",
+          "row_label": "Revenue segment A",
+          "formula_cache_status": "not_applicable"
+        },
+        {
+          "cell_id": "7c54389fae9d4ad65111fd78bc2b7e015e58c6c8",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJBNCJd",
+          "citation": "excel-parity.xlsx Valuation!A4",
+          "markdown_citation": "[excel-parity.xlsx Valuation!A4](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJBNCJd)",
+          "sheet_name": "Valuation",
+          "cell_ref": "A4",
+          "row_index": 4,
+          "col_index": 1,
+          "is_formula": false,
+          "display_value": "Revenue segment B",
+          "raw_value": "Revenue segment B",
+          "number_format": "General",
+          "col_label": "Revenue segment A",
+          "formula_cache_status": "not_applicable"
+        },
+        {
+          "cell_id": "1ad698f56cfbf837ba2207b6e931f3af1152a944",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJCNCJd",
+          "citation": "excel-parity.xlsx Valuation!B4",
+          "markdown_citation": "[excel-parity.xlsx Valuation!B4](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJCNCJd)",
+          "sheet_name": "Valuation",
+          "cell_ref": "B4",
+          "row_index": 4,
+          "col_index": 2,
+          "is_formula": false,
+          "display_value": "700",
+          "raw_value": "700",
+          "number_format": "General",
+          "row_label": "Revenue segment B",
+          "col_label": "500",
+          "period": "2026",
+          "formula_cache_status": "not_applicable",
+          "numeric_value": 700
+        },
+        {
+          "cell_id": "fcf062a069c47eb88f3ed7ae1dfdcfc0bd74f794",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJBNSJd",
+          "citation": "excel-parity.xlsx Valuation!A5",
+          "markdown_citation": "[excel-parity.xlsx Valuation!A5](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJBNSJd)",
+          "sheet_name": "Valuation",
+          "cell_ref": "A5",
+          "row_index": 5,
+          "col_index": 1,
+          "is_formula": false,
+          "display_value": "Revenue",
+          "raw_value": "Revenue",
+          "number_format": "General",
+          "col_label": "Revenue segment B",
+          "formula_cache_status": "not_applicable"
+        },
+        {
+          "cell_id": "82a9506987cb744b7906ed283c3958962eaf1022",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJCNSJd",
+          "citation": "excel-parity.xlsx Valuation!B5",
+          "markdown_citation": "[excel-parity.xlsx Valuation!B5](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJCNSJd)",
+          "sheet_name": "Valuation",
+          "cell_ref": "B5",
+          "row_index": 5,
+          "col_index": 2,
+          "is_formula": true,
+          "display_value": "1200",
+          "raw_value": "=SUM(B3:B4)",
+          "formula": "=SUM(B3:B4)",
+          "cached_value": "1200",
+          "number_format": "General",
+          "row_label": "Revenue",
+          "col_label": "700",
+          "period": "2026",
+          "formula_type": "standard",
+          "formula_cache_status": "present",
+          "numeric_value": 1200
+        },
+        {
+          "cell_id": "a78d4c308f501a7b98aa0860b95f7b4fe8e1be63",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJBNiJd",
+          "citation": "excel-parity.xlsx Valuation!A6",
+          "markdown_citation": "[excel-parity.xlsx Valuation!A6](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJBNiJd)",
+          "sheet_name": "Valuation",
+          "cell_ref": "A6",
+          "row_index": 6,
+          "col_index": 1,
+          "is_formula": false,
+          "display_value": "Current Price",
+          "raw_value": "Current Price",
+          "number_format": "General",
+          "col_label": "Revenue",
+          "formula_cache_status": "not_applicable"
+        },
+        {
+          "cell_id": "969b453bf802cdbc2edff8d08df2e87d1dffe4fc",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJCNiJd",
+          "citation": "excel-parity.xlsx Valuation!B6",
+          "markdown_citation": "[excel-parity.xlsx Valuation!B6](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJCNiJd)",
+          "sheet_name": "Valuation",
+          "cell_ref": "B6",
+          "row_index": 6,
+          "col_index": 2,
+          "is_formula": false,
+          "display_value": "100",
+          "raw_value": "100",
+          "number_format": "General",
+          "row_label": "Current Price",
+          "col_label": "1200",
+          "period": "2026",
+          "formula_cache_status": "not_applicable",
+          "numeric_value": 100
+        },
+        {
+          "cell_id": "b0c94a8db7f18a30694c1e734510420a817ef021",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJBNyJd",
+          "citation": "excel-parity.xlsx Valuation!A7",
+          "markdown_citation": "[excel-parity.xlsx Valuation!A7](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJBNyJd)",
+          "sheet_name": "Valuation",
+          "cell_ref": "A7",
+          "row_index": 7,
+          "col_index": 1,
+          "is_formula": false,
+          "display_value": "Target Price",
+          "raw_value": "Target Price",
+          "number_format": "General",
+          "col_label": "Current Price",
+          "formula_cache_status": "not_applicable"
+        },
+        {
+          "cell_id": "e56e0e6de1eb2cc68a2ef57ac4f1a8bd304e7fe3",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJCNyJd",
+          "citation": "excel-parity.xlsx Valuation!B7",
+          "markdown_citation": "[excel-parity.xlsx Valuation!B7](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJCNyJd)",
+          "sheet_name": "Valuation",
+          "cell_ref": "B7",
+          "row_index": 7,
+          "col_index": 2,
+          "is_formula": true,
+          "display_value": "120",
+          "raw_value": "=B5/10",
+          "formula": "=B5/10",
+          "cached_value": "120",
+          "number_format": "\"CNY/share\" 0.00",
+          "row_label": "Target Price",
+          "col_label": "1200",
+          "period": "2026",
+          "formula_type": "standard",
+          "formula_cache_status": "present",
+          "numeric_value": 120
+        },
+        {
+          "cell_id": "6de97f3b9f950c652c7c04af67a9d1d9269bdc7e",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJBOCJd",
+          "citation": "excel-parity.xlsx Valuation!A8",
+          "markdown_citation": "[excel-parity.xlsx Valuation!A8](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJBOCJd)",
+          "sheet_name": "Valuation",
+          "cell_ref": "A8",
+          "row_index": 8,
+          "col_index": 1,
+          "is_formula": false,
+          "display_value": "Upside",
+          "raw_value": "Upside",
+          "number_format": "General",
+          "col_label": "Target Price",
+          "formula_cache_status": "not_applicable"
+        },
+        {
+          "cell_id": "17ab22cb09942fee7e84b779ef6e131d95d6bae8",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJCOCJd",
+          "citation": "excel-parity.xlsx Valuation!B8",
+          "markdown_citation": "[excel-parity.xlsx Valuation!B8](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJCOCJd)",
+          "sheet_name": "Valuation",
+          "cell_ref": "B8",
+          "row_index": 8,
+          "col_index": 2,
+          "is_formula": true,
+          "display_value": "0.2",
+          "raw_value": "=B7/B6-1",
+          "formula": "=B7/B6-1",
+          "cached_value": "0.2",
+          "number_format": "0.0%",
+          "row_label": "Upside",
+          "col_label": "1200",
+          "period": "2026",
+          "unit": "%",
+          "formula_type": "standard",
+          "formula_cache_status": "present",
+          "numeric_value": 0.2
+        },
+        {
+          "cell_id": "c8b01e8af481bdaf00867450cbb3c16ad895d058",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJBMTAiXQ",
+          "citation": "excel-parity.xlsx Valuation!A10",
+          "markdown_citation": "[excel-parity.xlsx Valuation!A10](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJBMTAiXQ)",
+          "sheet_name": "Valuation",
+          "cell_ref": "A10",
+          "row_index": 10,
+          "col_index": 1,
+          "is_formula": false,
+          "display_value": "Long original note: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx...",
+          "raw_value": "Long original note: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          "number_format": "General",
+          "col_label": "Upside",
+          "formula_cache_status": "not_applicable"
+        },
+        {
+          "cell_id": "cfea8470894851b832bc51c70c60b335ae3d7d25",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJEMTIiXQ",
+          "citation": "excel-parity.xlsx Valuation!D12",
+          "markdown_citation": "[excel-parity.xlsx Valuation!D12](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJEMTIiXQ)",
+          "sheet_name": "Valuation",
+          "cell_ref": "D12",
+          "row_index": 12,
+          "col_index": 4,
+          "is_formula": false,
+          "display_value": "Window edge",
+          "raw_value": "Window edge",
+          "number_format": "General",
+          "col_label": "Merged annotation",
+          "formula_cache_status": "not_applicable"
+        }
+      ],
+      "answer_contract": "Treat formulas and cached values as distinct fields. Cite decisive cells with their markdown_citation. A present cache is not proof that Excel recalculated it recently."
+    },
+    {
+      "dataset_id": "parity-dataset",
+      "document": {
+        "doc_id": "7ad214e4d713852a1201a95135e146b2f8df0d49",
+        "logical_doc_id": "b30a9927288a33ee213636d2d4a52b40106d815a",
+        "filename": "excel-parity.xlsx",
+        "file_type": "xlsx",
+        "version_no": 1,
+        "parser_name": "openpyxl",
+        "parser_version": "3.1.5"
+      },
+      "sheet": {
+        "name": "Hidden assumptions",
+        "index": 2,
+        "role": "driver_model",
+        "state": "veryHidden",
+        "used_range": "A1:B2",
+        "row_count": 2,
+        "col_count": 2,
+        "non_empty_cell_count": 3,
+        "formula_count": 1,
+        "formula_density": 0.3333333333333333
+      },
+      "cell_range": "A1:B2",
+      "citation": "excel-parity.xlsx Hidden assumptions!A1:B2",
+      "requested_cell_count": 4,
+      "matching_cell_count": 3,
+      "blank_cell_count": 1,
+      "returned_cell_count": 3,
+      "truncated": false,
+      "cells": [
+        {
+          "cell_id": "6afd19e5312a1731f0b6694c681cb232b3cf38e6",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJIaWRkZW4gYXNzdW1wdGlvbnMiLCJBMSJd",
+          "citation": "excel-parity.xlsx Hidden assumptions!A1",
+          "markdown_citation": "[excel-parity.xlsx Hidden assumptions!A1](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJIaWRkZW4gYXNzdW1wdGlvbnMiLCJBMSJd)",
+          "sheet_name": "Hidden assumptions",
+          "cell_ref": "A1",
+          "row_index": 1,
+          "col_index": 1,
+          "is_formula": false,
+          "display_value": "Hidden source",
+          "raw_value": "Hidden source",
+          "number_format": "General",
+          "formula_cache_status": "not_applicable"
+        },
+        {
+          "cell_id": "c75857e66822a75d27db2ac45bb1356d5a713d48",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJIaWRkZW4gYXNzdW1wdGlvbnMiLCJCMSJd",
+          "citation": "excel-parity.xlsx Hidden assumptions!B1",
+          "markdown_citation": "[excel-parity.xlsx Hidden assumptions!B1](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJIaWRkZW4gYXNzdW1wdGlvbnMiLCJCMSJd)",
+          "sheet_name": "Hidden assumptions",
+          "cell_ref": "B1",
+          "row_index": 1,
+          "col_index": 2,
+          "is_formula": false,
+          "display_value": "2",
+          "raw_value": "2",
+          "number_format": "General",
+          "row_label": "Hidden source",
+          "formula_cache_status": "not_applicable",
+          "numeric_value": 2
+        },
+        {
+          "cell_id": "ca9d3870146dc0bc34b36d6a450d3b0f6c3509c4",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJIaWRkZW4gYXNzdW1wdGlvbnMiLCJCMiJd",
+          "citation": "excel-parity.xlsx Hidden assumptions!B2",
+          "markdown_citation": "[excel-parity.xlsx Hidden assumptions!B2](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJIaWRkZW4gYXNzdW1wdGlvbnMiLCJCMiJd)",
+          "sheet_name": "Hidden assumptions",
+          "cell_ref": "B2",
+          "row_index": 2,
+          "col_index": 2,
+          "is_formula": true,
+          "display_value": "=Valuation!B3",
+          "raw_value": "=Valuation!B3",
+          "formula": "=Valuation!B3",
+          "number_format": "General",
+          "col_label": "2",
+          "formula_type": "standard",
+          "formula_cache_status": "missing"
+        }
+      ],
+      "answer_contract": "Treat formulas and cached values as distinct fields. Cite decisive cells with their markdown_citation. A present cache is not proof that Excel recalculated it recently."
+    },
+    {
+      "dataset_id": "parity-dataset",
+      "document": {
+        "doc_id": "7ad214e4d713852a1201a95135e146b2f8df0d49",
+        "logical_doc_id": "b30a9927288a33ee213636d2d4a52b40106d815a",
+        "filename": "excel-parity.xlsx",
+        "file_type": "xlsx",
+        "version_no": 1,
+        "parser_name": "openpyxl",
+        "parser_version": "3.1.5"
+      },
+      "sheet": {
+        "name": "Formula cases",
+        "index": 3,
+        "role": "worksheet",
+        "state": "visible",
+        "used_range": "A1:K3",
+        "row_count": 3,
+        "col_count": 11,
+        "non_empty_cell_count": 12,
+        "formula_count": 10,
+        "formula_density": 0.8333333333333334
+      },
+      "cell_range": "A1:K3",
+      "citation": "excel-parity.xlsx Formula cases!A1:K3",
+      "requested_cell_count": 33,
+      "matching_cell_count": 12,
+      "blank_cell_count": 21,
+      "returned_cell_count": 12,
+      "truncated": false,
+      "cells": [
+        {
+          "cell_id": "99cc83f8242b09c4ccc392072f1ffc25afe7b29b",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJGb3JtdWxhIGNhc2VzIiwiQTEiXQ",
+          "citation": "excel-parity.xlsx Formula cases!A1",
+          "markdown_citation": "[excel-parity.xlsx Formula cases!A1](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJGb3JtdWxhIGNhc2VzIiwiQTEiXQ)",
+          "sheet_name": "Formula cases",
+          "cell_ref": "A1",
+          "row_index": 1,
+          "col_index": 1,
+          "is_formula": false,
+          "display_value": "3",
+          "raw_value": "3",
+          "number_format": "General",
+          "formula_cache_status": "not_applicable",
+          "numeric_value": 3
+        },
+        {
+          "cell_id": "619cf82dd5c93842c6e33ea9d68fa13701371b26",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJGb3JtdWxhIGNhc2VzIiwiQjEiXQ",
+          "citation": "excel-parity.xlsx Formula cases!B1",
+          "markdown_citation": "[excel-parity.xlsx Formula cases!B1](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJGb3JtdWxhIGNhc2VzIiwiQjEiXQ)",
+          "sheet_name": "Formula cases",
+          "cell_ref": "B1",
+          "row_index": 1,
+          "col_index": 2,
+          "is_formula": true,
+          "display_value": "{\"attributes\": {\"ref\": \"B1:B2\", \"text\": \"=A1:A2*2\"}, \"type\": \"ArrayFormula\"}",
+          "raw_value": "{\"attributes\": {\"ref\": \"B1:B2\", \"text\": \"=A1:A2*2\"}, \"type\": \"ArrayFormula\"}",
+          "formula": "=A1:A2*2",
+          "number_format": "General",
+          "formula_type": "array",
+          "formula_cache_status": "missing"
+        },
+        {
+          "cell_id": "f2afb2143ccf53cbcecadf678025a47a86a37dfe",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJGb3JtdWxhIGNhc2VzIiwiQzEiXQ",
+          "citation": "excel-parity.xlsx Formula cases!C1",
+          "markdown_citation": "[excel-parity.xlsx Formula cases!C1](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJGb3JtdWxhIGNhc2VzIiwiQzEiXQ)",
+          "sheet_name": "Formula cases",
+          "cell_ref": "C1",
+          "row_index": 1,
+          "col_index": 3,
+          "is_formula": true,
+          "display_value": "{\"attributes\": {\"ca\": false, \"del1\": false, \"del2\": false, \"dt2D\": false, \"dtr\": false, \"r1\": \"A1\", \"r2\": null, \"ref\": \"C1:D2\"}, \"type\": \"DataTableFormula\"}",
+          "raw_value": "{\"attributes\": {\"ca\": false, \"del1\": false, \"del2\": false, \"dt2D\": false, \"dtr\": false, \"r1\": \"A1\", \"r2\": null, \"ref\": \"C1:D2\"}, \"type\": \"DataTableFormula\"}",
+          "formula": "{\"ca\": false, \"del1\": false, \"del2\": false, \"dt2D\": false, \"dtr\": false, \"formula_type\": \"DataTableFormula\", \"r1\": \"A1\", \"r2\": null, \"ref\": \"C1:D2\"}",
+          "number_format": "General",
+          "formula_type": "data_table",
+          "formula_cache_status": "missing"
+        },
+        {
+          "cell_id": "f42f3a1f776538fa090f24063596c23f8849c229",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJGb3JtdWxhIGNhc2VzIiwiRTEiXQ",
+          "citation": "excel-parity.xlsx Formula cases!E1",
+          "markdown_citation": "[excel-parity.xlsx Formula cases!E1](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJGb3JtdWxhIGNhc2VzIiwiRTEiXQ)",
+          "sheet_name": "Formula cases",
+          "cell_ref": "E1",
+          "row_index": 1,
+          "col_index": 5,
+          "is_formula": true,
+          "display_value": "=A99",
+          "raw_value": "=A99",
+          "formula": "=A99",
+          "number_format": "General",
+          "formula_type": "standard",
+          "formula_cache_status": "missing"
+        },
+        {
+          "cell_id": "d07200556a5c8bb94b66e3e358e4383739949d50",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJGb3JtdWxhIGNhc2VzIiwiRjEiXQ",
+          "citation": "excel-parity.xlsx Formula cases!F1",
+          "markdown_citation": "[excel-parity.xlsx Formula cases!F1](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJGb3JtdWxhIGNhc2VzIiwiRjEiXQ)",
+          "sheet_name": "Formula cases",
+          "cell_ref": "F1",
+          "row_index": 1,
+          "col_index": 6,
+          "is_formula": true,
+          "display_value": "=G1",
+          "raw_value": "=G1",
+          "formula": "=G1",
+          "number_format": "General",
+          "formula_type": "standard",
+          "formula_cache_status": "missing"
+        },
+        {
+          "cell_id": "e3b27214203a9e7405588ac1766abf7ecb5d26a1",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJGb3JtdWxhIGNhc2VzIiwiRzEiXQ",
+          "citation": "excel-parity.xlsx Formula cases!G1",
+          "markdown_citation": "[excel-parity.xlsx Formula cases!G1](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJGb3JtdWxhIGNhc2VzIiwiRzEiXQ)",
+          "sheet_name": "Formula cases",
+          "cell_ref": "G1",
+          "row_index": 1,
+          "col_index": 7,
+          "is_formula": true,
+          "display_value": "=F1",
+          "raw_value": "=F1",
+          "formula": "=F1",
+          "number_format": "General",
+          "formula_type": "standard",
+          "formula_cache_status": "missing"
+        },
+        {
+          "cell_id": "1966caba0a3934eb4b1ca6b62bfe1bd506acda73",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJGb3JtdWxhIGNhc2VzIiwiSDEiXQ",
+          "citation": "excel-parity.xlsx Formula cases!H1",
+          "markdown_citation": "[excel-parity.xlsx Formula cases!H1](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJGb3JtdWxhIGNhc2VzIiwiSDEiXQ)",
+          "sheet_name": "Formula cases",
+          "cell_ref": "H1",
+          "row_index": 1,
+          "col_index": 8,
+          "is_formula": true,
+          "display_value": "='[missing.xlsx]Sheet1'!A1",
+          "raw_value": "='[missing.xlsx]Sheet1'!A1",
+          "formula": "='[missing.xlsx]Sheet1'!A1",
+          "number_format": "General",
+          "formula_type": "standard",
+          "formula_cache_status": "missing"
+        },
+        {
+          "cell_id": "a1d65dbae11e802efd764d1842bcb6b5e5b38731",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJGb3JtdWxhIGNhc2VzIiwiSTEiXQ",
+          "citation": "excel-parity.xlsx Formula cases!I1",
+          "markdown_citation": "[excel-parity.xlsx Formula cases!I1](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJGb3JtdWxhIGNhc2VzIiwiSTEiXQ)",
+          "sheet_name": "Formula cases",
+          "cell_ref": "I1",
+          "row_index": 1,
+          "col_index": 9,
+          "is_formula": true,
+          "display_value": "=SUM(A:A)",
+          "raw_value": "=SUM(A:A)",
+          "formula": "=SUM(A:A)",
+          "number_format": "General",
+          "formula_type": "standard",
+          "formula_cache_status": "missing"
+        },
+        {
+          "cell_id": "ad4c571bcb05107135ff975e620e4a965fd91d66",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJGb3JtdWxhIGNhc2VzIiwiSjEiXQ",
+          "citation": "excel-parity.xlsx Formula cases!J1",
+          "markdown_citation": "[excel-parity.xlsx Formula cases!J1](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJGb3JtdWxhIGNhc2VzIiwiSjEiXQ)",
+          "sheet_name": "Formula cases",
+          "cell_ref": "J1",
+          "row_index": 1,
+          "col_index": 10,
+          "is_formula": true,
+          "display_value": "=SUM(Valuation:Formula cases!A1)",
+          "raw_value": "=SUM(Valuation:Formula cases!A1)",
+          "formula": "=SUM(Valuation:Formula cases!A1)",
+          "number_format": "General",
+          "formula_type": "standard",
+          "formula_cache_status": "missing"
+        },
+        {
+          "cell_id": "ae7472360e5da5b480db09d32a749ccea7853272",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJGb3JtdWxhIGNhc2VzIiwiSzEiXQ",
+          "citation": "excel-parity.xlsx Formula cases!K1",
+          "markdown_citation": "[excel-parity.xlsx Formula cases!K1](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJGb3JtdWxhIGNhc2VzIiwiSzEiXQ)",
+          "sheet_name": "Formula cases",
+          "cell_ref": "K1",
+          "row_index": 1,
+          "col_index": 11,
+          "is_formula": false,
+          "display_value": "#REF!",
+          "raw_value": "#REF!",
+          "number_format": "General",
+          "formula_cache_status": "not_applicable"
+        },
+        {
+          "cell_id": "0751d47e7493fae648b82e56997fb616db1ae2ae",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJGb3JtdWxhIGNhc2VzIiwiQTIiXQ",
+          "citation": "excel-parity.xlsx Formula cases!A2",
+          "markdown_citation": "[excel-parity.xlsx Formula cases!A2](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJGb3JtdWxhIGNhc2VzIiwiQTIiXQ)",
+          "sheet_name": "Formula cases",
+          "cell_ref": "A2",
+          "row_index": 2,
+          "col_index": 1,
+          "is_formula": true,
+          "display_value": "=Input_Growth*A1",
+          "raw_value": "=Input_Growth*A1",
+          "formula": "=Input_Growth*A1",
+          "number_format": "General",
+          "col_label": "3",
+          "formula_type": "standard",
+          "formula_cache_status": "missing"
+        },
+        {
+          "cell_id": "dcc3ee8865ee3a24207e56642b964fa6fafb327c",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJGb3JtdWxhIGNhc2VzIiwiQTMiXQ",
+          "citation": "excel-parity.xlsx Formula cases!A3",
+          "markdown_citation": "[excel-parity.xlsx Formula cases!A3](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJGb3JtdWxhIGNhc2VzIiwiQTMiXQ)",
+          "sheet_name": "Formula cases",
+          "cell_ref": "A3",
+          "row_index": 3,
+          "col_index": 1,
+          "is_formula": true,
+          "display_value": "=SUM(Valuation!B3:B4)",
+          "raw_value": "=SUM(Valuation!B3:B4)",
+          "formula": "=SUM(Valuation!B3:B4)",
+          "number_format": "General",
+          "col_label": "3",
+          "formula_type": "standard",
+          "formula_cache_status": "missing"
+        }
+      ],
+      "answer_contract": "Treat formulas and cached values as distinct fields. Cite decisive cells with their markdown_citation. A present cache is not proof that Excel recalculated it recently."
+    },
+    {
+      "dataset_id": "parity-dataset",
+      "document": {
+        "doc_id": "7ad214e4d713852a1201a95135e146b2f8df0d49",
+        "logical_doc_id": "b30a9927288a33ee213636d2d4a52b40106d815a",
+        "filename": "excel-parity.xlsx",
+        "file_type": "xlsx",
+        "version_no": 1,
+        "parser_name": "openpyxl",
+        "parser_version": "3.1.5"
+      },
+      "sheet": {
+        "name": "Date cases",
+        "index": 4,
+        "role": "valuation_dcf",
+        "state": "visible",
+        "used_range": "A1:B5",
+        "row_count": 5,
+        "col_count": 2,
+        "non_empty_cell_count": 10,
+        "formula_count": 0,
+        "formula_density": 0
+      },
+      "cell_range": "A1:B5",
+      "citation": "excel-parity.xlsx Date cases!A1:B5",
+      "requested_cell_count": 10,
+      "matching_cell_count": 10,
+      "blank_cell_count": 0,
+      "returned_cell_count": 10,
+      "truncated": false,
+      "cells": [
+        {
+          "cell_id": "6f7253d5fc00d209ec82027180b010033b0be130",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEYXRlIGNhc2VzIiwiQTEiXQ",
+          "citation": "excel-parity.xlsx Date cases!A1",
+          "markdown_citation": "[excel-parity.xlsx Date cases!A1](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEYXRlIGNhc2VzIiwiQTEiXQ)",
+          "sheet_name": "Date cases",
+          "cell_ref": "A1",
+          "row_index": 1,
+          "col_index": 1,
+          "is_formula": false,
+          "display_value": "Valuation date",
+          "raw_value": "Valuation date",
+          "number_format": "General",
+          "formula_cache_status": "not_applicable"
+        },
+        {
+          "cell_id": "c9d08dba48057b033b4ba363b2b11ea8c0634fb1",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEYXRlIGNhc2VzIiwiQjEiXQ",
+          "citation": "excel-parity.xlsx Date cases!B1",
+          "markdown_citation": "[excel-parity.xlsx Date cases!B1](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEYXRlIGNhc2VzIiwiQjEiXQ)",
+          "sheet_name": "Date cases",
+          "cell_ref": "B1",
+          "row_index": 1,
+          "col_index": 2,
+          "is_formula": false,
+          "display_value": "Not confirmed 2026-09-01",
+          "raw_value": "Not confirmed 2026-09-01",
+          "number_format": "General",
+          "row_label": "Valuation date",
+          "period": "2026",
+          "formula_cache_status": "not_applicable"
+        },
+        {
+          "cell_id": "3a9c761c884036d8bd5558d9dd042f0e5c96e841",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEYXRlIGNhc2VzIiwiQTIiXQ",
+          "citation": "excel-parity.xlsx Date cases!A2",
+          "markdown_citation": "[excel-parity.xlsx Date cases!A2](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEYXRlIGNhc2VzIiwiQTIiXQ)",
+          "sheet_name": "Date cases",
+          "cell_ref": "A2",
+          "row_index": 2,
+          "col_index": 1,
+          "is_formula": false,
+          "display_value": "Market price date",
+          "raw_value": "Market price date",
+          "number_format": "General",
+          "col_label": "Valuation date",
+          "formula_cache_status": "not_applicable"
+        },
+        {
+          "cell_id": "02d17edc9effd91e58ef9015a2c21ae998d3d509",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEYXRlIGNhc2VzIiwiQjIiXQ",
+          "citation": "excel-parity.xlsx Date cases!B2",
+          "markdown_citation": "[excel-parity.xlsx Date cases!B2](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEYXRlIGNhc2VzIiwiQjIiXQ)",
+          "sheet_name": "Date cases",
+          "cell_ref": "B2",
+          "row_index": 2,
+          "col_index": 2,
+          "is_formula": false,
+          "display_value": "2026-08-30T00:00:00",
+          "raw_value": "\"2026-08-30T00:00:00\"",
+          "number_format": "yyyy-mm-dd h:mm:ss",
+          "row_label": "Market price date",
+          "col_label": "Not confirmed 2026-09-01",
+          "period": "2026",
+          "formula_cache_status": "not_applicable"
+        },
+        {
+          "cell_id": "63fef02022aa6b56cc6c705cbd81d12cced0e466",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEYXRlIGNhc2VzIiwiQTMiXQ",
+          "citation": "excel-parity.xlsx Date cases!A3",
+          "markdown_citation": "[excel-parity.xlsx Date cases!A3](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEYXRlIGNhc2VzIiwiQTMiXQ)",
+          "sheet_name": "Date cases",
+          "cell_ref": "A3",
+          "row_index": 3,
+          "col_index": 1,
+          "is_formula": false,
+          "display_value": "Forecast",
+          "raw_value": "Forecast",
+          "number_format": "General",
+          "col_label": "Market price date",
+          "formula_cache_status": "not_applicable"
+        },
+        {
+          "cell_id": "5464a4eca9c7c152c68d67dd81ebc3ebf35c04b8",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEYXRlIGNhc2VzIiwiQjMiXQ",
+          "citation": "excel-parity.xlsx Date cases!B3",
+          "markdown_citation": "[excel-parity.xlsx Date cases!B3](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEYXRlIGNhc2VzIiwiQjMiXQ)",
+          "sheet_name": "Date cases",
+          "cell_ref": "B3",
+          "row_index": 3,
+          "col_index": 2,
+          "is_formula": false,
+          "display_value": "2030E",
+          "raw_value": "2030E",
+          "number_format": "General",
+          "row_label": "Forecast",
+          "col_label": "2026-08-30T00:00:00",
+          "period": "2026",
+          "formula_cache_status": "not_applicable"
+        },
+        {
+          "cell_id": "5a24fdb70bafba2ff7b15024ea3d6e97ff63dbc1",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEYXRlIGNhc2VzIiwiQTQiXQ",
+          "citation": "excel-parity.xlsx Date cases!A4",
+          "markdown_citation": "[excel-parity.xlsx Date cases!A4](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEYXRlIGNhc2VzIiwiQTQiXQ)",
+          "sheet_name": "Date cases",
+          "cell_ref": "A4",
+          "row_index": 4,
+          "col_index": 1,
+          "is_formula": false,
+          "display_value": "Valuation date",
+          "raw_value": "Valuation date",
+          "number_format": "General",
+          "col_label": "Forecast",
+          "formula_cache_status": "not_applicable"
+        },
+        {
+          "cell_id": "804d3b46a5926f6c0e4c3378f1e4de3b09d3e535",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEYXRlIGNhc2VzIiwiQjQiXQ",
+          "citation": "excel-parity.xlsx Date cases!B4",
+          "markdown_citation": "[excel-parity.xlsx Date cases!B4](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEYXRlIGNhc2VzIiwiQjQiXQ)",
+          "sheet_name": "Date cases",
+          "cell_ref": "B4",
+          "row_index": 4,
+          "col_index": 2,
+          "is_formula": false,
+          "display_value": "not 2026-10-31",
+          "raw_value": "not 2026-10-31",
+          "number_format": "General",
+          "row_label": "Valuation date",
+          "col_label": "2030E",
+          "period": "2030E",
+          "formula_cache_status": "not_applicable"
+        },
+        {
+          "cell_id": "7cbac837f038e9c71182521505ba5ff7b488d01e",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEYXRlIGNhc2VzIiwiQTUiXQ",
+          "citation": "excel-parity.xlsx Date cases!A5",
+          "markdown_citation": "[excel-parity.xlsx Date cases!A5](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEYXRlIGNhc2VzIiwiQTUiXQ)",
+          "sheet_name": "Date cases",
+          "cell_ref": "A5",
+          "row_index": 5,
+          "col_index": 1,
+          "is_formula": false,
+          "display_value": "Valuation date",
+          "raw_value": "Valuation date",
+          "number_format": "General",
+          "col_label": "Valuation date",
+          "formula_cache_status": "not_applicable"
+        },
+        {
+          "cell_id": "e2758f883eb6a6f478e9e6c4519b831a8cd22999",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEYXRlIGNhc2VzIiwiQjUiXQ",
+          "citation": "excel-parity.xlsx Date cases!B5",
+          "markdown_citation": "[excel-parity.xlsx Date cases!B5](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEYXRlIGNhc2VzIiwiQjUiXQ)",
+          "sheet_name": "Date cases",
+          "cell_ref": "B5",
+          "row_index": 5,
+          "col_index": 2,
+          "is_formula": false,
+          "display_value": "2026-08-01 or 2026-08-02",
+          "raw_value": "2026-08-01 or 2026-08-02",
+          "number_format": "General",
+          "row_label": "Valuation date",
+          "col_label": "not 2026-10-31",
+          "period": "2026",
+          "formula_cache_status": "not_applicable"
+        }
+      ],
+      "answer_contract": "Treat formulas and cached values as distinct fields. Cite decisive cells with their markdown_citation. A present cache is not proof that Excel recalculated it recently."
+    },
+    {
+      "dataset_id": "parity-dataset",
+      "document": {
+        "doc_id": "7ad214e4d713852a1201a95135e146b2f8df0d49",
+        "logical_doc_id": "b30a9927288a33ee213636d2d4a52b40106d815a",
+        "filename": "excel-parity.xlsx",
+        "file_type": "xlsx",
+        "version_no": 1,
+        "parser_name": "openpyxl",
+        "parser_version": "3.1.5"
+      },
+      "sheet": {
+        "name": "DCF",
+        "index": 5,
+        "role": "valuation_dcf",
+        "state": "visible",
+        "used_range": "A1:B7",
+        "row_count": 7,
+        "col_count": 2,
+        "non_empty_cell_count": 14,
+        "formula_count": 3,
+        "formula_density": 0.21428571428571427
+      },
+      "cell_range": "A1:B7",
+      "citation": "excel-parity.xlsx DCF!A1:B7",
+      "requested_cell_count": 14,
+      "matching_cell_count": 14,
+      "blank_cell_count": 0,
+      "returned_cell_count": 14,
+      "truncated": false,
+      "cells": [
+        {
+          "cell_id": "0a1d8c513fb46984ed96902fc510a43ca97c3876",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEQ0YiLCJBMSJd",
+          "citation": "excel-parity.xlsx DCF!A1",
+          "markdown_citation": "[excel-parity.xlsx DCF!A1](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEQ0YiLCJBMSJd)",
+          "sheet_name": "DCF",
+          "cell_ref": "A1",
+          "row_index": 1,
+          "col_index": 1,
+          "is_formula": false,
+          "display_value": "WACC",
+          "raw_value": "WACC",
+          "number_format": "General",
+          "formula_cache_status": "not_applicable"
+        },
+        {
+          "cell_id": "6dec314dd7961fb84ff0c107e15d30ea56add910",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEQ0YiLCJCMSJd",
+          "citation": "excel-parity.xlsx DCF!B1",
+          "markdown_citation": "[excel-parity.xlsx DCF!B1](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEQ0YiLCJCMSJd)",
+          "sheet_name": "DCF",
+          "cell_ref": "B1",
+          "row_index": 1,
+          "col_index": 2,
+          "is_formula": false,
+          "display_value": "0.1",
+          "raw_value": "0.1",
+          "number_format": "General",
+          "row_label": "WACC",
+          "formula_cache_status": "not_applicable",
+          "numeric_value": 0.1
+        },
+        {
+          "cell_id": "5e84faaf91508790ec00c434f2bf60c3f8317025",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEQ0YiLCJBMiJd",
+          "citation": "excel-parity.xlsx DCF!A2",
+          "markdown_citation": "[excel-parity.xlsx DCF!A2](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEQ0YiLCJBMiJd)",
+          "sheet_name": "DCF",
+          "cell_ref": "A2",
+          "row_index": 2,
+          "col_index": 1,
+          "is_formula": false,
+          "display_value": "Free cash flow",
+          "raw_value": "Free cash flow",
+          "number_format": "General",
+          "col_label": "WACC",
+          "formula_cache_status": "not_applicable"
+        },
+        {
+          "cell_id": "43dbb000a9a0e6f24defcc69596db5e867a8cda2",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEQ0YiLCJCMiJd",
+          "citation": "excel-parity.xlsx DCF!B2",
+          "markdown_citation": "[excel-parity.xlsx DCF!B2](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEQ0YiLCJCMiJd)",
+          "sheet_name": "DCF",
+          "cell_ref": "B2",
+          "row_index": 2,
+          "col_index": 2,
+          "is_formula": false,
+          "display_value": "100",
+          "raw_value": "100",
+          "number_format": "General",
+          "row_label": "Free cash flow",
+          "col_label": "0.1",
+          "formula_cache_status": "not_applicable",
+          "numeric_value": 100
+        },
+        {
+          "cell_id": "c95235834dd773467ad98ae24295a7c95d8a93bc",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEQ0YiLCJBMyJd",
+          "citation": "excel-parity.xlsx DCF!A3",
+          "markdown_citation": "[excel-parity.xlsx DCF!A3](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEQ0YiLCJBMyJd)",
+          "sheet_name": "DCF",
+          "cell_ref": "A3",
+          "row_index": 3,
+          "col_index": 1,
+          "is_formula": false,
+          "display_value": "Terminal value",
+          "raw_value": "Terminal value",
+          "number_format": "General",
+          "col_label": "Free cash flow",
+          "formula_cache_status": "not_applicable"
+        },
+        {
+          "cell_id": "c5cafe4d84be6477e176432124bbfd2e555e6f63",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEQ0YiLCJCMyJd",
+          "citation": "excel-parity.xlsx DCF!B3",
+          "markdown_citation": "[excel-parity.xlsx DCF!B3](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEQ0YiLCJCMyJd)",
+          "sheet_name": "DCF",
+          "cell_ref": "B3",
+          "row_index": 3,
+          "col_index": 2,
+          "is_formula": false,
+          "display_value": "1000",
+          "raw_value": "1000",
+          "number_format": "General",
+          "row_label": "Terminal value",
+          "col_label": "100",
+          "formula_cache_status": "not_applicable",
+          "numeric_value": 1000
+        },
+        {
+          "cell_id": "757fef6866cf18d3c159e506000a65e57938795a",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEQ0YiLCJBNCJd",
+          "citation": "excel-parity.xlsx DCF!A4",
+          "markdown_citation": "[excel-parity.xlsx DCF!A4](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEQ0YiLCJBNCJd)",
+          "sheet_name": "DCF",
+          "cell_ref": "A4",
+          "row_index": 4,
+          "col_index": 1,
+          "is_formula": false,
+          "display_value": "DCF value",
+          "raw_value": "DCF value",
+          "number_format": "General",
+          "col_label": "Terminal value",
+          "formula_cache_status": "not_applicable"
+        },
+        {
+          "cell_id": "2e34cc99af5645882c9866866d3e9381221949b2",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEQ0YiLCJCNCJd",
+          "citation": "excel-parity.xlsx DCF!B4",
+          "markdown_citation": "[excel-parity.xlsx DCF!B4](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEQ0YiLCJCNCJd)",
+          "sheet_name": "DCF",
+          "cell_ref": "B4",
+          "row_index": 4,
+          "col_index": 2,
+          "is_formula": true,
+          "display_value": "=B2/B1+B3",
+          "raw_value": "=B2/B1+B3",
+          "formula": "=B2/B1+B3",
+          "number_format": "General",
+          "row_label": "DCF value",
+          "col_label": "1000",
+          "formula_type": "standard",
+          "formula_cache_status": "missing"
+        },
+        {
+          "cell_id": "9171f5d16fe59744c359c54e700e5740a665e94d",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEQ0YiLCJBNSJd",
+          "citation": "excel-parity.xlsx DCF!A5",
+          "markdown_citation": "[excel-parity.xlsx DCF!A5](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEQ0YiLCJBNSJd)",
+          "sheet_name": "DCF",
+          "cell_ref": "A5",
+          "row_index": 5,
+          "col_index": 1,
+          "is_formula": false,
+          "display_value": "Equity value",
+          "raw_value": "Equity value",
+          "number_format": "General",
+          "col_label": "DCF value",
+          "formula_cache_status": "not_applicable"
+        },
+        {
+          "cell_id": "10d7139f5668ae4844f170f43b543de32f62e886",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEQ0YiLCJCNSJd",
+          "citation": "excel-parity.xlsx DCF!B5",
+          "markdown_citation": "[excel-parity.xlsx DCF!B5](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEQ0YiLCJCNSJd)",
+          "sheet_name": "DCF",
+          "cell_ref": "B5",
+          "row_index": 5,
+          "col_index": 2,
+          "is_formula": true,
+          "display_value": "=B4-100",
+          "raw_value": "=B4-100",
+          "formula": "=B4-100",
+          "number_format": "General",
+          "row_label": "Equity value",
+          "col_label": "1000",
+          "formula_type": "standard",
+          "formula_cache_status": "missing"
+        },
+        {
+          "cell_id": "38753106d938a13ef39a688a0830d66d826d4287",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEQ0YiLCJBNiJd",
+          "citation": "excel-parity.xlsx DCF!A6",
+          "markdown_citation": "[excel-parity.xlsx DCF!A6](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEQ0YiLCJBNiJd)",
+          "sheet_name": "DCF",
+          "cell_ref": "A6",
+          "row_index": 6,
+          "col_index": 1,
+          "is_formula": false,
+          "display_value": "Diluted shares",
+          "raw_value": "Diluted shares",
+          "number_format": "General",
+          "col_label": "Equity value",
+          "formula_cache_status": "not_applicable"
+        },
+        {
+          "cell_id": "f5e0af4c5edbe6f7bb51e86e11dcf825028c4276",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEQ0YiLCJCNiJd",
+          "citation": "excel-parity.xlsx DCF!B6",
+          "markdown_citation": "[excel-parity.xlsx DCF!B6](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEQ0YiLCJCNiJd)",
+          "sheet_name": "DCF",
+          "cell_ref": "B6",
+          "row_index": 6,
+          "col_index": 2,
+          "is_formula": false,
+          "display_value": "10",
+          "raw_value": "10",
+          "number_format": "General",
+          "row_label": "Diluted shares",
+          "col_label": "1000",
+          "formula_cache_status": "not_applicable",
+          "numeric_value": 10
+        },
+        {
+          "cell_id": "3d220080e58a759fd26bd82ec9ba207df06f25ae",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEQ0YiLCJBNyJd",
+          "citation": "excel-parity.xlsx DCF!A7",
+          "markdown_citation": "[excel-parity.xlsx DCF!A7](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEQ0YiLCJBNyJd)",
+          "sheet_name": "DCF",
+          "cell_ref": "A7",
+          "row_index": 7,
+          "col_index": 1,
+          "is_formula": false,
+          "display_value": "Per share value",
+          "raw_value": "Per share value",
+          "number_format": "General",
+          "col_label": "Diluted shares",
+          "formula_cache_status": "not_applicable"
+        },
+        {
+          "cell_id": "bb8410a6dfbfd55a920aa5ccd02519a55a42a1ca",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEQ0YiLCJCNyJd",
+          "citation": "excel-parity.xlsx DCF!B7",
+          "markdown_citation": "[excel-parity.xlsx DCF!B7](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEQ0YiLCJCNyJd)",
+          "sheet_name": "DCF",
+          "cell_ref": "B7",
+          "row_index": 7,
+          "col_index": 2,
+          "is_formula": true,
+          "display_value": "=B5/B6",
+          "raw_value": "=B5/B6",
+          "formula": "=B5/B6",
+          "number_format": "\"CNY/share\" 0.00",
+          "row_label": "Per share value",
+          "col_label": "1000",
+          "formula_type": "standard",
+          "formula_cache_status": "missing"
+        }
+      ],
+      "answer_contract": "Treat formulas and cached values as distinct fields. Cite decisive cells with their markdown_citation. A present cache is not proof that Excel recalculated it recently."
+    },
+    {
+      "dataset_id": "parity-dataset",
+      "document": {
+        "doc_id": "7ad214e4d713852a1201a95135e146b2f8df0d49",
+        "logical_doc_id": "b30a9927288a33ee213636d2d4a52b40106d815a",
+        "filename": "excel-parity.xlsx",
+        "file_type": "xlsx",
+        "version_no": 1,
+        "parser_name": "openpyxl",
+        "parser_version": "3.1.5"
+      },
+      "sheet": {
+        "name": "SOTP",
+        "index": 6,
+        "role": "worksheet",
+        "state": "visible",
+        "used_range": "A1:B3",
+        "row_count": 3,
+        "col_count": 2,
+        "non_empty_cell_count": 6,
+        "formula_count": 1,
+        "formula_density": 0.16666666666666666
+      },
+      "cell_range": "A1:B3",
+      "citation": "excel-parity.xlsx SOTP!A1:B3",
+      "requested_cell_count": 6,
+      "matching_cell_count": 6,
+      "blank_cell_count": 0,
+      "returned_cell_count": 6,
+      "truncated": false,
+      "cells": [
+        {
+          "cell_id": "e9bd1e07cde016767b0c121f7226ef279013e509",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJTT1RQIiwiQTEiXQ",
+          "citation": "excel-parity.xlsx SOTP!A1",
+          "markdown_citation": "[excel-parity.xlsx SOTP!A1](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJTT1RQIiwiQTEiXQ)",
+          "sheet_name": "SOTP",
+          "cell_ref": "A1",
+          "row_index": 1,
+          "col_index": 1,
+          "is_formula": false,
+          "display_value": "Segment A",
+          "raw_value": "Segment A",
+          "number_format": "General",
+          "formula_cache_status": "not_applicable"
+        },
+        {
+          "cell_id": "c5eb61dba80a213b13445f2e347395efed0343bf",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJTT1RQIiwiQjEiXQ",
+          "citation": "excel-parity.xlsx SOTP!B1",
+          "markdown_citation": "[excel-parity.xlsx SOTP!B1](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJTT1RQIiwiQjEiXQ)",
+          "sheet_name": "SOTP",
+          "cell_ref": "B1",
+          "row_index": 1,
+          "col_index": 2,
+          "is_formula": false,
+          "display_value": "500",
+          "raw_value": "500",
+          "number_format": "General",
+          "row_label": "Segment A",
+          "formula_cache_status": "not_applicable",
+          "numeric_value": 500
+        },
+        {
+          "cell_id": "d23c7460e1547b3567c9d8d1ffa3fc0e7b5ec050",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJTT1RQIiwiQTIiXQ",
+          "citation": "excel-parity.xlsx SOTP!A2",
+          "markdown_citation": "[excel-parity.xlsx SOTP!A2](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJTT1RQIiwiQTIiXQ)",
+          "sheet_name": "SOTP",
+          "cell_ref": "A2",
+          "row_index": 2,
+          "col_index": 1,
+          "is_formula": false,
+          "display_value": "Segment B",
+          "raw_value": "Segment B",
+          "number_format": "General",
+          "col_label": "Segment A",
+          "formula_cache_status": "not_applicable"
+        },
+        {
+          "cell_id": "b5e902538e4b96e25a6336b0849989c921058b38",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJTT1RQIiwiQjIiXQ",
+          "citation": "excel-parity.xlsx SOTP!B2",
+          "markdown_citation": "[excel-parity.xlsx SOTP!B2](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJTT1RQIiwiQjIiXQ)",
+          "sheet_name": "SOTP",
+          "cell_ref": "B2",
+          "row_index": 2,
+          "col_index": 2,
+          "is_formula": false,
+          "display_value": "700",
+          "raw_value": "700",
+          "number_format": "General",
+          "row_label": "Segment B",
+          "col_label": "500",
+          "formula_cache_status": "not_applicable",
+          "numeric_value": 700
+        },
+        {
+          "cell_id": "348382ea5c8ba01f651d070195921b391f167f59",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJTT1RQIiwiQTMiXQ",
+          "citation": "excel-parity.xlsx SOTP!A3",
+          "markdown_citation": "[excel-parity.xlsx SOTP!A3](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJTT1RQIiwiQTMiXQ)",
+          "sheet_name": "SOTP",
+          "cell_ref": "A3",
+          "row_index": 3,
+          "col_index": 1,
+          "is_formula": false,
+          "display_value": "SOTP value",
+          "raw_value": "SOTP value",
+          "number_format": "General",
+          "col_label": "Segment B",
+          "formula_cache_status": "not_applicable"
+        },
+        {
+          "cell_id": "2911b7ca2af6eaf67ae32812eabd5a90a16eaad0",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJTT1RQIiwiQjMiXQ",
+          "citation": "excel-parity.xlsx SOTP!B3",
+          "markdown_citation": "[excel-parity.xlsx SOTP!B3](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJTT1RQIiwiQjMiXQ)",
+          "sheet_name": "SOTP",
+          "cell_ref": "B3",
+          "row_index": 3,
+          "col_index": 2,
+          "is_formula": true,
+          "display_value": "=SUM(B1:B2)",
+          "raw_value": "=SUM(B1:B2)",
+          "formula": "=SUM(B1:B2)",
+          "number_format": "General",
+          "row_label": "SOTP value",
+          "col_label": "700",
+          "formula_type": "standard",
+          "formula_cache_status": "missing"
+        }
+      ],
+      "answer_contract": "Treat formulas and cached values as distinct fields. Cite decisive cells with their markdown_citation. A present cache is not proof that Excel recalculated it recently."
+    },
+    {
+      "dataset_id": "parity-dataset",
+      "document": {
+        "doc_id": "7ad214e4d713852a1201a95135e146b2f8df0d49",
+        "logical_doc_id": "b30a9927288a33ee213636d2d4a52b40106d815a",
+        "filename": "excel-parity.xlsx",
+        "file_type": "xlsx",
+        "version_no": 1,
+        "parser_name": "openpyxl",
+        "parser_version": "3.1.5"
+      },
+      "sheet": {
+        "name": "Sensitivity",
+        "index": 7,
+        "role": "sensitivity",
+        "state": "visible",
+        "used_range": "A1:B1",
+        "row_count": 1,
+        "col_count": 2,
+        "non_empty_cell_count": 2,
+        "formula_count": 1,
+        "formula_density": 0.5
+      },
+      "cell_range": "A1:B1",
+      "citation": "excel-parity.xlsx Sensitivity!A1:B1",
+      "requested_cell_count": 2,
+      "matching_cell_count": 2,
+      "blank_cell_count": 0,
+      "returned_cell_count": 2,
+      "truncated": false,
+      "cells": [
+        {
+          "cell_id": "1431c1b5858ee8a6198555e4b376654ebddb2893",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJTZW5zaXRpdml0eSIsIkExIl0",
+          "citation": "excel-parity.xlsx Sensitivity!A1",
+          "markdown_citation": "[excel-parity.xlsx Sensitivity!A1](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJTZW5zaXRpdml0eSIsIkExIl0)",
+          "sheet_name": "Sensitivity",
+          "cell_ref": "A1",
+          "row_index": 1,
+          "col_index": 1,
+          "is_formula": false,
+          "display_value": "Target Price",
+          "raw_value": "Target Price",
+          "number_format": "General",
+          "formula_cache_status": "not_applicable"
+        },
+        {
+          "cell_id": "52d4cf6e4faafa8b2530fd24a4cb1f61924bca65",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJTZW5zaXRpdml0eSIsIkIxIl0",
+          "citation": "excel-parity.xlsx Sensitivity!B1",
+          "markdown_citation": "[excel-parity.xlsx Sensitivity!B1](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJTZW5zaXRpdml0eSIsIkIxIl0)",
+          "sheet_name": "Sensitivity",
+          "cell_ref": "B1",
+          "row_index": 1,
+          "col_index": 2,
+          "is_formula": true,
+          "display_value": "=125",
+          "raw_value": "=125",
+          "formula": "=125",
+          "number_format": "\"CNY/share\" 0.00",
+          "row_label": "Target Price",
+          "formula_type": "standard",
+          "formula_cache_status": "missing"
+        }
+      ],
+      "answer_contract": "Treat formulas and cached values as distinct fields. Cite decisive cells with their markdown_citation. A present cache is not proof that Excel recalculated it recently."
+    }
+  ],
+  "outputs": {
+    "schema_version": "1.0",
+    "dataset_id": "parity-dataset",
+    "locator_run_id": "46f857d4472e12c71c60f4374bb48240aab95a56",
+    "document": {
+      "doc_id": "7ad214e4d713852a1201a95135e146b2f8df0d49",
+      "filename": "excel-parity.xlsx",
+      "version_no": 1
+    },
+    "status": "selected",
+    "selection_method": "explainable_rule_score",
+    "selected_candidate_id": "b88f354dd74f18b48eb79fbc037182401a401dd8",
+    "selected_output": {
+      "candidate_id": "b88f354dd74f18b48eb79fbc037182401a401dd8",
+      "semantic_role": "target_price",
+      "sheet_name": "Valuation",
+      "cell_ref": "B7",
+      "score": 1.21,
+      "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJCNyJd",
+      "markdown_citation": "[excel-parity.xlsx Valuation!B7](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJCNyJd)"
+    },
+    "conflicting_candidate_ids": [],
+    "conflicting_outputs": [],
+    "candidate_count": 6,
+    "evaluated_candidate_count": 6,
+    "returned_candidate_count": 6,
+    "cross_check_nodes": [
+      {
+        "role": "current_price",
+        "sheet_name": "Valuation",
+        "cell_ref": "B6",
+        "label": "Current Price",
+        "display_value": "100",
+        "numeric_value": 100,
+        "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJCNiJd",
+        "markdown_citation": "[excel-parity.xlsx Valuation!B6](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJCNiJd)"
+      },
+      {
+        "role": "upside",
+        "sheet_name": "Valuation",
+        "cell_ref": "B8",
+        "label": "Upside",
+        "display_value": "0.2",
+        "numeric_value": 0.2,
+        "formula": "=B7/B6-1",
+        "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJCOCJd",
+        "markdown_citation": "[excel-parity.xlsx Valuation!B8](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJCOCJd)"
+      }
+    ],
+    "warnings": [],
+    "candidates": [
+      {
+        "candidate_id": "b88f354dd74f18b48eb79fbc037182401a401dd8",
+        "semantic_role": "target_price",
+        "score": 1.21,
+        "confidence": 1,
+        "sheet_name": "Valuation",
+        "cell_ref": "B7",
+        "sheet_role": "valuation_dcf",
+        "sheet_state": "visible",
+        "label": "Target Price",
+        "label_source": "right_of_label",
+        "matched_phrase": "target price",
+        "label_cell_refs": [
+          "A7"
+        ],
+        "defined_names": [
+          "Primary_Target_Price"
+        ],
+        "evidence_ids": [
+          "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJCNyJd",
+          "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJBNyJd"
+        ],
+        "citations": [
+          "excel-parity.xlsx Valuation!B7",
+          "excel-parity.xlsx Valuation!A7"
+        ],
+        "markdown_citations": [
+          "[excel-parity.xlsx Valuation!B7](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJCNyJd)",
+          "[excel-parity.xlsx Valuation!A7](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJBNyJd)"
+        ],
+        "display_value": "120",
+        "numeric_value": 120,
+        "formula": "=B5/10",
+        "cached_value": "120",
+        "formula_cache_status": "present",
+        "number_format": "\"CNY/share\" 0.00",
+        "period": "2026",
+        "direct_downstream_formula_count": 1,
+        "referenced_by_upside": true,
+        "upside_links": [
+          {
+            "upside_cell_id": "17ab22cb09942fee7e84b779ef6e131d95d6bae8",
+            "upside_sheet": "Valuation",
+            "upside_cell_ref": "B8",
+            "current_price_cell_ids": [
+              "969b453bf802cdbc2edff8d08df2e87d1dffe4fc"
+            ],
+            "calculated_upside": 0.19999999999999996,
+            "reported_upside": 0.2,
+            "consistent": true
+          }
+        ],
+        "date_context": [
+          {
+            "candidate_id": "ec67c5f3e7bb142f9de10eb509b2a37c9d81dfc2",
+            "role": "valuation_date",
+            "normalized_date": "2026-08-31",
+            "distance": 6,
+            "confidence": 0.98
+          }
+        ],
+        "formula_trace": {
+          "structurally_complete": true,
+          "node_count": 4,
+          "edge_count": 2,
+          "issue_codes": []
+        },
+        "features": [
+          {
+            "code": "semantic_label_target_price",
+            "weight": 0.51,
+            "detail": "Label 'Target Price' matched 'target price'"
+          },
+          {
+            "code": "label_source_right_of_label",
+            "weight": 0.11,
+            "detail": "Label source is right_of_label"
+          },
+          {
+            "code": "numeric_output",
+            "weight": 0.05,
+            "detail": "Cell has an indexed numeric value"
+          },
+          {
+            "code": "formula_output",
+            "weight": 0.08,
+            "detail": "Cell contains a formula"
+          },
+          {
+            "code": "formula_cache_present",
+            "weight": 0.02,
+            "detail": "Formula has a stored cache value"
+          },
+          {
+            "code": "per_share_unit_or_format",
+            "weight": 0.08,
+            "detail": "Unit or format indicates a per-share value"
+          },
+          {
+            "code": "valuation_sheet",
+            "weight": 0.06,
+            "detail": "Worksheet is classified as valuation/DCF"
+          },
+          {
+            "code": "sheet_name_context",
+            "weight": 0.04,
+            "detail": "Worksheet name or role indicates valuation output context"
+          },
+          {
+            "code": "referenced_by_upside",
+            "weight": 0.1,
+            "detail": "An upside/downside formula references this cell"
+          },
+          {
+            "code": "upside_arithmetic_consistent",
+            "weight": 0.08,
+            "detail": "Target/current-price ratio matches reported upside"
+          },
+          {
+            "code": "near_explicit_valuation_date",
+            "weight": 0.04,
+            "detail": "A high-confidence valuation-date candidate is nearby"
+          },
+          {
+            "code": "complete_formula_lineage",
+            "weight": 0.04,
+            "detail": "Formula lineage is structurally complete within tool limits"
+          }
+        ],
+        "warnings": [],
+        "rank": 1
+      },
+      {
+        "candidate_id": "8e684259a335df6464472fa54813515d40048319",
+        "semantic_role": "per_share_value",
+        "score": 1.09,
+        "confidence": 1,
+        "sheet_name": "DCF",
+        "cell_ref": "B7",
+        "sheet_role": "valuation_dcf",
+        "sheet_state": "visible",
+        "label": "Per share value",
+        "label_source": "right_of_label",
+        "matched_phrase": "per share value",
+        "label_cell_refs": [
+          "A7"
+        ],
+        "defined_names": [],
+        "evidence_ids": [
+          "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEQ0YiLCJCNyJd",
+          "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEQ0YiLCJBNyJd"
+        ],
+        "citations": [
+          "excel-parity.xlsx DCF!B7",
+          "excel-parity.xlsx DCF!A7"
+        ],
+        "markdown_citations": [
+          "[excel-parity.xlsx DCF!B7](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEQ0YiLCJCNyJd)",
+          "[excel-parity.xlsx DCF!A7](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEQ0YiLCJBNyJd)"
+        ],
+        "display_value": "=B5/B6",
+        "formula": "=B5/B6",
+        "formula_cache_status": "missing",
+        "number_format": "\"CNY/share\" 0.00",
+        "direct_downstream_formula_count": 0,
+        "referenced_by_upside": false,
+        "upside_links": [],
+        "date_context": [],
+        "formula_trace": {
+          "structurally_complete": true,
+          "node_count": 7,
+          "edge_count": 6,
+          "issue_codes": [
+            "formula_cache_unavailable"
+          ]
+        },
+        "features": [
+          {
+            "code": "semantic_label_per_share_value",
+            "weight": 0.49,
+            "detail": "Label 'Per share value' matched 'per share value'"
+          },
+          {
+            "code": "label_source_right_of_label",
+            "weight": 0.11,
+            "detail": "Label source is right_of_label"
+          },
+          {
+            "code": "formula_output",
+            "weight": 0.08,
+            "detail": "Cell contains a formula"
+          },
+          {
+            "code": "per_share_unit_or_format",
+            "weight": 0.08,
+            "detail": "Unit or format indicates a per-share value"
+          },
+          {
+            "code": "valuation_sheet",
+            "weight": 0.06,
+            "detail": "Worksheet is classified as valuation/DCF"
+          },
+          {
+            "code": "sheet_name_context",
+            "weight": 0.04,
+            "detail": "Worksheet name or role indicates valuation output context"
+          },
+          {
+            "code": "formula_graph_endpoint",
+            "weight": 0.03,
+            "detail": "No exact downstream formula reference was indexed"
+          },
+          {
+            "code": "equity_value_divided_by_shares_signature",
+            "weight": 0.16,
+            "detail": "Upstream labels contain equity value and shares"
+          },
+          {
+            "code": "complete_formula_lineage",
+            "weight": 0.04,
+            "detail": "Formula lineage is structurally complete within tool limits"
+          }
+        ],
+        "warnings": [],
+        "rank": 2
+      },
+      {
+        "candidate_id": "38ac1d2121d85acf9d9bd2c1833c11eba2b49a2d",
+        "semantic_role": "dcf_value",
+        "score": 0.87,
+        "confidence": 0.87,
+        "sheet_name": "DCF",
+        "cell_ref": "B4",
+        "sheet_role": "valuation_dcf",
+        "sheet_state": "visible",
+        "label": "DCF value",
+        "label_source": "right_of_label",
+        "matched_phrase": "dcf value",
+        "label_cell_refs": [
+          "A4"
+        ],
+        "defined_names": [],
+        "evidence_ids": [
+          "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEQ0YiLCJCNCJd",
+          "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEQ0YiLCJBNCJd"
+        ],
+        "citations": [
+          "excel-parity.xlsx DCF!B4",
+          "excel-parity.xlsx DCF!A4"
+        ],
+        "markdown_citations": [
+          "[excel-parity.xlsx DCF!B4](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEQ0YiLCJCNCJd)",
+          "[excel-parity.xlsx DCF!A4](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEQ0YiLCJBNCJd)"
+        ],
+        "display_value": "=B2/B1+B3",
+        "formula": "=B2/B1+B3",
+        "formula_cache_status": "missing",
+        "number_format": "General",
+        "direct_downstream_formula_count": 1,
+        "referenced_by_upside": false,
+        "upside_links": [],
+        "date_context": [],
+        "formula_trace": {
+          "structurally_complete": true,
+          "node_count": 4,
+          "edge_count": 3,
+          "issue_codes": [
+            "formula_cache_unavailable"
+          ]
+        },
+        "features": [
+          {
+            "code": "semantic_label_dcf_value",
+            "weight": 0.42000000000000004,
+            "detail": "Label 'DCF value' matched 'dcf value'"
+          },
+          {
+            "code": "label_source_right_of_label",
+            "weight": 0.11,
+            "detail": "Label source is right_of_label"
+          },
+          {
+            "code": "formula_output",
+            "weight": 0.08,
+            "detail": "Cell contains a formula"
+          },
+          {
+            "code": "valuation_sheet",
+            "weight": 0.06,
+            "detail": "Worksheet is classified as valuation/DCF"
+          },
+          {
+            "code": "sheet_name_context",
+            "weight": 0.04,
+            "detail": "Worksheet name or role indicates valuation output context"
+          },
+          {
+            "code": "dcf_lineage_signature",
+            "weight": 0.12,
+            "detail": "Upstream labels contain DCF inputs"
+          },
+          {
+            "code": "complete_formula_lineage",
+            "weight": 0.04,
+            "detail": "Formula lineage is structurally complete within tool limits"
+          }
+        ],
+        "warnings": [],
+        "rank": 3
+      },
+      {
+        "candidate_id": "176667f13a6c65b9f0982227d8450518e5f82e7b",
+        "semantic_role": "equity_value",
+        "score": 0.72,
+        "confidence": 0.72,
+        "sheet_name": "DCF",
+        "cell_ref": "B5",
+        "sheet_role": "valuation_dcf",
+        "sheet_state": "visible",
+        "label": "Equity value",
+        "label_source": "right_of_label",
+        "matched_phrase": "equity value",
+        "label_cell_refs": [
+          "A5"
+        ],
+        "defined_names": [],
+        "evidence_ids": [
+          "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEQ0YiLCJCNSJd",
+          "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEQ0YiLCJBNSJd"
+        ],
+        "citations": [
+          "excel-parity.xlsx DCF!B5",
+          "excel-parity.xlsx DCF!A5"
+        ],
+        "markdown_citations": [
+          "[excel-parity.xlsx DCF!B5](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEQ0YiLCJCNSJd)",
+          "[excel-parity.xlsx DCF!A5](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEQ0YiLCJBNSJd)"
+        ],
+        "display_value": "=B4-100",
+        "formula": "=B4-100",
+        "formula_cache_status": "missing",
+        "number_format": "General",
+        "direct_downstream_formula_count": 1,
+        "referenced_by_upside": false,
+        "upside_links": [],
+        "date_context": [],
+        "formula_trace": {
+          "structurally_complete": true,
+          "node_count": 5,
+          "edge_count": 4,
+          "issue_codes": [
+            "formula_cache_unavailable"
+          ]
+        },
+        "features": [
+          {
+            "code": "semantic_label_equity_value",
+            "weight": 0.39,
+            "detail": "Label 'Equity value' matched 'equity value'"
+          },
+          {
+            "code": "label_source_right_of_label",
+            "weight": 0.11,
+            "detail": "Label source is right_of_label"
+          },
+          {
+            "code": "formula_output",
+            "weight": 0.08,
+            "detail": "Cell contains a formula"
+          },
+          {
+            "code": "valuation_sheet",
+            "weight": 0.06,
+            "detail": "Worksheet is classified as valuation/DCF"
+          },
+          {
+            "code": "sheet_name_context",
+            "weight": 0.04,
+            "detail": "Worksheet name or role indicates valuation output context"
+          },
+          {
+            "code": "complete_formula_lineage",
+            "weight": 0.04,
+            "detail": "Formula lineage is structurally complete within tool limits"
+          }
+        ],
+        "warnings": [],
+        "rank": 4
+      },
+      {
+        "candidate_id": "3634fa5376a62e5e53d60b70e536bf36ada755b1",
+        "semantic_role": "sotp_value",
+        "score": 0.72,
+        "confidence": 0.72,
+        "sheet_name": "SOTP",
+        "cell_ref": "B3",
+        "sheet_role": "worksheet",
+        "sheet_state": "visible",
+        "label": "SOTP value",
+        "label_source": "right_of_label",
+        "matched_phrase": "sotp value",
+        "label_cell_refs": [
+          "A3"
+        ],
+        "defined_names": [],
+        "evidence_ids": [
+          "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJTT1RQIiwiQjMiXQ",
+          "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJTT1RQIiwiQTMiXQ"
+        ],
+        "citations": [
+          "excel-parity.xlsx SOTP!B3",
+          "excel-parity.xlsx SOTP!A3"
+        ],
+        "markdown_citations": [
+          "[excel-parity.xlsx SOTP!B3](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJTT1RQIiwiQjMiXQ)",
+          "[excel-parity.xlsx SOTP!A3](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJTT1RQIiwiQTMiXQ)"
+        ],
+        "display_value": "=SUM(B1:B2)",
+        "formula": "=SUM(B1:B2)",
+        "formula_cache_status": "missing",
+        "number_format": "General",
+        "direct_downstream_formula_count": 0,
+        "referenced_by_upside": false,
+        "upside_links": [],
+        "date_context": [],
+        "formula_trace": {
+          "structurally_complete": true,
+          "node_count": 3,
+          "edge_count": 1,
+          "issue_codes": [
+            "formula_cache_unavailable"
+          ]
+        },
+        "features": [
+          {
+            "code": "semantic_label_sotp_value",
+            "weight": 0.42000000000000004,
+            "detail": "Label 'SOTP value' matched 'sotp value'"
+          },
+          {
+            "code": "label_source_right_of_label",
+            "weight": 0.11,
+            "detail": "Label source is right_of_label"
+          },
+          {
+            "code": "formula_output",
+            "weight": 0.08,
+            "detail": "Cell contains a formula"
+          },
+          {
+            "code": "sheet_name_context",
+            "weight": 0.04,
+            "detail": "Worksheet name or role indicates valuation output context"
+          },
+          {
+            "code": "formula_graph_endpoint",
+            "weight": 0.03,
+            "detail": "No exact downstream formula reference was indexed"
+          },
+          {
+            "code": "complete_formula_lineage",
+            "weight": 0.04,
+            "detail": "Formula lineage is structurally complete within tool limits"
+          }
+        ],
+        "warnings": [],
+        "rank": 5
+      },
+      {
+        "candidate_id": "7363b02aa3eb141e223ffee712bf2d9103ef89bc",
+        "semantic_role": "target_price",
+        "score": 0.56,
+        "confidence": 0.56,
+        "sheet_name": "Sensitivity",
+        "cell_ref": "B1",
+        "sheet_role": "sensitivity",
+        "sheet_state": "visible",
+        "label": "Target Price",
+        "label_source": "right_of_label",
+        "matched_phrase": "target price",
+        "label_cell_refs": [
+          "A1"
+        ],
+        "defined_names": [],
+        "evidence_ids": [
+          "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJTZW5zaXRpdml0eSIsIkIxIl0",
+          "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJTZW5zaXRpdml0eSIsIkExIl0"
+        ],
+        "citations": [
+          "excel-parity.xlsx Sensitivity!B1",
+          "excel-parity.xlsx Sensitivity!A1"
+        ],
+        "markdown_citations": [
+          "[excel-parity.xlsx Sensitivity!B1](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJTZW5zaXRpdml0eSIsIkIxIl0)",
+          "[excel-parity.xlsx Sensitivity!A1](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJTZW5zaXRpdml0eSIsIkExIl0)"
+        ],
+        "display_value": "=125",
+        "formula": "=125",
+        "formula_cache_status": "missing",
+        "number_format": "\"CNY/share\" 0.00",
+        "direct_downstream_formula_count": 0,
+        "referenced_by_upside": false,
+        "upside_links": [],
+        "date_context": [],
+        "formula_trace": {
+          "structurally_complete": true,
+          "node_count": 1,
+          "edge_count": 0,
+          "issue_codes": [
+            "formula_cache_unavailable"
+          ]
+        },
+        "features": [
+          {
+            "code": "semantic_label_target_price",
+            "weight": 0.51,
+            "detail": "Label 'Target Price' matched 'target price'"
+          },
+          {
+            "code": "label_source_right_of_label",
+            "weight": 0.11,
+            "detail": "Label source is right_of_label"
+          },
+          {
+            "code": "formula_output",
+            "weight": 0.08,
+            "detail": "Cell contains a formula"
+          },
+          {
+            "code": "per_share_unit_or_format",
+            "weight": 0.08,
+            "detail": "Unit or format indicates a per-share value"
+          },
+          {
+            "code": "sensitivity_context_penalty",
+            "weight": -0.25,
+            "detail": "Sensitivity-grid values cannot be selected as the primary output without separate base-case evidence"
+          },
+          {
+            "code": "formula_graph_endpoint",
+            "weight": 0.03,
+            "detail": "No exact downstream formula reference was indexed"
+          }
+        ],
+        "warnings": [
+          "Candidate is inside a sensitivity worksheet and was down-ranked"
+        ],
+        "rank": 6
+      }
+    ],
+    "answer_contract": "status=selected means one deterministic top-ranked output candidate, not that its cached value or valuation logic was recalculated or verified. For ambiguous, preserve every conflicting candidate and trace them separately. Pass the selected candidate ID, sheet, and cell to pe_valuation_date_resolve; never promote current price, upside, or a sensitivity-grid cell to the primary output."
+  },
+  "traces": [
+    {
+      "dataset_id": "parity-dataset",
+      "doc_id": "7ad214e4d713852a1201a95135e146b2f8df0d49",
+      "root": {
+        "sheet_name": "Valuation",
+        "cell_ref": "B7"
+      },
+      "direction": "upstream",
+      "complete": true,
+      "truncated": false,
+      "node_count": 4,
+      "edge_count": 2,
+      "issues": [],
+      "nodes": [
+        {
+          "cell_id": "e56e0e6de1eb2cc68a2ef57ac4f1a8bd304e7fe3",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJCNyJd",
+          "citation": "excel-parity.xlsx Valuation!B7",
+          "markdown_citation": "[excel-parity.xlsx Valuation!B7](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJCNyJd)",
+          "sheet_name": "Valuation",
+          "cell_ref": "B7",
+          "row_index": 7,
+          "col_index": 2,
+          "is_formula": true,
+          "display_value": "120",
+          "raw_value": "=B5/10",
+          "formula": "=B5/10",
+          "cached_value": "120",
+          "number_format": "\"CNY/share\" 0.00",
+          "row_label": "Target Price",
+          "col_label": "1200",
+          "period": "2026",
+          "formula_type": "standard",
+          "formula_cache_status": "present",
+          "numeric_value": 120,
+          "depth": 0
+        },
+        {
+          "cell_id": "82a9506987cb744b7906ed283c3958962eaf1022",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJCNSJd",
+          "citation": "excel-parity.xlsx Valuation!B5",
+          "markdown_citation": "[excel-parity.xlsx Valuation!B5](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJCNSJd)",
+          "sheet_name": "Valuation",
+          "cell_ref": "B5",
+          "row_index": 5,
+          "col_index": 2,
+          "is_formula": true,
+          "display_value": "1200",
+          "raw_value": "=SUM(B3:B4)",
+          "formula": "=SUM(B3:B4)",
+          "cached_value": "1200",
+          "number_format": "General",
+          "row_label": "Revenue",
+          "col_label": "700",
+          "period": "2026",
+          "formula_type": "standard",
+          "formula_cache_status": "present",
+          "numeric_value": 1200,
+          "depth": 1
+        },
+        {
+          "cell_id": "c03a235caa03eb5344a3c434a876a9b9963122c5",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJCMyJd",
+          "citation": "excel-parity.xlsx Valuation!B3",
+          "markdown_citation": "[excel-parity.xlsx Valuation!B3](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJCMyJd)",
+          "sheet_name": "Valuation",
+          "cell_ref": "B3",
+          "row_index": 3,
+          "col_index": 2,
+          "is_formula": false,
+          "display_value": "500",
+          "raw_value": "500",
+          "number_format": "General",
+          "row_label": "Revenue segment A",
+          "col_label": "2026-08-31T00:00:00",
+          "period": "2026",
+          "formula_cache_status": "not_applicable",
+          "numeric_value": 500,
+          "depth": 2
+        },
+        {
+          "cell_id": "1ad698f56cfbf837ba2207b6e931f3af1152a944",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJCNCJd",
+          "citation": "excel-parity.xlsx Valuation!B4",
+          "markdown_citation": "[excel-parity.xlsx Valuation!B4](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJCNCJd)",
+          "sheet_name": "Valuation",
+          "cell_ref": "B4",
+          "row_index": 4,
+          "col_index": 2,
+          "is_formula": false,
+          "display_value": "700",
+          "raw_value": "700",
+          "number_format": "General",
+          "row_label": "Revenue segment B",
+          "col_label": "500",
+          "period": "2026",
+          "formula_cache_status": "not_applicable",
+          "numeric_value": 700,
+          "depth": 2
+        }
+      ],
+      "edges": [
+        {
+          "source_cell_id": "e56e0e6de1eb2cc68a2ef57ac4f1a8bd304e7fe3",
+          "source_sheet": "Valuation",
+          "source_cell_ref": "B7",
+          "reference_index": 0,
+          "raw_reference": "B5",
+          "reference_kind": "cell",
+          "parse_status": "resolved",
+          "target_cell_ids": [
+            "82a9506987cb744b7906ed283c3958962eaf1022"
+          ],
+          "target_sheet": "Valuation",
+          "target_range": "B5"
+        },
+        {
+          "source_cell_id": "82a9506987cb744b7906ed283c3958962eaf1022",
+          "source_sheet": "Valuation",
+          "source_cell_ref": "B5",
+          "reference_index": 0,
+          "raw_reference": "B3:B4",
+          "reference_kind": "range",
+          "parse_status": "resolved",
+          "target_cell_ids": [
+            "c03a235caa03eb5344a3c434a876a9b9963122c5",
+            "1ad698f56cfbf837ba2207b6e931f3af1152a944"
+          ],
+          "target_sheet": "Valuation",
+          "target_range": "B3:B4"
+        }
+      ],
+      "answer_contract": "Explain only traversed nodes. Treat external, deferred, unresolved, error, depth-limited, and node-limited references as an incomplete chain. A present cached value is not proof of fresh recalculation."
+    }
+  ],
+  "dates": [
+    {
+      "schema_version": "1.0",
+      "dataset_id": "parity-dataset",
+      "resolution_id": "6b577aad7ab3a0117a7974c764c8fd2061ad2b1a",
+      "resolution_version": 1,
+      "supersedes_resolution_id": null,
+      "document": {
+        "doc_id": "7ad214e4d713852a1201a95135e146b2f8df0d49",
+        "filename": "excel-parity.xlsx",
+        "version_no": 1
+      },
+      "status": "verified",
+      "valuation_date": "2026-08-31",
+      "resolution_method": "explicit_label_and_valuation_output_context",
+      "confidence": 0.98,
+      "selected_role": "valuation_date",
+      "selected_candidate_ids": [
+        "ec67c5f3e7bb142f9de10eb509b2a37c9d81dfc2"
+      ],
+      "conflicting_candidate_ids": [],
+      "evidence_ids": [
+        "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJCMSJd"
+      ],
+      "primary_output_node_id": "b88f354dd74f18b48eb79fbc037182401a401dd8",
+      "output_context": {
+        "sheet_name": "Valuation",
+        "cell_ref": "B7",
+        "valuation_output_candidate_id": "b88f354dd74f18b48eb79fbc037182401a401dd8",
+        "valuation_output_status": "confirmed",
+        "valuation_output_role": "target_price",
+        "valuation_output_label": "Target Price",
+        "formula_trace_complete": true,
+        "formula_trace_status": "complete",
+        "formula_trace_issue_codes": []
+      },
+      "related_dates": {
+        "market_price_date": {
+          "status": "identified",
+          "date": "2026-08-30",
+          "confidence": 0.94,
+          "candidate_ids": [
+            "068358e5c37740f0b5791e358a973a49086e3b9f"
+          ],
+          "evidence_ids": [
+            "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEYXRlIGNhc2VzIiwiQjIiXQ"
+          ]
+        },
+        "financial_data_as_of": {
+          "status": "missing",
+          "candidate_ids": [],
+          "evidence_ids": []
+        },
+        "report_publication_date": {
+          "status": "missing",
+          "candidate_ids": [],
+          "evidence_ids": []
+        },
+        "model_updated_at": {
+          "status": "missing",
+          "candidate_ids": [],
+          "evidence_ids": []
+        },
+        "target_horizon_end": {
+          "status": "missing",
+          "candidate_ids": [],
+          "evidence_ids": []
+        }
+      },
+      "warnings": [
+        "1 forecast-period candidate(s) were excluded from valuation-date selection",
+        "1 cell(s) contain multiple date spans and require review",
+        "1 negated date candidate(s) were retained for review but excluded from date selection",
+        "1 unconfirmed date candidate(s) were retained for review but excluded from date selection"
+      ],
+      "candidate_count": 9,
+      "candidates": [
+        {
+          "candidate_id": "ec67c5f3e7bb142f9de10eb509b2a37c9d81dfc2",
+          "schema_version": "1.0",
+          "normalized_date": "2026-08-31",
+          "raw_text": "2026-08-31 00:00:00",
+          "role": "valuation_date",
+          "source_type": "workbook_cell",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJCMSJd",
+          "citation": "excel-parity.xlsx Valuation!B1",
+          "markdown_citation": "[excel-parity.xlsx Valuation!B1](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJWYWx1YXRpb24iLCJCMSJd)",
+          "sheet_name": "Valuation",
+          "cell_ref": "B1",
+          "row_index": 1,
+          "col_index": 2,
+          "nearby_label": "Valuation Date",
+          "label_cell_refs": [
+            "A1"
+          ],
+          "parse_method": "excel_datetime",
+          "date_precision": "day",
+          "is_forecast": false,
+          "priority_score": 0.98,
+          "confidence": 0.98,
+          "role_method": "explicit_label:valuation date",
+          "matched_text": "2026-08-31 00:00:00",
+          "label_context": "",
+          "assertion_status": "affirmed",
+          "date_extraction_rules_version": "3",
+          "on_output_formula_path": false,
+          "near_output": true,
+          "resolution_score": 1.144
+        },
+        {
+          "candidate_id": "068358e5c37740f0b5791e358a973a49086e3b9f",
+          "schema_version": "1.0",
+          "normalized_date": "2026-08-30",
+          "raw_text": "2026-08-30 00:00:00",
+          "role": "market_price_date",
+          "source_type": "workbook_cell",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEYXRlIGNhc2VzIiwiQjIiXQ",
+          "citation": "excel-parity.xlsx Date cases!B2",
+          "markdown_citation": "[excel-parity.xlsx Date cases!B2](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEYXRlIGNhc2VzIiwiQjIiXQ)",
+          "sheet_name": "Date cases",
+          "cell_ref": "B2",
+          "row_index": 2,
+          "col_index": 2,
+          "nearby_label": "Market price date | Not confirmed 2026-09-01",
+          "label_cell_refs": [
+            "A2",
+            "B1"
+          ],
+          "parse_method": "excel_datetime",
+          "date_precision": "day",
+          "is_forecast": false,
+          "priority_score": 0.88,
+          "confidence": 0.94,
+          "role_method": "explicit_label:market price date",
+          "matched_text": "2026-08-30 00:00:00",
+          "label_context": "",
+          "assertion_status": "affirmed",
+          "date_extraction_rules_version": "3",
+          "on_output_formula_path": false,
+          "near_output": false,
+          "resolution_score": 0.88
+        },
+        {
+          "candidate_id": "346f61b1ecd09b5754fd6e1247988d48521a64ec",
+          "schema_version": "1.0",
+          "normalized_date": "2026-09-06",
+          "raw_text": "2026-09-06T19:21:56",
+          "role": "file_modified_at",
+          "source_type": "workbook_property",
+          "citation": "excel-parity.xlsx",
+          "parse_method": "workbook_property",
+          "date_precision": "day",
+          "is_forecast": false,
+          "priority_score": 0.02,
+          "confidence": 0.5,
+          "rejection_reason": "workbook_property_cannot_verify_valuation_date",
+          "role_method": "workbook_property",
+          "assertion_status": "affirmed",
+          "date_extraction_rules_version": "3",
+          "on_output_formula_path": false,
+          "near_output": false,
+          "resolution_score": 0.02
+        },
+        {
+          "candidate_id": "92410424373c2b26b3e4a511c00a4389356688ec",
+          "schema_version": "1.0",
+          "normalized_date": "2026-08-31",
+          "raw_text": "2026-08-31T00:00:00+00:00",
+          "role": "file_modified_at",
+          "source_type": "file_metadata",
+          "citation": "excel-parity.xlsx",
+          "parse_method": "workbook_property",
+          "date_precision": "day",
+          "is_forecast": false,
+          "priority_score": 0.02,
+          "confidence": 0.5,
+          "rejection_reason": "workbook_property_cannot_verify_valuation_date",
+          "role_method": "workbook_property",
+          "assertion_status": "affirmed",
+          "date_extraction_rules_version": "3",
+          "on_output_formula_path": false,
+          "near_output": false,
+          "resolution_score": 0.02
+        },
+        {
+          "candidate_id": "d2f305dd23ab8ab39674aac2738d59ed7575c492",
+          "schema_version": "1.0",
+          "normalized_date": "2026-01-01",
+          "raw_text": "2026-01-01T00:00:00",
+          "role": "file_created_at",
+          "source_type": "workbook_property",
+          "citation": "excel-parity.xlsx",
+          "parse_method": "workbook_property",
+          "date_precision": "day",
+          "is_forecast": false,
+          "priority_score": 0.02,
+          "confidence": 0.5,
+          "rejection_reason": "workbook_property_cannot_verify_valuation_date",
+          "role_method": "workbook_property",
+          "assertion_status": "affirmed",
+          "date_extraction_rules_version": "3",
+          "on_output_formula_path": false,
+          "near_output": false,
+          "resolution_score": 0.02
+        },
+        {
+          "candidate_id": "14212a084d19193cec5b57ffb3d41367b27d1ebe",
+          "schema_version": "1.0",
+          "normalized_date": "2026-09-01",
+          "raw_text": "Not confirmed 2026-09-01",
+          "role": "valuation_date",
+          "source_type": "workbook_cell",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEYXRlIGNhc2VzIiwiQjEiXQ",
+          "citation": "excel-parity.xlsx Date cases!B1",
+          "markdown_citation": "[excel-parity.xlsx Date cases!B1](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEYXRlIGNhc2VzIiwiQjEiXQ)",
+          "sheet_name": "Date cases",
+          "cell_ref": "B1",
+          "row_index": 1,
+          "col_index": 2,
+          "nearby_label": "Valuation date",
+          "label_cell_refs": [
+            "A1"
+          ],
+          "parse_method": "year_first_text",
+          "date_precision": "day",
+          "is_forecast": false,
+          "priority_score": 0,
+          "confidence": 0.5,
+          "rejection_reason": "date_assertion_unconfirmed",
+          "role_method": "explicit_label:valuation date",
+          "matched_text": "2026-09-01",
+          "label_context": "Not confirmed",
+          "assertion_status": "unconfirmed",
+          "date_extraction_rules_version": "3",
+          "on_output_formula_path": false,
+          "near_output": false,
+          "resolution_score": 0
+        },
+        {
+          "candidate_id": "67a5040d55b53ff3e71f2ab1c7ff04946e152468",
+          "schema_version": "1.0",
+          "raw_text": "2030E",
+          "role": "forecast_period",
+          "source_type": "workbook_cell",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEYXRlIGNhc2VzIiwiQjMiXQ",
+          "citation": "excel-parity.xlsx Date cases!B3",
+          "markdown_citation": "[excel-parity.xlsx Date cases!B3](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEYXRlIGNhc2VzIiwiQjMiXQ)",
+          "sheet_name": "Date cases",
+          "cell_ref": "B3",
+          "row_index": 3,
+          "col_index": 2,
+          "nearby_label": "Forecast",
+          "label_cell_refs": [
+            "A3"
+          ],
+          "parse_method": "forecast_period_token",
+          "date_precision": "period",
+          "is_forecast": true,
+          "priority_score": 0,
+          "confidence": 0.99,
+          "rejection_reason": "forecast_period_is_not_valuation_date",
+          "role_method": "forecast_suffix",
+          "assertion_status": "affirmed",
+          "date_extraction_rules_version": "3",
+          "on_output_formula_path": false,
+          "near_output": false,
+          "resolution_score": 0
+        },
+        {
+          "candidate_id": "93d25a50da66a9f47efef3bb96a0f9f223a28e4a",
+          "schema_version": "1.0",
+          "normalized_date": "2026-10-31",
+          "raw_text": "not 2026-10-31",
+          "role": "valuation_date",
+          "source_type": "workbook_cell",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEYXRlIGNhc2VzIiwiQjQiXQ",
+          "citation": "excel-parity.xlsx Date cases!B4",
+          "markdown_citation": "[excel-parity.xlsx Date cases!B4](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEYXRlIGNhc2VzIiwiQjQiXQ)",
+          "sheet_name": "Date cases",
+          "cell_ref": "B4",
+          "row_index": 4,
+          "col_index": 2,
+          "nearby_label": "Valuation date | 2030E",
+          "label_cell_refs": [
+            "A4",
+            "B3"
+          ],
+          "parse_method": "year_first_text",
+          "date_precision": "day",
+          "is_forecast": false,
+          "priority_score": 0,
+          "confidence": 0,
+          "rejection_reason": "date_assertion_negated",
+          "role_method": "explicit_label:valuation date",
+          "matched_text": "2026-10-31",
+          "label_context": "not",
+          "assertion_status": "negated",
+          "date_extraction_rules_version": "3",
+          "on_output_formula_path": false,
+          "near_output": false,
+          "resolution_score": 0
+        },
+        {
+          "candidate_id": "dedd17354f0d5a30b21b880c558c1b1a36d1e1c5",
+          "schema_version": "1.0",
+          "raw_text": "2026-08-01 or 2026-08-02",
+          "role": "unknown",
+          "source_type": "workbook_cell",
+          "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEYXRlIGNhc2VzIiwiQjUiXQ",
+          "citation": "excel-parity.xlsx Date cases!B5",
+          "markdown_citation": "[excel-parity.xlsx Date cases!B5](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJEYXRlIGNhc2VzIiwiQjUiXQ)",
+          "sheet_name": "Date cases",
+          "cell_ref": "B5",
+          "row_index": 5,
+          "col_index": 2,
+          "nearby_label": "Valuation date | not 2026-10-31",
+          "label_cell_refs": [
+            "A5",
+            "B4"
+          ],
+          "parse_method": "multiple_date_text",
+          "date_precision": "day",
+          "is_forecast": false,
+          "priority_score": 0,
+          "confidence": 0,
+          "rejection_reason": "multiple_dates_require_review",
+          "role_method": "unclassified_date",
+          "assertion_status": "affirmed",
+          "date_extraction_rules_version": "3",
+          "on_output_formula_path": false,
+          "near_output": false,
+          "resolution_score": 0
+        }
+      ],
+      "answer_contract": "Only status=verified may be described as a verified valuation date. Negated, unconfirmed, or rejected candidates are review evidence only, never selected dates. Keep market-price date, financial-data cutoff, report date, model-update date, target horizon, forecast periods, and file timestamps separate. If status is ambiguous or missing, disclose candidates and do not choose the latest date."
+    }
+  ],
+  "validation": {
+    "dataset_id": "parity-dataset",
+    "document": {
+      "doc_id": "7ad214e4d713852a1201a95135e146b2f8df0d49",
+      "filename": "excel-parity.xlsx",
+      "version_no": 1
+    },
+    "structural_status": "error",
+    "error_count": 1,
+    "warning_count": 4,
+    "issues": [
+      {
+        "severity": "warning",
+        "code": "formula_cache_missing",
+        "message": "16 formula cache(s) are missing"
+      },
+      {
+        "severity": "warning",
+        "code": "formula_reference_external",
+        "message": "1 formula reference(s) are external"
+      },
+      {
+        "severity": "warning",
+        "code": "formula_reference_unresolved",
+        "message": "1 formula reference(s) are unresolved"
+      },
+      {
+        "severity": "error",
+        "code": "formula_error_cells",
+        "message": "1 indexed cell(s) contain formula error values or broken references"
+      },
+      {
+        "severity": "warning",
+        "code": "metric_facts_review_required",
+        "message": "12 heuristic metric fact(s) require source-cell review"
+      }
+    ],
+    "formula_cache_status_counts": {
+      "missing": 16,
+      "present": 3
+    },
+    "formula_reference_status_counts": {
+      "external": 1,
+      "resolved": 21,
+      "unresolved": 1
+    },
+    "reference_kind_counts": {
+      "cell": 15,
+      "defined_name": 1,
+      "external_cell": 1,
+      "range": 4,
+      "unresolved_name": 1,
+      "whole_range": 1
+    },
+    "metric_quality_status_counts": {
+      "candidate_complete": 1,
+      "review_required": 12
+    },
+    "formula_error_cells": [
+      {
+        "cell_id": "ae7472360e5da5b480db09d32a749ccea7853272",
+        "evidence_id": "source:WyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJGb3JtdWxhIGNhc2VzIiwiSzEiXQ",
+        "citation": "excel-parity.xlsx Formula cases!K1",
+        "markdown_citation": "[excel-parity.xlsx Formula cases!K1](#pe-source?evidence_id=source%3AWyI3YWQyMTRlNGQ3MTM4NTJhMTIwMWE5NTEzNWUxNDZiMmY4ZGYwZDQ5IiwiZXhjZWwiLCJGb3JtdWxhIGNhc2VzIiwiSzEiXQ)",
+        "sheet_name": "Formula cases",
+        "cell_ref": "K1",
+        "row_index": 1,
+        "col_index": 11,
+        "is_formula": false,
+        "display_value": "#REF!",
+        "raw_value": "#REF!",
+        "number_format": "General",
+        "formula_cache_status": "not_applicable"
+      }
+    ],
+    "valuation_output_validation": {
+      "status": "not_run",
+      "tool": "pe_valuation_output_locate",
+      "requires_selected_doc_id": true
+    },
+    "valuation_date_validation": {
+      "status": "not_run",
+      "tool": "pe_valuation_date_resolve",
+      "requires_selected_output_context": true
+    },
+    "calculation_validation": {
+      "status": "not_run",
+      "engine": null,
+      "cached_values_recalculated": false
+    },
+    "answer_contract": "Structural pass does not identify the primary valuation output, verify the valuation date, or mean cached values were recalculated. Run pe_valuation_output_locate, then pe_valuation_date_resolve with its selected output context. Do not describe cached formula values as recalculation-verified while calculation_validation.status is not_run."
+  }
+}

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
+import PDFDocument from "pdfkit";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { preparePeDocument, registerPeDocuments, resolvePeEvidenceSource } from "../src/documents.ts";
 import { parseSourceId, sourceId, sourceUrl } from "../src/source.ts";
@@ -16,10 +17,26 @@ import { createDocumentProject } from "./document-fixture.ts";
 
 const roots: string[] = [];
 const assets = mkdtempSync(join(tmpdir(), "pe-document-assets-"));
-beforeAll(() => {
+beforeAll(async () => {
 	const python =
 		process.env.PE_DOCUMENT_PYTHON || fileURLToPath(new URL("../python/.venv/bin/python", import.meta.url));
 	execFileSync(python, [fileURLToPath(new URL("./fixtures/create_documents.py", import.meta.url)), assets]);
+	const pdf = new PDFDocument({ autoFirstPage: false });
+	const chunks: Buffer[] = [];
+	const finished = new Promise<void>((resolve, reject) => {
+		pdf.on("data", (chunk: Buffer) => chunks.push(chunk));
+		pdf.on("error", reject);
+		pdf.on("end", () => {
+			writeFileSync(join(assets, "report.pdf"), Buffer.concat(chunks));
+			resolve();
+		});
+	});
+	for (const text of ["Revenue: 100 million", "Gross margin: 20%", ""]) {
+		pdf.addPage();
+		if (text) pdf.text(text);
+	}
+	pdf.end();
+	await finished;
 });
 afterAll(() => rmSync(assets, { recursive: true, force: true }));
 afterEach(() => {
@@ -38,20 +55,16 @@ function upload(root: string, filename: string, text?: string): string {
 }
 
 describe("on-demand documents and file citations", () => {
-	it("uploads originals without parsing, indexing, or a background job", () => {
+	it("registers originals before parsing or publishing derived data", () => {
 		const root = project();
 		upload(root, "broken.pdf", "not a PDF");
 		expect(readdirSync(join(root, "raw"))).toEqual(["broken.pdf"]);
-		expect(readdirSync(join(root, "meta"))).toEqual(["collection.sqlite3"]);
 		const database = new DatabaseSync(join(root, "meta/collection.sqlite3"));
 		try {
-			expect(database.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all()).toEqual([
-				{ name: "document_cache" },
-				{ name: "documents" },
-				{ name: "project_metadata" },
-			]);
+			for (const table of ["document_cache", "pdf_pages", "excel_cells", "processing_jobs"])
+				expect(database.prepare(`SELECT * FROM ${table}`).all()).toEqual([]);
 			expect(database.prepare("SELECT status,parser_name FROM documents").get()).toMatchObject({
-				status: "available",
+				status: "queued",
 				parser_name: null,
 			});
 		} finally {
@@ -95,9 +108,21 @@ describe("on-demand documents and file citations", () => {
 		expect(JSON.parse(readFileSync(restored.cachePath, "utf8")).text).toBe("Revenue 100");
 	});
 
-	it("reads PDF pages and exposes warnings for pages without text", async () => {
+	it("reads published Node PDF pages and exposes warnings for pages without text", async () => {
 		const root = project();
 		const docId = upload(root, "report.pdf");
+		await expect(preparePeDocument(root, { docId })).rejects.toMatchObject({ status: 409 });
+		// Parsing is covered by the Web Node pipeline tests; this suite consumes its published contract.
+		const database = new DatabaseSync(join(root, "meta/collection.sqlite3"));
+		const page = database.prepare(
+			"INSERT INTO pdf_pages VALUES (?,?,?,?,'','body','{}','passed','{}',612,792,0,'[]',0,0,0)",
+		);
+		for (const [index, text] of ["Revenue: 100 million", "Gross margin: 20%", ""].entries())
+			page.run(`${docId}-${index + 1}`, docId, index + 1, text);
+		database
+			.prepare("UPDATE documents SET status='completed_with_warnings',page_count=3,warnings_json=? WHERE doc_id=?")
+			.run(JSON.stringify(["Pages without extractable text: [3]"]), docId);
+		database.close();
 		const id = sourceId({ docId, location: { kind: "pdf", pageStart: 2, pageEnd: 2 } });
 		const { payload } = await resolvePeEvidenceSource(root, id);
 		expect(payload).toMatchObject({
@@ -109,7 +134,7 @@ describe("on-demand documents and file citations", () => {
 		expect(payload.warnings).toHaveLength(1);
 		await expect(
 			resolvePeEvidenceSource(root, sourceId({ docId, location: { kind: "pdf", pageStart: 4, pageEnd: 4 } })),
-		).rejects.toThrow("Invalid PDF page range");
+		).rejects.toMatchObject({ status: 404 });
 	});
 
 	it("keeps full workbook values, formulas, date evidence, and native-searchable source links", async () => {
@@ -196,9 +221,18 @@ describe("on-demand documents and file citations", () => {
 			]),
 		).toThrow("filename");
 		expect(readdirSync(join(root, "raw"))).toEqual([]);
-		const docId = upload(root, "bad.xlsx", "not Excel");
-		await expect(preparePeDocument(root, { docId })).rejects.toThrow();
-		expect(existsSync(join(root, "meta/read-cache", `${docId}.json`))).toBe(false);
+		expect(() => upload(root, "bad.xlsx", "not Excel")).toThrow();
+		expect(existsSync(join(root, "raw/bad.xlsx"))).toBe(false);
+		const docId = upload(root, "model.xlsx");
+		const timeout = process.env.PE_EXCEL_TIMEOUT_MS;
+		process.env.PE_EXCEL_TIMEOUT_MS = "1";
+		try {
+			await expect(preparePeDocument(root, { docId })).rejects.toThrow("exceeded");
+		} finally {
+			if (timeout === undefined) delete process.env.PE_EXCEL_TIMEOUT_MS;
+			else process.env.PE_EXCEL_TIMEOUT_MS = timeout;
+		}
+		expect((await preparePeDocument(root, { docId })).document.doc_id).toBe(docId);
 		const controller = new AbortController();
 		controller.abort();
 		await expect(preparePeDocument(root, { docId }, controller.signal)).rejects.toThrow();

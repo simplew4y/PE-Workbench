@@ -42,7 +42,22 @@ describe("PE Research Note tool", () => {
 		expect(peResearchNoteSaveTool.name).toBe("pe_research_note_save");
 		expect(buildPeSystemPrompt("/workspace")).not.toContain("- pe_research_note_save:");
 
+		for (const name of ["pe_pdf_search", "pe_pdf_read", "pe_workbook_inspect", "pe_excel_range", "pe_source_detail"])
+			expect(buildPeSystemPrompt("/workspace")).toContain(`- ${name}:`);
+
 		const packageDirectory = dirname(dirname(fileURLToPath(import.meta.url)));
+		const skill = readFileSync(join(packageDirectory, "skills", "pe-research-note", "SKILL.md"), "utf8");
+		for (const keyword of [
+			"pe_pdf_search",
+			"pe_pdf_read",
+			"pe_workbook_inspect",
+			"pe_excel_range",
+			"`page:`",
+			"`source:`",
+			"`cell:`",
+			"`fact:`",
+		])
+			expect(skill).toContain(keyword);
 		const result = loadSkillsFromDir({ dir: join(packageDirectory, "skills"), source: "test" });
 		expect(result.diagnostics).toEqual([]);
 		expect(result.skills.map((skill) => skill.name)).toEqual([

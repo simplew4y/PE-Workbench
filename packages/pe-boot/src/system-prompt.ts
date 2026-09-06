@@ -1,4 +1,5 @@
 import { PE_PRESENTATION_SELECTION } from "./presentation-policy.ts";
+import { PE_TOOL_PROMPT_SNIPPETS } from "./tools/index.ts";
 
 //【提示词】角色提示词
 const PE_ROLE =
@@ -58,6 +59,22 @@ Choose presentation.treatment (minimal/divider/soft/card/paper/glass/outline/spo
 
 For longer answers, lead with the answer and explain it naturally. Insert a visual only at the point where prose becomes harder to understand. Do not force a fixed sequence of sections or a closing next step.`;
 
+// 保持 pi-agent 原内置四个工具的系统提示词
+const PE_BASE_TOOLS = [
+	{ name: "read", description: "Read file contents" },
+	{ name: "bash", description: "Execute bash commands (ls, grep, find, etc.)" },
+	{
+		name: "edit",
+		description: "Make precise file edits with exact text replacement, including multiple disjoint edits in one call",
+	},
+	{ name: "write", description: "Create or overwrite files" },
+] as const;
+
+//【提示词】工具列表,PE_BASE_TOOLS + PE_TOOL_PROMPT_SNIPPETS
+export const toolsList = [...PE_BASE_TOOLS, ...PE_TOOL_PROMPT_SNIPPETS]
+	.map(({ name, description }) => `- ${name}: ${description}`)
+	.join("\n");
+
 export function buildPeSystemPrompt(cwd: string): string {
 	const promptCwd = cwd.replaceAll("\\", "/");
 	//【提示词】工作目录与目录架构规范（源码中有promptCwd）
@@ -75,9 +92,14 @@ ${PE_WORKSPACE}
 Presentation rules:
 ${PE_PRESENTATION}
 
-Use the available native file tools (read, grep, find, ls, or bash with rg) to discover and read files. Do not invent a parallel project search system.
-Uploads register originals without parsing. Select a document in raw/, call pe_document_open once, then use native read/grep on its readable_path. Office/PDF/Excel conversion is cached only for the selected document. Never modify originals or the managed file catalog/cache.
-Source links bind a document version to its page, cells, text lines, or original Office block; they do not depend on search chunks. Copy the exact citation from tool output. pe_source_detail resolves the same location used by the right-hand source preview.
+Available tools:
+${toolsList}
+
+PDF uploads are processed by the background PDF pipeline. Use pe_pdf_search to find evidence pages and pe_pdf_read to inspect exact pages; use native read on returned page-image paths when visual inspection is needed. Preserve their page: citations.
+Excel uploads register immutable original versions and are prepared by the background Excel pipeline. Use pe_workbook_inspect to select one active workbook. Excel tools wait for preparation or rebuild a missing cache. Call pe_document_open for its readable_path and use native read/grep (or bash with rg) for fallback inspection. Never modify originals or the managed file catalog/cache.
+Excel source: links bind a document version to its worksheet and cell range independently of parser caches. Legacy cell: links remain resolvable; legacy fact: links retain their original document version. Copy exact citations from tool output. pe_source_detail resolves the same location used by the right-hand source preview; historical citations must never silently resolve to the latest version.
+
+For supported Word, PowerPoint, and text documents, use native file discovery and pe_document_open on the selected document, then read/grep its readable_path. Their source: links retain the exact text lines or original Office block. PDF preparation reads the existing PDF pipeline index; do not run a second PDF parser.
 
 For PE evidence, place the exact markdown_citation after each material claim; never expose a bare evidence_id. Preserve the internal #pe-source?evidence_id= fragment exactly. It is an application action, not a website URL. Never expand it into https://pe-workbench.local, another host, a file link, or a source_collection URL. Green citation controls and their original-document preview must remain available in every presentation style.
 For valuation-model analysis, call pe_valuation_output_locate before choosing an output cell. A selected result is a ranked candidate, not recalculation proof; preserve ambiguous candidates instead of choosing the first label match.

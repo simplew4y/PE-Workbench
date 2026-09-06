@@ -3,18 +3,13 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { initializePeCollectionDatabase } from "../src/collection-schema.ts";
 import { DOCUMENT_SCHEMA } from "../src/tools/database.ts";
 
 export function createDocumentProject(datasetId = "dataset-1"): string {
 	const root = mkdtempSync(join(tmpdir(), "pe-document-"));
 	for (const directory of ["raw", "meta"]) mkdirSync(join(root, directory));
-	const database = new DatabaseSync(join(root, "meta/collection.sqlite3"));
-	try {
-		database.exec("CREATE TABLE project_metadata (id INTEGER PRIMARY KEY, dataset_id TEXT NOT NULL)");
-		database.prepare("INSERT INTO project_metadata VALUES (1, ?)").run(datasetId);
-	} finally {
-		database.close();
-	}
+	initializePeCollectionDatabase(join(root, "meta/collection.sqlite3"), { datasetId, name: "Document fixture" });
 	return root;
 }
 
@@ -40,6 +35,7 @@ export function createTextDocumentProject(filename: string, datasetId = "dataset
 				new Date().toISOString(),
 				new Date().toISOString(),
 			);
+		database.exec("UPDATE documents SET raw_path=stored_path,sha256=checksum");
 	} finally {
 		database.close();
 	}

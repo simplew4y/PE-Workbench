@@ -6,17 +6,10 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 
 import openpyxl
-import pymupdf
 from openpyxl.workbook.defined_name import DefinedName
 
 target = Path(sys.argv[1])
 target.mkdir(parents=True, exist_ok=True)
-with pymupdf.open() as pdf:
-    for text in ['Revenue: 100 million', 'Gross margin: 20%', '']:
-        page = pdf.new_page()
-        page.insert_text((72, 72), text)
-    pdf.save(target / 'report.pdf')
-
 workbook = openpyxl.Workbook()
 sheet = workbook.active
 sheet.title = 'Valuation'

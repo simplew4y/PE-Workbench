@@ -43,8 +43,8 @@ generated/memo/
 ## Create workflow
 
 1. Identify one stable canonical topic, a client-facing title, the requested scope, and the questions the Memo must answer.
-2. Discover sources with native `ls`/`find`, open selected files with `pe_document_open`, then use native `read`/`grep` on the returned text view. Use `pe_excel_range` for exact financial cells.
-3. Use `pe_source_detail` on decisive, numerical, conflicting, or source-sensitive evidence before treating it as verified.
+2. For PDF evidence, use `pe_pdf_search` with literal Chinese, English, abbreviation, or synonym variants when terminology is uncertain. For Excel, select one active workbook with `pe_workbook_inspect` and use `pe_excel_range` for exact financial cells. Use `pe_document_open` and native `read`/`grep` for the selected workbook text view or supported Office/text documents.
+3. Verify decisive, numerical, conflicting, table, metric, and chart evidence before using it. Use `pe_pdf_read` for PDF pages, including neighboring pages when a statement crosses a boundary; use `pe_source_detail` for exact Excel ranges or Office/text locations. Follow the valuation-model-explainer Skill for valuation outputs, dates, formula traces, and model validation.
 4. Separate sourced facts, interpretations, counterevidence, risks, and open questions. Preserve exact dates, periods, currencies, units, and scenarios.
 5. Build `memo_claims` as the complete desired Memo. Each item is one claim with a section, plain text, status, and exact evidence IDs. Do not put citation syntax in `text`.
 6. Call `pe_dataset_memo` with `operation=create`.
@@ -66,11 +66,11 @@ You decide from the user's meaning whether the request is a revision. Updating, 
 
 ## Citation Gate
 
-- `supported`: use only exact `source:` IDs returned by PE retrieval tools. Every material fact, date, amount, ratio, valuation input, forecast, and management statement needs evidence.
+- `supported`: use only exact `page:` or `source:` IDs returned by PE retrieval tools; previously returned `cell:` and `fact:` IDs remain valid when resolved by the service. Every material fact, date, amount, ratio, valuation input, forecast, and management statement needs evidence.
 - `not_covered`: use when the current project materials do not cover the claim. Pass no evidence IDs.
 - `needs_review`: use for an interpretation or unresolved point that must not be presented as verified.
 - The service validates every ID and owns citation rendering. Missing or invalid evidence on a `supported` claim is downgraded to `needs_review`; never invent or repair an ID yourself.
-- Evidence IDs are internal validation keys only. Never place `source:...` in `text`, section titles, or other client-facing prose.
+- Evidence IDs are internal validation keys only. Never place raw `page:`, `source:`, `cell:`, or `fact:` IDs in `text`, section titles, or other client-facing prose.
 - User-visible Memo artifacts must show a human-readable source location and the corresponding claim `text`, never the internal evidence ID. Keep IDs only in `evidence_ids` so the service can validate provenance and retain it in Citation Gate metadata.
 - Keep generation instructions, conversation context, key questions, version-control details, database paths, and filesystem paths out of client-facing Memo sections.
 

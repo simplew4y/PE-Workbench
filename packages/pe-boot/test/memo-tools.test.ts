@@ -1,15 +1,17 @@
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { loadSkillsFromDir } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
 import { registerPeDocuments } from "../src/documents.ts";
+import { resolvePeEvidenceSource } from "../src/evidence.ts";
 import { sourceId } from "../src/source.ts";
 import { buildPeSystemPrompt } from "../src/system-prompt.ts";
 import { peDatasetMemoTool } from "../src/tools/dataset-memo.ts";
 import { peHistoryCompareTool } from "../src/tools/history-compare.ts";
 import { comparePeMemoVersions, getPeMemoVersion, listPeMemoHistory, savePeMemo } from "../src/tools/memo-storage.ts";
+import { savePeResearchNote } from "../src/tools/research-note-storage.ts";
 import { createTextDocumentProject } from "./document-fixture.ts";
 
 const temporaryDirectories: string[] = [];
@@ -32,6 +34,68 @@ afterEach(() => {
 });
 
 describe("PE Memo tools", () => {
+	it("rejects cached PDF page evidence after the managed original changes", async () => {
+		const root = createMemoFixture();
+		const database = new DatabaseSync(join(root, "meta", "collection.sqlite3"));
+		database.exec(`
+			UPDATE documents SET file_type='pdf' WHERE doc_id='doc-1';
+			INSERT INTO pdf_pages VALUES ('page-1', 'doc-1', 1, '收入增长20%。', 'p.1', 'body', '{}', 'passed', '{}', 595, 842, 0, '[]', 0, 0, 0);
+		`);
+		database.close();
+		const evidenceId = "page:page-1";
+		const valid = await savePeMemo(root, {
+			operation: "create",
+			topic: "已核验PDF",
+			claims: [supported("结论", "收入增长20%。", evidenceId)],
+		});
+		expect(valid.citation_gate).toMatchObject({ passed: true, valid_evidence_ids: [evidenceId] });
+		expect(getPeMemoVersion(root, valid.memo_version_id).document_versions).toEqual([
+			expect.objectContaining({ doc_id: "doc-1", version_no: 1 }),
+		]);
+		const rebuilding = new DatabaseSync(join(root, "meta", "collection.sqlite3"));
+		rebuilding.exec("UPDATE documents SET status='queued'; DELETE FROM pdf_pages;");
+		rebuilding.close();
+		await expect(resolvePeEvidenceSource(root, evidenceId)).rejects.toMatchObject({ status: 404 });
+		const locationId = sourceId({ docId: "doc-1", location: { kind: "pdf", pageStart: 1, pageEnd: 1 } });
+		await expect(resolvePeEvidenceSource(root, locationId)).rejects.toMatchObject({ status: 409 });
+		const restored = new DatabaseSync(join(root, "meta", "collection.sqlite3"));
+		const columns = new Set(
+			restored
+				.prepare("PRAGMA table_info(documents)")
+				.all()
+				.map((column) => column.name),
+		);
+		if (!columns.has("registration_kind")) restored.exec("ALTER TABLE documents ADD COLUMN registration_kind TEXT");
+		if (!columns.has("page_count")) restored.exec("ALTER TABLE documents ADD COLUMN page_count INTEGER");
+		restored.exec("UPDATE documents SET registration_kind='catalog', status='failed', page_count=1;");
+		await expect(resolvePeEvidenceSource(root, locationId)).rejects.toMatchObject({ status: 409 });
+		await expect(
+			resolvePeEvidenceSource(
+				root,
+				sourceId({ docId: "doc-1", location: { kind: "pdf", pageStart: 2, pageEnd: 2 } }),
+			),
+		).rejects.toMatchObject({ status: 404 });
+		restored.exec(
+			"UPDATE documents SET status='completed'; INSERT INTO pdf_pages VALUES ('page-1', 'doc-1', 1, '收入增长20%。', 'p.1', 'body', '{}', 'passed', '{}', 595, 842, 0, '[]', 0, 0, 0);",
+		);
+		restored.close();
+		writeFileSync(join(root, "raw", "访谈.txt"), "原件已被改变");
+		const invalid = await savePeMemo(root, {
+			operation: "create",
+			topic: "失效PDF",
+			claims: [supported("结论", "收入增长20%。", evidenceId)],
+		});
+		expect(invalid.citation_gate).toMatchObject({ passed: false, invalid_evidence_ids: [evidenceId] });
+		const note = await savePeResearchNote(root, {
+			title: "失效PDF",
+			summary: "引用核验",
+			presentationMode: "text",
+			contentHtml: "<html><body>收入增长20%。</body></html>",
+			evidenceIds: [evidenceId],
+		});
+		expect(note.unresolved_evidence_ids).toEqual([evidenceId]);
+	});
+
 	it("records the referenced original version after a newer upload", async () => {
 		const root = createMemoFixture();
 		registerPeDocuments(root, "dataset-1", [{ name: "访谈.txt", bytes: Buffer.from("新版本收入增长30%。") }]);
@@ -54,7 +118,22 @@ describe("PE Memo tools", () => {
 		expect(prompt).toContain("pe_document_open");
 		expect(prompt).toContain("pe_source_detail");
 
+		for (const name of ["pe_pdf_search", "pe_pdf_read", "pe_workbook_inspect", "pe_excel_range", "pe_source_detail"])
+			expect(buildPeSystemPrompt("/workspace")).toContain(`- ${name}:`);
+
 		const packageDirectory = dirname(dirname(fileURLToPath(import.meta.url)));
+		const skill = readFileSync(join(packageDirectory, "skills", "pe-memo", "SKILL.md"), "utf8");
+		for (const keyword of [
+			"pe_pdf_search",
+			"pe_pdf_read",
+			"pe_workbook_inspect",
+			"pe_excel_range",
+			"`page:`",
+			"`source:`",
+			"`cell:`",
+			"`fact:`",
+		])
+			expect(skill).toContain(keyword);
 		const result = loadSkillsFromDir({ dir: join(packageDirectory, "skills"), source: "test" });
 		expect(result.diagnostics).toEqual([]);
 		expect(result.skills).toEqual([

@@ -24,7 +24,8 @@ export const peResearchNoteSaveTool = defineTool({
 			maxLength: 50_000,
 		}),
 		evidence_ids: Type.Array(Type.String({ minLength: 1, maxLength: 2048 }), {
-			description: "Exact source: IDs used by the note. May be empty.",
+			description:
+				"Exact page: PDF or source: document-location evidence IDs used by the note. Legacy cell: and fact: IDs are accepted. May be empty.",
 			maxItems: 100,
 		}),
 		dataset_id: Type.Optional(

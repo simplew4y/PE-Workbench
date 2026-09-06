@@ -8,9 +8,9 @@ export const peDocumentOpenTool = defineTool({
 	name: "pe_document_open",
 	label: "PE Document Open",
 	description:
-		"Open one uploaded file by filename or immutable doc_id. Creates a disposable text view with source citations on first read. Use native read/grep on readable_path; this tool does not search or summarize the project.",
+		"Open one uploaded Excel, text, CSV, DOCX, or PPTX file by filename or immutable doc_id. Reuses Excel upload processing or prepares a disposable text view with versioned source citations. Rebuilds missing caches. Use native read/grep on readable_path. Use pe_pdf_search and pe_pdf_read for PDFs.",
 	promptSnippet:
-		"Prepare one selected document for native read/grep, with citations pinned to its original version and location",
+		"Prepare one selected workbook or text/Office document for native read/grep, with citations pinned to its original version and location",
 	parameters: Type.Object({
 		path: Type.Optional(
 			Type.String({ description: "Uploaded filename or path under raw/. Select with native ls/find first." }),

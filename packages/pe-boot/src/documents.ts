@@ -1,50 +1,21 @@
-import { spawn } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { basename, extname, isAbsolute, join, relative, resolve } from "node:path";
+import { initializePeCollectionDatabase, openPeCollectionDatabase } from "./collection-schema.ts";
+import { type PreparedWorkbook, prepareWorkbook, validatePeExcelUpload, verifyPeOriginal } from "./excel-processing.ts";
+import { DOCUMENT_EXTENSIONS } from "./source.ts";
 import {
-	createReadStream,
-	existsSync,
-	mkdirSync,
-	readFileSync,
-	realpathSync,
-	renameSync,
-	rmSync,
-	writeFileSync,
-} from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import { type PeSourcePayload, type PeSourceReference, parseExcelCellRange, parseSourceId } from "./source.ts";
-import {
-	DOCUMENT_SCHEMA,
 	documentFilePath,
-	numberValue,
 	openPeDataset,
 	openWritablePeDataset,
 	type SqlRow,
-	sourceCitation,
 	sourceEvidenceId,
-	sourceFilename,
 	sourceMarkdownCitation,
 	textValue,
 } from "./tools/database.ts";
-import { readExcelCellsByBounds } from "./tools/excel-cells.ts";
 
-export { DOCUMENT_EXTENSIONS, registerPeDocuments } from "./tools/database.ts";
-
-interface DocumentBlock {
-	text: string;
-	page_start?: number;
-	page_end?: number;
-	block_index?: number;
-	heading_path?: string;
-}
-
-interface DocumentCache {
-	doc_id: string;
-	revision: string;
-	blocks: DocumentBlock[];
-	text?: string;
-	warnings: string[];
-}
+export { resolvePeEvidenceSource, resolvePeEvidenceSources, sourceLocationRow } from "./evidence.ts";
+export { DOCUMENT_EXTENSIONS } from "./source.ts";
 
 export interface PeDocumentOptions {
 	docId?: string;
@@ -71,122 +42,133 @@ export class PeSourceError extends Error {
 	}
 }
 
-const readerRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../python");
-const preparations = new Map<string, Promise<PreparedPeDocument>>();
-
-function cacheDirectory(workspaceRoot: string): string {
-	const directory = join(workspaceRoot, "meta", "read-cache");
-	mkdirSync(directory, { recursive: true });
-	if (realpathSync(directory) !== directory) throw new PeSourceError(400, "Document cache must not be a symlink");
-	return directory;
-}
-
-function readCache(path: string): DocumentCache {
-	const value: unknown = JSON.parse(readFileSync(path, "utf8"));
-	if (!value || typeof value !== "object") throw new Error("Invalid document cache");
-	const cache = value as DocumentCache;
-	if (
-		typeof cache.doc_id !== "string" ||
-		typeof cache.revision !== "string" ||
-		!Array.isArray(cache.blocks) ||
-		!Array.isArray(cache.warnings)
-	)
-		throw new Error("Invalid document cache");
-	if (
-		!cache.blocks.every((block) => block && typeof block.text === "string") ||
-		!cache.warnings.every((warning) => typeof warning === "string") ||
-		(cache.text !== undefined && typeof cache.text !== "string")
-	)
-		throw new Error("Invalid document cache contents");
-	return cache;
-}
-
-function writeAtomic(path: string, text: string): void {
-	const temporary = join(dirname(path), `.${randomUUID()}.tmp`);
-	try {
-		writeFileSync(temporary, text, { flag: "wx", mode: 0o600 });
-		renameSync(temporary, path);
-	} finally {
-		rmSync(temporary, { force: true });
+function projectRoot(cwd: string): string {
+	const root = realpathSync(cwd);
+	for (const name of ["raw", "meta"]) {
+		const entry = lstatSync(join(root, name));
+		if (!entry.isDirectory() || entry.isSymbolicLink())
+			throw new PeSourceError(400, `${name}/ must be a real project directory`);
 	}
+	const database = join(root, "meta", "collection.sqlite3");
+	if (existsSync(database) && lstatSync(database).isSymbolicLink())
+		throw new PeSourceError(400, "Project database must not be a symlink");
+	return root;
 }
 
-async function verifyOriginal(path: string, checksum: string, signal?: AbortSignal): Promise<void> {
-	const hash = createHash("sha256");
-	for await (const bytes of createReadStream(path, { signal })) hash.update(bytes);
-	if (hash.digest("hex") !== checksum)
-		throw new PeSourceError(409, "Original file changed; upload it as a new version before citing it");
-}
-
-function runReader(workspaceRoot: string, docId: string, revision: string, signal?: AbortSignal): Promise<void> {
-	const localPython = join(readerRoot, ".venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python");
-	const python = process.env.PE_DOCUMENT_PYTHON?.trim() || (existsSync(localPython) ? localPython : "python3");
-	return new Promise((resolveReader, reject) => {
-		const child = spawn(
-			python,
-			[join(readerRoot, "read_document.py"), "--project", workspaceRoot, "--doc-id", docId, "--revision", revision],
-			{ signal, stdio: ["ignore", "ignore", "pipe"] },
-		);
-		let error = "";
-		child.stderr.on("data", (chunk: Buffer) => {
-			error = (error + chunk.toString()).slice(-8_000);
-		});
-		child.once("error", reject);
-		child.once("close", (code) => {
-			if (code === 0) resolveReader();
-			else reject(new Error(error.trim() || `Document reader exited with code ${code}`));
-		});
-	});
-}
-
-function writeReadableView(prepared: PreparedPeDocument, cache: DocumentCache): void {
-	const document = prepared.document;
-	const docId = textValue(document, "doc_id") ?? "";
-	const lines = [
-		`# ${sourceFilename(document)} (version ${numberValue(document, "version_no")})`,
-		...cache.warnings.map((warning) => `Warning: ${warning}`),
-	];
-	const fileType = textValue(document, "file_type");
-	if (fileType === "xlsx" || fileType === "xlsm") {
-		const connection = openPeDataset(prepared.workspaceRoot, prepared.datasetId);
+/** Register immutable Excel originals. The upload worker prepares their derived data separately. */
+export function registerPeDocuments(
+	cwd: string,
+	datasetId: string,
+	files: Array<{ name: string; bytes: Uint8Array }>,
+): { documents: SqlRow[]; fileCount: number } {
+	const root = projectRoot(cwd);
+	const inputs = files.map(({ name, bytes }) => {
+		const extension = extname(name).toLowerCase();
+		if (basename(name) !== name || /[\\/\x00-\x1f]/u.test(name) || !DOCUMENT_EXTENSIONS.has(extension))
+			throw new PeSourceError(400, `Unsupported document filename: ${name}`);
 		try {
-			const sheets = connection.database
-				.prepare("SELECT sheet_name,used_range,sheet_state FROM excel_sheets WHERE doc_id=? ORDER BY sheet_index")
-				.all(docId) as SqlRow[];
-			for (const sheet of sheets)
-				lines.push(
-					`Sheet: ${textValue(sheet, "sheet_name")} | ${textValue(sheet, "used_range") ?? "empty"} | ${textValue(sheet, "sheet_state")}`,
-				);
-			const cells = connection.database
-				.prepare("SELECT * FROM excel_cells WHERE doc_id=? ORDER BY sheet_name,row_index,col_index")
-				.iterate(docId);
-			for (const cell of cells) {
-				const row: SqlRow = { ...document, ...cell };
-				const id = sourceEvidenceId(row);
-				lines.push(
-					`${sourceCitation(row)} | value=${JSON.stringify(textValue(row, "raw_value") ?? "")} | cached=${JSON.stringify(textValue(row, "cached_value") ?? "")} | formula=${JSON.stringify(textValue(row, "formula") ?? "")} | ${sourceMarkdownCitation(row, id)}`,
-				);
-			}
-		} finally {
-			connection.database.close();
+			if (extension === ".xlsx" || extension === ".xlsm") validatePeExcelUpload(bytes, extension.slice(1));
+		} catch (error) {
+			throw new PeSourceError(400, error instanceof Error ? error.message : String(error));
 		}
-	} else if (cache.text !== undefined) {
-		for (const [index, line] of cache.text.split("\n").entries()) {
-			const row = { ...document, line_start: index + 1, line_end: index + 1 };
-			lines.push(`${line} ${sourceMarkdownCitation(row, sourceEvidenceId(row))}`);
-		}
-	} else {
-		for (const block of cache.blocks) {
-			const row: SqlRow = { ...document, ...block };
-			const citation = sourceMarkdownCitation(row, sourceEvidenceId(row));
-			lines.push(`\n${block.heading_path ?? ""} ${citation}`);
-			// Each matching line carries a source marker when grep omits surrounding lines.
-			for (const line of block.text.split("\n")) lines.push(`${line} ${citation}`);
-		}
+		return { name, bytes, extension, checksum: createHash("sha256").update(bytes).digest("hex") };
+	});
+	initializePeCollectionDatabase(join(root, "meta", "collection.sqlite3"));
+	const metadata = openPeCollectionDatabase(join(root, "meta", "collection.sqlite3"));
+	try {
+		const now = new Date().toISOString();
+		metadata
+			.prepare("INSERT OR IGNORE INTO project_metadata(id,dataset_id,name,created_at,updated_at) VALUES (1,?,?,?,?)")
+			.run(datasetId, basename(root), now, now);
+	} finally {
+		metadata.close();
 	}
-	writeAtomic(prepared.readablePath, `${lines.join("\n")}\n`);
+	const connection = openWritablePeDataset(root, datasetId);
+	const database = connection.database;
+	const created: string[] = [];
+	try {
+		database.exec("BEGIN IMMEDIATE");
+		const documents: SqlRow[] = [];
+		for (const { name, bytes, extension, checksum } of inputs) {
+			const generatedLogicalId = createHash("sha256").update(`${datasetId}\0${name}`).digest("hex").slice(0, 40);
+			const current = database
+				.prepare(`SELECT * FROM documents WHERE dataset_id=?
+				AND (logical_doc_id=? OR source_relpath=? OR source_relpath=?) AND is_current=1 AND lifecycle_state='active' AND deleted_at IS NULL ORDER BY version_no DESC LIMIT 1`)
+				.get(datasetId, generatedLogicalId, name, `raw/${name}`) as SqlRow | undefined;
+			const logicalId = textValue(current ?? {}, "logical_doc_id") ?? generatedLogicalId;
+			if (current && textValue(current, "checksum") === checksum) {
+				if (
+					createHash("sha256")
+						.update(readFileSync(documentFilePath(root, current)))
+						.digest("hex") !== checksum
+				)
+					throw new PeSourceError(
+						409,
+						"Stored original was modified; restore it before uploading this version again",
+					);
+				documents.push(current);
+				continue;
+			}
+			const sequence = database
+				.prepare(
+					"SELECT COALESCE(MAX(version_no),0)+1 AS version FROM documents WHERE dataset_id=? AND logical_doc_id=?",
+				)
+				.get(datasetId, logicalId) as SqlRow;
+			const version = Number(sequence.version);
+			const docId = createHash("sha256").update(`${logicalId}\0${version}\0${checksum}`).digest("hex").slice(0, 40);
+			const storedName = existsSync(join(root, "raw", name))
+				? `${name.slice(0, -extension.length)}--${docId}${extension}`
+				: name;
+			const target = join(root, "raw", storedName);
+			writeFileSync(target, bytes, { flag: "wx", mode: 0o600 });
+			created.push(target);
+			const now = new Date().toISOString();
+			database
+				.prepare("UPDATE documents SET is_current=0 WHERE dataset_id=? AND logical_doc_id=?")
+				.run(datasetId, logicalId);
+			database
+				.prepare(`INSERT INTO documents
+				(doc_id,dataset_id,logical_doc_id,version_no,supersedes_doc_id,is_current,title,original_filename,filename_key,
+				source_relpath,stored_path,raw_path,file_type,checksum,sha256,file_size,status,page_count,created_at,updated_at,registration_kind)
+				VALUES (?,?,?,?,?,1,?,?,?,?,?,?,?,?,?,?,'queued',0,?,?,'catalog')`)
+				.run(
+					docId,
+					datasetId,
+					logicalId,
+					version,
+					current?.doc_id ?? null,
+					name,
+					name,
+					name.normalize("NFKC").toLocaleLowerCase("und"),
+					name,
+					`raw/${storedName}`,
+					`raw/${storedName}`,
+					extension.slice(1),
+					checksum,
+					checksum,
+					bytes.byteLength,
+					now,
+					now,
+				);
+			documents.push(database.prepare("SELECT * FROM documents WHERE doc_id=?").get(docId) as SqlRow);
+		}
+		const count = database
+			.prepare(
+				"SELECT COUNT(*) AS count FROM documents WHERE dataset_id=? AND is_current=1 AND lifecycle_state='active' AND deleted_at IS NULL",
+			)
+			.get(datasetId) as SqlRow;
+		database.exec("COMMIT");
+		return { documents, fileCount: Number(count.count) };
+	} catch (error) {
+		database.exec("ROLLBACK");
+		for (const path of created) rmSync(path, { force: true });
+		throw error;
+	} finally {
+		database.close();
+	}
 }
 
+/** Shared readiness barrier for upload workers, Excel tools, and historical source previews. */
 export async function preparePeDocument(
 	cwd: string,
 	options: PeDocumentOptions,
@@ -195,247 +177,125 @@ export async function preparePeDocument(
 	signal?.throwIfAborted();
 	if (!options.docId?.trim() && !options.path?.trim())
 		throw new PeSourceError(400, "Specify a document filename or doc_id");
-	const connection = openWritablePeDataset(cwd, options.datasetId);
-	let selected: SqlRow | undefined;
+	const root = projectRoot(cwd);
+	initializePeCollectionDatabase(join(root, "meta", "collection.sqlite3"));
+	const connection = openPeDataset(root, options.datasetId);
+	let document: SqlRow | undefined;
 	try {
-		connection.database.exec(DOCUMENT_SCHEMA);
 		if (options.docId)
-			selected = connection.database
+			document = connection.database
 				.prepare("SELECT * FROM documents WHERE dataset_id=? AND doc_id=? AND deleted_at IS NULL")
 				.get(connection.datasetId, options.docId) as SqlRow | undefined;
 		else {
 			const requested = options.path?.trim() ?? "";
-			const path = isAbsolute(requested) ? relative(connection.workspaceRoot, resolve(requested)) : requested;
-			if (path.startsWith("..") || isAbsolute(path))
+			const local = isAbsolute(requested) ? relative(root, resolve(requested)) : requested;
+			if (local.startsWith("..") || isAbsolute(local))
 				throw new PeSourceError(400, "Document path is outside the project");
-			const name = path.replaceAll("\\", "/").replace(/^raw\//u, "");
-			selected = connection.database
-				.prepare(
-					"SELECT * FROM documents WHERE dataset_id=? AND is_current=1 AND deleted_at IS NULL AND (source_relpath=? OR source_relpath=? OR stored_path=? OR stored_path=?) ORDER BY version_no DESC LIMIT 1",
-				)
-				.get(
-					connection.datasetId,
-					name,
-					`raw/${name}`,
-					`raw/${name}`,
-					resolve(connection.workspaceRoot, "raw", name),
-				) as SqlRow | undefined;
+			const name = local.replaceAll("\\", "/").replace(/^raw\//u, "");
+			document = connection.database
+				.prepare(`SELECT * FROM documents WHERE dataset_id=? AND is_current=1 AND lifecycle_state='active' AND deleted_at IS NULL
+				AND (source_relpath=? OR source_relpath=? OR stored_path=? OR stored_path=?) ORDER BY version_no DESC LIMIT 1`)
+				.get(connection.datasetId, name, `raw/${name}`, `raw/${name}`, resolve(root, "raw", name)) as
+				| SqlRow
+				| undefined;
 		}
 	} finally {
 		connection.database.close();
 	}
-	const document = selected;
 	if (!document) throw new PeSourceError(404, "Document not found in this project's upload catalog");
-	const docId = textValue(document, "doc_id") ?? "";
-	const filePath = documentFilePath(connection.workspaceRoot, document);
-	await verifyOriginal(filePath, textValue(document, "checksum") ?? "", signal);
-	const key = `${connection.workspaceRoot}\0${docId}`;
-	const existing = preparations.get(key);
-	if (existing) return existing;
-	const prepare = async (): Promise<PreparedPeDocument> => {
-		const directory = cacheDirectory(connection.workspaceRoot);
-		const revision = createHash("sha256");
-		for (const file of [
-			"read_document.py",
-			"workbook.py",
-			"office.py",
-			"excel_formula_parser.py",
-			"excel_date_candidates.py",
-			"requirements.txt",
-		])
-			revision.update(readFileSync(join(readerRoot, file)));
-		const revisionId = revision.digest("hex");
-		const prepared: PreparedPeDocument = {
-			document,
-			datasetId: connection.datasetId,
-			workspaceRoot: connection.workspaceRoot,
-			filePath,
-			readablePath: join(directory, `${docId}.txt`),
-			cachePath: join(directory, `${docId}.json`),
-			warnings: [],
-		};
-		let cache: DocumentCache | undefined;
-		if (existsSync(prepared.cachePath)) {
-			try {
-				cache = readCache(prepared.cachePath);
-			} catch {
-				/* Rebuild a damaged disposable cache. */
-			}
-		}
-		const inspection = openPeDataset(connection.workspaceRoot, connection.datasetId);
-		let storedRevision: string | undefined;
-		try {
-			storedRevision = textValue(
-				(inspection.database.prepare("SELECT revision FROM document_cache WHERE doc_id=?").get(docId) as
-					| SqlRow
-					| undefined) ?? {},
-				"revision",
-			);
-		} finally {
-			inspection.database.close();
-		}
-		if (cache?.revision !== revisionId || cache.doc_id !== docId || storedRevision !== revisionId) {
-			await runReader(connection.workspaceRoot, docId, revisionId, signal);
-			cache = readCache(prepared.cachePath);
-			writeReadableView(prepared, cache);
-		} else if (!existsSync(prepared.readablePath)) writeReadableView(prepared, cache);
-		prepared.warnings = cache.warnings;
-		return prepared;
-	};
-	const pending = prepare();
-	preparations.set(key, pending);
+	if (!DOCUMENT_EXTENSIONS.has(`.${document.file_type}`)) throw new PeSourceError(400, "Unsupported document type");
+	let filePath: string;
 	try {
-		return await pending;
-	} finally {
-		preparations.delete(key);
+		filePath = documentFilePath(root, document);
+		await verifyPeOriginal(filePath, textValue(document, "checksum") ?? textValue(document, "sha256") ?? "", signal);
+	} catch (error) {
+		signal?.throwIfAborted();
+		const missing = error instanceof Error && "code" in error && error.code === "ENOENT";
+		throw new PeSourceError(
+			missing ? 404 : 409,
+			missing ? "Document original is missing" : error instanceof Error ? error.message : String(error),
+		);
 	}
-}
-
-export function sourceLocationRow(reference: PeSourceReference): SqlRow {
-	const { location } = reference;
-	switch (location.kind) {
-		case "excel":
-			return { sheet_name: location.sheet, cell_range: location.range };
-		case "pdf":
-			return { page_start: location.pageStart, page_end: location.pageEnd };
-		case "text":
-			return { line_start: location.lineStart, line_end: location.lineEnd };
-		case "block":
-			return { block_index: location.blockIndex };
-	}
-}
-
-/** Shared by the agent and the web preview. Always resolve an immutable version. */
-export async function resolvePeEvidenceSource(
-	cwd: string,
-	evidenceId: string,
-	signal?: AbortSignal,
-): Promise<{ payload: PeSourcePayload; filePath: string }> {
-	const reference = parseSourceId(evidenceId);
-	if (!reference) throw new PeSourceError(400, "Invalid source ID");
-	const prepared = await preparePeDocument(cwd, { docId: reference.docId }, signal);
-	const cache = readCache(prepared.cachePath);
-	const row = { ...prepared.document, ...sourceLocationRow(reference) };
-	const base = {
-		dataset_id: prepared.datasetId,
-		doc_id: reference.docId,
-		version_no: numberValue(row, "version_no") ?? 1,
-		evidence_id: evidenceId,
-		citation: sourceCitation(row),
-		markdown_citation: sourceMarkdownCitation(row, evidenceId),
-		filename: sourceFilename(row),
-		truncated: false,
-		warnings: cache.warnings,
-	};
-	const location = reference.location;
-	const fileType = textValue(row, "file_type");
-	if (location.kind === "excel" && (fileType === "xlsx" || fileType === "xlsm")) {
-		const bounds = parseExcelCellRange(location.range);
-		if (!bounds) throw new PeSourceError(400, "Invalid Excel range");
-		const connection = openPeDataset(cwd, prepared.datasetId);
-		try {
-			const sheet = connection.database
-				.prepare("SELECT used_range FROM excel_sheets WHERE doc_id=? AND sheet_name=?")
-				.get(reference.docId, location.sheet) as SqlRow | undefined;
-			if (!sheet) throw new PeSourceError(404, "Worksheet not found in this document version");
-			const used = parseExcelCellRange(textValue(sheet, "used_range"));
-			if (!used || bounds.rowEnd > used.rowEnd || bounds.columnEnd > used.columnEnd)
-				throw new PeSourceError(404, "Source range is outside the worksheet's used range");
-			const window = {
-				rowStart: Math.max(1, bounds.rowStart - 3),
-				rowEnd: 0,
-				columnStart: Math.max(1, bounds.columnStart - 3),
-				columnEnd: 0,
-			};
-			window.rowEnd = Math.min(used.rowEnd, window.rowStart + 11);
-			window.columnEnd = Math.min(used.columnEnd, window.columnStart + 11);
-			const cells = readExcelCellsByBounds(
-				connection.database,
-				prepared.datasetId,
-				reference.docId,
-				location.sheet,
-				window,
-				144,
-			);
-			return {
-				filePath: prepared.filePath,
-				payload: {
-					...base,
-					kind: "excel",
-					sheet_name: location.sheet,
-					cell_range: location.range,
-					grid_window: {
-						row_start: window.rowStart,
-						row_end: window.rowEnd,
-						col_start: window.columnStart,
-						col_end: window.columnEnd,
-					},
-					cells,
-					truncated: bounds.rowEnd > window.rowEnd || bounds.columnEnd > window.columnEnd,
-				},
-			};
-		} finally {
-			connection.database.close();
-		}
-	}
-	if (location.kind === "pdf" && fileType === "pdf") {
-		if (location.pageEnd > cache.blocks.length || location.pageEnd - location.pageStart >= 20)
-			throw new PeSourceError(400, "Invalid PDF page range (maximum 20 pages)");
-		let budget = 12_000;
-		let truncated = false;
-		const pages = cache.blocks
-			.filter(
-				(block) => (block.page_start ?? 0) >= location.pageStart && (block.page_start ?? 0) <= location.pageEnd,
-			)
-			.map((block) => {
-				const text = block.text.slice(0, budget);
-				budget -= text.length;
-				truncated ||= text.length < block.text.length;
-				return { page_number: block.page_start ?? 0, text };
-			});
-		return {
-			filePath: prepared.filePath,
-			payload: {
-				...base,
-				kind: "pdf",
-				page_start: location.pageStart,
-				page_end: location.pageEnd,
-				pdf_pages: pages,
-				content: pages.map((page) => page.text).join("\n\n"),
-				truncated,
-			},
-		};
-	}
-	let content: string | undefined;
-	if (location.kind === "text" && cache.text !== undefined) {
-		const lines = cache.text.split("\n");
-		if (location.lineEnd <= lines.length && location.lineEnd - location.lineStart < 2_000)
-			content = lines.slice(location.lineStart - 1, location.lineEnd).join("\n");
-	} else if (location.kind === "block" && (fileType === "docx" || fileType === "pptx"))
-		content = cache.blocks.find((block) => block.block_index === location.blockIndex)?.text;
-	if (content === undefined) throw new PeSourceError(404, "Source location does not exist in this document version");
-	return {
-		filePath: prepared.filePath,
-		payload: { ...base, kind: "text", content: content.slice(0, 12_000), truncated: content.length > 12_000 },
-	};
-}
-
-/** Resolve citations before saving an artifact or entering its write transaction. */
-export async function resolvePeEvidenceSources(
-	cwd: string,
-	evidenceIds: readonly string[],
-	signal?: AbortSignal,
-): Promise<Map<string, PeSourcePayload>> {
-	const sources = new Map<string, PeSourcePayload>();
-	for (const id of new Set(evidenceIds.map((value) => value.trim()))) {
+	let prepared: PreparedWorkbook;
+	try {
+		prepared =
+			document.file_type === "pdf"
+				? prepareIndexedPdf(root, document)
+				: await prepareWorkbook(root, document, filePath, signal);
+	} catch (error) {
 		signal?.throwIfAborted();
 		try {
-			const { payload } = await resolvePeEvidenceSource(cwd, id, signal);
-			sources.set(id, payload);
-		} catch {
+			await verifyPeOriginal(filePath, String(document.sha256), signal);
+		} catch (originalError) {
 			signal?.throwIfAborted();
-			// Missing, changed, or unreadable originals stay unresolved in the citation audit.
+			const missing = originalError instanceof Error && "code" in originalError && originalError.code === "ENOENT";
+			throw new PeSourceError(
+				missing ? 404 : 409,
+				missing
+					? "Document original is missing"
+					: originalError instanceof Error
+						? originalError.message
+						: String(originalError),
+			);
 		}
+		throw error;
 	}
-	return sources;
+	const refreshed = openPeDataset(root, connection.datasetId);
+	try {
+		document =
+			(refreshed.database.prepare("SELECT * FROM documents WHERE doc_id=?").get(document.doc_id) as
+				| SqlRow
+				| undefined) ?? document;
+	} finally {
+		refreshed.database.close();
+	}
+	return { document, datasetId: connection.datasetId, workspaceRoot: root, filePath, ...prepared };
+}
+
+/** PDF parsing remains owned by the upload pipeline; this view consumes its published pages. */
+function prepareIndexedPdf(root: string, document: SqlRow): PreparedWorkbook {
+	const connection = openPeDataset(root, String(document.dataset_id));
+	try {
+		const pages = connection.database
+			.prepare("SELECT page_number,page_text FROM pdf_pages WHERE doc_id=? ORDER BY page_number")
+			.all(document.doc_id) as SqlRow[];
+		if (!pages.length || !["completed", "completed_with_warnings"].includes(String(document.status)))
+			throw new PeSourceError(
+				409,
+				"PDF is not prepared; wait for the Node upload pipeline or retry its processing job",
+			);
+		const warnings = JSON.parse(String(document.warnings_json || "[]")) as string[];
+		const blocks = pages.map((page) => ({
+			page_start: Number(page.page_number),
+			page_end: Number(page.page_number),
+			text: String(page.page_text),
+		}));
+		const revision = createHash("sha256").update(JSON.stringify({ blocks, warnings })).digest("hex");
+		const directory = join(root, "meta", "read-cache", String(document.doc_id), revision);
+		mkdirSync(directory, { recursive: true });
+		if (realpathSync(directory) !== directory) throw new PeSourceError(400, "Document cache must not be a symlink");
+		const cachePath = join(directory, "manifest.json");
+		const readablePath = join(directory, "readable.txt");
+		const lines = [
+			`# ${document.original_filename} (version ${document.version_no})`,
+			...warnings.map((warning) => `Warning: ${warning}`),
+		];
+		for (const block of blocks) {
+			const row = { ...document, ...block };
+			const citation = sourceMarkdownCitation(row, sourceEvidenceId(row));
+			lines.push(`\n ${citation}`);
+			for (const line of block.text.split("\n")) lines.push(`${line} ${citation}`);
+		}
+		for (const [path, content] of [
+			[cachePath, JSON.stringify({ doc_id: document.doc_id, revision, blocks, warnings })],
+			[readablePath, `${lines.join("\n")}\n`],
+		]) {
+			if (existsSync(path) && realpathSync(path) !== path)
+				throw new PeSourceError(400, "Document cache must not be a symlink");
+			writeFileSync(path, content, { mode: 0o600 });
+		}
+		return { cachePath, readablePath, warnings };
+	} finally {
+		connection.database.close();
+	}
 }

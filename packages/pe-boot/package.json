@@ -8,16 +8,13 @@
 	"exports": {
 		".": {
 			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js",
 			"default": "./dist/index.js"
 		},
-		"./documents": {
-			"types": "./dist/documents.d.ts",
-			"default": "./dist/documents.js"
-		},
-		"./source": {
-			"types": "./dist/source.d.ts",
-			"default": "./dist/source.js"
-		}
+		"./documents": { "types": "./dist/documents.d.ts", "import": "./dist/documents.js", "default": "./dist/documents.js" },
+		"./schema": { "types": "./dist/collection-schema.d.ts", "import": "./dist/collection-schema.js", "default": "./dist/collection-schema.js" },
+		"./source": { "types": "./dist/source.d.ts", "import": "./dist/source.js", "default": "./dist/source.js" },
+		"./evidence": { "types": "./dist/evidence.d.ts", "import": "./dist/evidence.js", "default": "./dist/evidence.js" }
 	},
 	"bin": {
 		"pe-boot": "dist/cli.js"
@@ -25,14 +22,18 @@
 	"files": [
 		"dist",
 		"skills",
+		"INTEGRATION.md",
 		"python/*.py",
 		"python/requirements.txt",
-		"python/setup.sh"
+		"python/setup.sh",
+		"python/setup.mjs"
 	],
 	"scripts": {
 		"clean": "shx rm -rf dist",
 		"build": "tsgo -p tsconfig.build.json && shx chmod +x dist/cli.js",
 		"test": "vitest --run",
+		"setup:python": "node python/setup.mjs",
+		"test:python": "node python/setup.mjs --test",
 		"prepublishOnly": "npm run clean && npm run build"
 	},
 	"dependencies": {

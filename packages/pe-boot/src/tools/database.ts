@@ -1,9 +1,10 @@
-import { createHash } from "node:crypto";
-import { existsSync, lstatSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { basename, extname, isAbsolute, join, relative, resolve } from "node:path";
+import { realpathSync, statSync } from "node:fs";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { DOCUMENT_EXTENSIONS, sourceId, sourceLink } from "../source.ts";
+import { sourceId } from "../source.ts";
 
+export { DOCUMENT_SCHEMA } from "../collection-schema.ts";
+export { registerPeDocuments } from "../documents.ts";
 export { DOCUMENT_EXTENSIONS } from "../source.ts";
 
 export type SqlValue = string | number | bigint | Uint8Array | null;
@@ -31,24 +32,7 @@ export interface EvidenceLocator {
 	block_index?: number;
 }
 
-export const DOCUMENT_SCHEMA = `
-CREATE TABLE IF NOT EXISTS documents (
-  doc_id TEXT PRIMARY KEY, dataset_id TEXT NOT NULL, logical_doc_id TEXT NOT NULL,
-  version_no INTEGER NOT NULL, supersedes_doc_id TEXT, is_current INTEGER NOT NULL DEFAULT 1,
-  lifecycle_state TEXT NOT NULL DEFAULT 'active', title TEXT NOT NULL,
-  original_filename TEXT NOT NULL, source_relpath TEXT NOT NULL, stored_path TEXT NOT NULL,
-  file_type TEXT NOT NULL, checksum TEXT NOT NULL, file_size INTEGER NOT NULL,
-  status TEXT NOT NULL DEFAULT 'available', doc_type TEXT, document_date TEXT,
-  company_name TEXT, company_ticker TEXT, source_name TEXT, metadata_json TEXT,
-  parser_name TEXT, parser_version TEXT, parser_metadata_json TEXT,
-  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT
-);
-CREATE INDEX IF NOT EXISTS documents_current ON documents(dataset_id, is_current, source_relpath);
-CREATE TABLE IF NOT EXISTS document_cache (
-  doc_id TEXT PRIMARY KEY, revision TEXT NOT NULL, prepared_at TEXT NOT NULL,
-  FOREIGN KEY(doc_id) REFERENCES documents(doc_id)
-);
-`;
+const PE_SOURCE_HASH = "#pe-source";
 
 export function textValue(row: SqlRow, key: string): string | undefined {
 	const value = row[key];
@@ -110,8 +94,121 @@ export function sourceCitation(row: SqlRow): string {
 	return filename;
 }
 
+function escapeMarkdownLinkText(value: string): string {
+	return value.replaceAll("\\", "\\\\").replaceAll("[", "\\[").replaceAll("]", "\\]");
+}
+
+export function evidenceSourceUrl(evidenceId: string): string {
+	const params = new URLSearchParams({ evidence_id: evidenceId });
+	return `${PE_SOURCE_HASH}?${params.toString()}`;
+}
+
 export function sourceMarkdownCitation(row: SqlRow, evidenceId: string): string {
-	return sourceLink(sourceCitation(row), evidenceId);
+	const citation = sourceCitation(row);
+	return `[${escapeMarkdownLinkText(citation)}](${evidenceSourceUrl(evidenceId)})`;
+}
+
+export function resolvePeDatasetLocation(cwd: string): PeDatasetLocation {
+	let workspaceRoot: string;
+	try {
+		workspaceRoot = realpathSync(cwd);
+	} catch {
+		throw new Error(`PE project workspace does not exist: ${cwd}`);
+	}
+
+	const databaseCandidate = join(workspaceRoot, "meta", "collection.sqlite3");
+	let databasePath: string;
+	try {
+		databasePath = realpathSync(databaseCandidate);
+	} catch {
+		throw new Error("PE project workspace must contain meta/collection.sqlite3");
+	}
+
+	const relativeDatabasePath = relative(workspaceRoot, databasePath);
+	if (relativeDatabasePath.startsWith("..") || isAbsolute(relativeDatabasePath)) {
+		throw new Error("PE collection database resolves outside the current project workspace");
+	}
+	if (!statSync(databasePath).isFile()) {
+		throw new Error("meta/collection.sqlite3 is not a file");
+	}
+	return { databasePath, workspaceRoot };
+}
+
+function openResolvedPeDataset(
+	location: PeDatasetLocation,
+	expectedDatasetId: string | undefined,
+	readOnly: boolean,
+): PeDatasetDatabase {
+	const database = new DatabaseSync(location.databasePath, { readOnly, timeout: 10_000 });
+	try {
+		database.exec("PRAGMA busy_timeout=10000");
+		const rows = database
+			.prepare(
+				"SELECT DISTINCT dataset_id FROM documents WHERE dataset_id IS NOT NULL AND trim(dataset_id) <> '' ORDER BY dataset_id",
+			)
+			.all() as SqlRow[];
+		let datasetIds = rows.map((row) => textValue(row, "dataset_id")).filter((value) => value !== undefined);
+		if (
+			datasetIds.length === 0 &&
+			database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='project_metadata'").get()
+		) {
+			const projectRows = database
+				.prepare(
+					"SELECT DISTINCT dataset_id FROM project_metadata WHERE dataset_id IS NOT NULL AND trim(dataset_id) <> '' ORDER BY dataset_id",
+				)
+				.all() as SqlRow[];
+			datasetIds = projectRows.map((row) => textValue(row, "dataset_id")).filter((value) => value !== undefined);
+		}
+		if (datasetIds.length === 0) {
+			throw new Error("collection.sqlite3 contains no dataset ID");
+		}
+		if (datasetIds.length > 1) {
+			throw new Error(`collection.sqlite3 contains multiple dataset IDs: ${datasetIds.join(", ")}`);
+		}
+		const datasetId = datasetIds[0];
+		if (expectedDatasetId && expectedDatasetId !== datasetId) {
+			throw new Error(`dataset_id ${expectedDatasetId} does not match the current project dataset ${datasetId}`);
+		}
+		return { database, datasetId, workspaceRoot: location.workspaceRoot };
+	} catch (error) {
+		database.close();
+		throw error;
+	}
+}
+
+export function openPeDataset(cwd: string, expectedDatasetId?: string): PeDatasetDatabase {
+	return openResolvedPeDataset(resolvePeDatasetLocation(cwd), expectedDatasetId, true);
+}
+
+export function openWritablePeDataset(cwd: string, expectedDatasetId?: string): PeDatasetDatabase {
+	return openResolvedPeDataset(resolvePeDatasetLocation(cwd), expectedDatasetId, false);
+}
+
+/** PDF v2 predates document versions; discovery still treats its rows as current. */
+export function pdfDocumentSelection(
+	database: DatabaseSync,
+	includeHistorical = false,
+): {
+	predicate: string;
+	versionNo: string;
+} {
+	const columns = new Set(
+		database
+			.prepare("PRAGMA table_info(documents)")
+			.all()
+			.map((row) => row.name),
+	);
+	const predicates: string[] = [];
+	if (columns.has("file_type")) predicates.push("d.file_type='pdf'");
+	if (columns.has("deleted_at")) predicates.push("d.deleted_at IS NULL");
+	if (!includeHistorical) {
+		if (columns.has("is_current")) predicates.push("COALESCE(d.is_current,1)=1");
+		if (columns.has("lifecycle_state")) predicates.push("COALESCE(d.lifecycle_state,'active')='active'");
+	}
+	return {
+		predicate: predicates.join(" AND ") || "1=1",
+		versionNo: columns.has("version_no") ? "COALESCE(d.version_no,1)" : "1",
+	};
 }
 
 export function sourceEvidenceId(row: SqlRow): string {
@@ -138,82 +235,8 @@ export function sourceEvidenceId(row: SqlRow): string {
 	throw new Error("A source must include a concrete file location");
 }
 
-export function resolvePeDatasetLocation(cwd: string): PeDatasetLocation {
-	let workspaceRoot: string;
-	try {
-		workspaceRoot = realpathSync(cwd);
-	} catch {
-		throw new Error(`PE project workspace does not exist: ${cwd}`);
-	}
-
-	const databaseCandidate = join(workspaceRoot, "meta", "collection.sqlite3");
-	let databasePath: string;
-	try {
-		databasePath = realpathSync(databaseCandidate);
-	} catch {
-		throw new Error("PE project workspace must contain meta/collection.sqlite3");
-	}
-
-	const relativeDatabasePath = relative(workspaceRoot, databasePath);
-	if (relativeDatabasePath.startsWith("..") || isAbsolute(relativeDatabasePath)) {
-		throw new Error("PE collection database resolves outside the current project workspace");
-	}
-	if (!statSync(databasePath).isFile()) {
-		throw new Error("meta/collection.sqlite3 is not a file");
-	}
-	for (const directory of ["raw", "meta"]) {
-		const entry = lstatSync(join(workspaceRoot, directory));
-		if (!entry.isDirectory() || entry.isSymbolicLink()) throw new Error(`PE ${directory}/ must be a real directory`);
-	}
-	return { databasePath, workspaceRoot };
-}
-
-function openResolvedPeDataset(
-	location: PeDatasetLocation,
-	expectedDatasetId: string | undefined,
-	readOnly: boolean,
-): PeDatasetDatabase {
-	const database = new DatabaseSync(location.databasePath, { readOnly, timeout: 10_000 });
-	try {
-		database.exec("PRAGMA busy_timeout=10000");
-		const hasMetadata = database
-			.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='project_metadata'")
-			.get();
-		const rows = database
-			.prepare(
-				hasMetadata
-					? "SELECT dataset_id FROM project_metadata WHERE id = 1"
-					: "SELECT DISTINCT dataset_id FROM documents WHERE dataset_id IS NOT NULL AND trim(dataset_id) <> '' ORDER BY dataset_id",
-			)
-			.all() as SqlRow[];
-		const datasetIds = rows.map((row) => textValue(row, "dataset_id")).filter((value) => value !== undefined);
-		if (datasetIds.length === 0) {
-			throw new Error("collection.sqlite3 contains no dataset ID");
-		}
-		if (datasetIds.length > 1) {
-			throw new Error(`collection.sqlite3 contains multiple dataset IDs: ${datasetIds.join(", ")}`);
-		}
-		const datasetId = datasetIds[0];
-		if (expectedDatasetId && expectedDatasetId !== datasetId) {
-			throw new Error(`dataset_id ${expectedDatasetId} does not match the current project dataset ${datasetId}`);
-		}
-		return { database, datasetId, workspaceRoot: location.workspaceRoot };
-	} catch (error) {
-		database.close();
-		throw error;
-	}
-}
-
-export function openPeDataset(cwd: string, expectedDatasetId?: string): PeDatasetDatabase {
-	return openResolvedPeDataset(resolvePeDatasetLocation(cwd), expectedDatasetId, true);
-}
-
-export function openWritablePeDataset(cwd: string, expectedDatasetId?: string): PeDatasetDatabase {
-	return openResolvedPeDataset(resolvePeDatasetLocation(cwd), expectedDatasetId, false);
-}
-
 export function documentFilePath(workspaceRoot: string, document: SqlRow): string {
-	const stored = textValue(document, "stored_path");
+	const stored = textValue(document, "stored_path") ?? textValue(document, "raw_path");
 	if (!stored) throw new Error("Document has no original file path");
 	const candidate = realpathSync(resolve(workspaceRoot, stored));
 	const rel = relative(realpathSync(join(workspaceRoot, "raw")), candidate);
@@ -221,100 +244,6 @@ export function documentFilePath(workspaceRoot: string, document: SqlRow): strin
 		throw new Error("Document original must resolve to a file inside raw/");
 	}
 	return candidate;
-}
-
-/** Register originals only. Reading and parsing are separate operations. */
-export function registerPeDocuments(
-	cwd: string,
-	datasetId: string,
-	files: Array<{ name: string; bytes: Uint8Array }>,
-): { documents: SqlRow[]; fileCount: number } {
-	const connection = openWritablePeDataset(cwd, datasetId);
-	const { database, workspaceRoot } = connection;
-	const createdFiles: string[] = [];
-	try {
-		database.exec(DOCUMENT_SCHEMA);
-		database.exec("BEGIN IMMEDIATE");
-		const documents: SqlRow[] = [];
-		for (const { name, bytes } of files) {
-			const extension = extname(name).toLowerCase();
-			if (basename(name) !== name || /[\\/\x00-\x1f]/u.test(name) || !DOCUMENT_EXTENSIONS.has(extension)) {
-				throw new Error(`Unsupported document filename: ${name}`);
-			}
-			const checksum = createHash("sha256").update(bytes).digest("hex");
-			const generatedLogicalId = createHash("sha256").update(`${datasetId}\0${name}`).digest("hex").slice(0, 40);
-			const current = database
-				.prepare(
-					"SELECT * FROM documents WHERE dataset_id=? AND (logical_doc_id=? OR source_relpath=? OR source_relpath=?) AND is_current=1 AND deleted_at IS NULL ORDER BY version_no DESC LIMIT 1",
-				)
-				.get(datasetId, generatedLogicalId, name, `raw/${name}`) as SqlRow | undefined;
-			const logicalId = textValue(current ?? {}, "logical_doc_id") ?? generatedLogicalId;
-			if (current && textValue(current, "checksum") === checksum) {
-				const original = documentFilePath(workspaceRoot, current);
-				if (createHash("sha256").update(readFileSync(original)).digest("hex") !== checksum)
-					throw new Error("Stored original was modified; restore it before uploading this version again");
-				documents.push(current);
-				continue;
-			}
-			const version = Number(
-				(
-					database
-						.prepare(
-							"SELECT COALESCE(MAX(version_no),0)+1 AS version FROM documents WHERE dataset_id=? AND logical_doc_id=?",
-						)
-						.get(datasetId, logicalId) as SqlRow
-				).version,
-			);
-			const docId = createHash("sha256").update(`${logicalId}\0${version}\0${checksum}`).digest("hex").slice(0, 40);
-			let storedName = name;
-			if (existsSync(join(workspaceRoot, "raw", storedName)))
-				storedName = `${name.slice(0, -extension.length)}--${docId}${extension}`;
-			const target = join(workspaceRoot, "raw", storedName);
-			writeFileSync(target, bytes, { flag: "wx" });
-			createdFiles.push(target);
-			const now = new Date().toISOString();
-			database
-				.prepare("UPDATE documents SET is_current=0 WHERE dataset_id=? AND (logical_doc_id=? OR doc_id=?)")
-				.run(datasetId, logicalId, textValue(current ?? {}, "doc_id") ?? "");
-			database
-				.prepare(
-					`INSERT INTO documents (doc_id,dataset_id,logical_doc_id,version_no,supersedes_doc_id,title,original_filename,source_relpath,stored_path,file_type,checksum,file_size,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-				)
-				.run(
-					docId,
-					datasetId,
-					logicalId,
-					version,
-					textValue(current ?? {}, "doc_id") ?? null,
-					name,
-					name,
-					name,
-					`raw/${storedName}`,
-					extension.slice(1),
-					checksum,
-					bytes.byteLength,
-					"available",
-					now,
-					now,
-				);
-			documents.push(database.prepare("SELECT * FROM documents WHERE doc_id=?").get(docId) as SqlRow);
-		}
-		const count = database
-			.prepare("SELECT COUNT(*) AS count FROM documents WHERE dataset_id=? AND is_current=1 AND deleted_at IS NULL")
-			.get(datasetId) as SqlRow;
-		database.exec("COMMIT");
-		return { documents, fileCount: Number(count.count) };
-	} catch (error) {
-		try {
-			database.exec("ROLLBACK");
-		} catch {
-			/* No transaction was started. */
-		}
-		for (const file of createdFiles) rmSync(file, { force: true });
-		throw error;
-	} finally {
-		database.close();
-	}
 }
 
 export function normalizeText(value: unknown): string {
