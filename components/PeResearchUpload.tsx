@@ -17,6 +17,7 @@ interface Props {
   project?: PeProjectSummary;
   onComplete?: () => void;
   onBusyChange?: (busy: boolean) => void;
+  onDocumentsChanged?: () => void;
 }
 
 function upload(
@@ -54,7 +55,7 @@ function upload(
   });
 }
 
-export function PeResearchUpload({ project, onComplete, onBusyChange }: Props) {
+export function PeResearchUpload({ project, onComplete, onBusyChange, onDocumentsChanged }: Props) {
   const { t } = useI18n();
   const inputRef = useRef<HTMLInputElement>(null);
   const mountedRef = useRef(true);
@@ -96,6 +97,7 @@ export function PeResearchUpload({ project, onComplete, onBusyChange }: Props) {
       try {
         let job = await upload(datasetId, selected, setProgress);
         if (!mountedRef.current) return;
+        onDocumentsChanged?.();
         setProgress(100);
         while (job.status === "queued" || job.status === "running") {
           setStage(job.status);
@@ -124,7 +126,7 @@ export function PeResearchUpload({ project, onComplete, onBusyChange }: Props) {
         setMessage(cause instanceof Error ? cause.message : String(cause));
       }
     })();
-  }, [busy, onComplete, project, t]);
+  }, [busy, onComplete, onDocumentsChanged, project, t]);
 
   const disabled = busy || !project;
   return (
@@ -189,11 +191,11 @@ export function PeResearchUpload({ project, onComplete, onBusyChange }: Props) {
           )}
         </div>
       )}
-      <div style={{ marginTop: 5, color: "var(--text-dim)", fontSize: 10, lineHeight: 1.4 }}>
-        {project
-          ? t("researchUpload.hint", { project: project.name })
-          : t("researchUpload.noProject")}
-      </div>
+      {!project && (
+        <div style={{ marginTop: 5, color: "var(--text-dim)", fontSize: 10, lineHeight: 1.4 }}>
+          {t("researchUpload.noProject")}
+        </div>
+      )}
     </div>
   );
 }

@@ -9,6 +9,7 @@ import { getProjectActivity, sessionsForProject } from "@/lib/project-groups";
 import { workspaceKeyOf } from "@/lib/workspace-memory";
 import { useI18n } from "@/hooks/useI18n";
 import { PeResearchUpload } from "./PeResearchUpload";
+import { PeProjectDocuments } from "./PeProjectDocuments";
 import { PeProjectCreateDialog } from "./PeProjectCreateDialog";
 import { PeProjectDeleteDialog } from "./PeProjectDeleteDialog";
 
@@ -179,7 +180,7 @@ function buildSessionTree(sessions: SessionInfo[]): SessionTreeNode[] {
   return roots;
 }
 
-export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onBackgroundTaskDone, onRunningSessionIdsChange }: Props) {
+export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, onBackgroundTaskDone, onRunningSessionIdsChange }: Props) {
   const { t } = useI18n();
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -197,6 +198,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const [projectFilter, setProjectFilter] = useState("");
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [researchUploadBusy, setResearchUploadBusy] = useState(false);
+  const [documentRefreshKey, setDocumentRefreshKey] = useState(0);
   const [sessionRefreshDone, setSessionRefreshDone] = useState(false);
   const [runningSessionIds, setRunningSessionIds] = useState<Set<string>>(() => new Set());
   const [unreadSessionIds, setUnreadSessionIds] = useState<Set<string>>(() => loadUnreadSessionIds());
@@ -938,7 +940,17 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         <PeResearchUpload
           project={selectedRegisteredProject}
           onBusyChange={setResearchUploadBusy}
-          onComplete={() => void loadProjects()}
+          onDocumentsChanged={() => setDocumentRefreshKey((value) => value + 1)}
+          onComplete={() => {
+            setDocumentRefreshKey((value) => value + 1);
+            void loadProjects();
+          }}
+        />
+
+        <PeProjectDocuments
+          project={selectedRegisteredProject}
+          refreshKey={documentRefreshKey}
+          onOpenFile={onOpenFile}
         />
 
       </div>
