@@ -1665,9 +1665,19 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 			}
 		}
 
-		// Process Cloudflare AI Gateway models
-		if (data["cloudflare-ai-gateway"]?.models) {
-			for (const [prefixedId, model] of Object.entries(data["cloudflare-ai-gateway"].models)) {
+		// The gateway catalog can omit Workers AI models even though /compat routes them.
+		// Derive missing entries from Workers AI, keeping explicit gateway metadata authoritative.
+		// https://developers.cloudflare.com/ai-gateway/usage/chat-completion/
+		if (data["cloudflare-ai-gateway"]?.models || data["cloudflare-workers-ai"]?.models) {
+			const gatewayModels = {
+				...Object.fromEntries(
+					Object.entries(data["cloudflare-workers-ai"]?.models ?? {}).map(
+						([modelId, model]) => [`workers-ai/${modelId}`, model] as const,
+					),
+				),
+				...data["cloudflare-ai-gateway"]?.models,
+			};
+			for (const [prefixedId, model] of Object.entries(gatewayModels)) {
 				const m = model as ModelsDevModel;
 				if (m.tool_call !== true) continue;
 
