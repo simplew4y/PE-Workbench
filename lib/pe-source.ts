@@ -1,3 +1,5 @@
+import { parseSourceId } from "@earendil-works/pe-boot/source";
+
 export const PE_SOURCE_HASH = "#pe-source";
 
 export interface PeSourceReference {
@@ -11,6 +13,11 @@ export interface PeSourceCell {
   display_value?: string;
   raw_value?: string;
   formula?: string;
+  cached_value?: string;
+  number_format?: string;
+  formula_type?: string;
+  formula_cache_status?: string;
+  numeric_value?: number;
   row_label?: string;
   col_label?: string;
   period?: string;
@@ -29,6 +36,10 @@ interface PeSourceBase {
   evidence_id: string;
   citation: string;
   filename: string;
+  doc_id?: string;
+  version_no?: number;
+  warnings?: string[];
+  truncated?: boolean;
 }
 
 export interface PePdfSource extends PeSourceBase {
@@ -72,7 +83,7 @@ export function parsePeSourceHref(href: string | undefined): PeSourceReference |
   }
   if (!suffix.startsWith("?")) return null;
   const evidenceId = new URLSearchParams(suffix.slice(1)).get("evidence_id")?.trim();
-  if (!evidenceId || !/^(?:chunk|fact|cell):[^\s:]+$/u.test(evidenceId)) return null;
+  if (!evidenceId || (!/^(?:page|chunk|fact|cell):[^\s:]+$/u.test(evidenceId) && !parseSourceId(evidenceId))) return null;
   return { evidenceId };
 }
 

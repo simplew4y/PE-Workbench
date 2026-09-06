@@ -1,6 +1,7 @@
 import { realpathSync, statSync } from "node:fs";
 import { isAbsolute, join, relative } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { resolvePeEvidenceSource as resolveVersionedEvidence } from "@earendil-works/pe-boot/evidence";
 import type { PeExcelGridWindow, PeSourceCell, PeSourcePayload } from "./pe-source";
 
 type SqlValue = string | number | bigint | Uint8Array | null;
@@ -115,7 +116,18 @@ function evidenceRow(connection: DatasetConnection, evidenceId: string): SqlRow 
     "d.deleted_at IS NULL AND COALESCE(d.is_current, 1) = 1 AND COALESCE(d.lifecycle_state, 'active') = 'active'";
   let row: SqlRow | undefined;
 
-  if (kind === "chunk") {
+  if (kind === "page") {
+    row = connection.database
+      .prepare(
+        `SELECT p.page_id, p.doc_id, p.page_text AS content,
+                p.page_number AS page_start, p.page_number AS page_end,
+                d.original_filename, d.raw_path, 'pdf' AS file_type
+         FROM pdf_pages p
+         JOIN documents d ON d.doc_id = p.doc_id
+         WHERE p.page_id = ? AND d.dataset_id = ?`,
+      )
+      .get(rawId, connection.datasetId) as SqlRow | undefined;
+  } else if (kind === "chunk") {
     row = connection.database
       .prepare(
         `SELECT c.chunk_id, c.doc_id, c.content, c.content_type, c.title_path,
@@ -244,13 +256,26 @@ function pdfPages(connection: DatasetConnection, row: SqlRow): Array<{ page_numb
   const pageStart = numberValue(row, "page_start");
   const pageEnd = numberValue(row, "page_end") ?? pageStart;
   if (!docId || pageStart === undefined || pageEnd === undefined) return [];
-  const rows = connection.database
-    .prepare(
-      `SELECT page_number, text FROM pdf_pages
-       WHERE dataset_id = ? AND doc_id = ? AND page_number BETWEEN ? AND ?
-       ORDER BY page_number`,
-    )
-    .all(connection.datasetId, docId, Math.max(1, pageStart - 1), pageEnd + 1) as SqlRow[];
+  const usesPagePipeline = connection.database
+    .prepare("SELECT 1 FROM pragma_table_info('pdf_pages') WHERE name='page_text'")
+    .get() !== undefined;
+  const rows = usesPagePipeline
+    ? connection.database
+        .prepare(
+          `SELECT p.page_number, p.page_text AS text
+           FROM pdf_pages p
+           JOIN documents d ON d.doc_id=p.doc_id
+           WHERE d.dataset_id=? AND p.doc_id=? AND p.page_number BETWEEN ? AND ?
+           ORDER BY p.page_number`,
+        )
+        .all(connection.datasetId, docId, Math.max(1, pageStart - 1), pageEnd + 1) as SqlRow[]
+    : connection.database
+        .prepare(
+          `SELECT page_number, text FROM pdf_pages
+           WHERE dataset_id = ? AND doc_id = ? AND page_number BETWEEN ? AND ?
+           ORDER BY page_number`,
+        )
+        .all(connection.datasetId, docId, Math.max(1, pageStart - 1), pageEnd + 1) as SqlRow[];
   return rows.map((page) => ({
     page_number: numberValue(page, "page_number") ?? 0,
     text: (textValue(page, "text") ?? "").slice(0, 3_500),
@@ -266,7 +291,7 @@ function sourceFilePath(workspaceRoot: string, row: SqlRow): string {
   }
   if (!isWithin(workspaceRoot, rawRoot)) throw new PeSourceError(404, "资料目录越出当前项目工作区。");
 
-  const candidates = [textValue(row, "source_relpath"), textValue(row, "original_filename")];
+  const candidates = [textValue(row, "raw_path"), textValue(row, "source_relpath"), textValue(row, "original_filename")];
   for (const candidate of candidates) {
     if (!candidate || isAbsolute(candidate)) continue;
     const normalized = candidate.replaceAll("\\", "/").replace(/^raw\//u, "");
@@ -280,9 +305,23 @@ function sourceFilePath(workspaceRoot: string, row: SqlRow): string {
   throw new PeSourceError(404, "当前项目的 raw 目录中找不到引用原文件。");
 }
 
-export function resolvePeEvidenceSource(cwd: string, evidenceId: string): ResolvedPeSource {
+export async function resolvePeEvidenceSource(cwd: string, evidenceId: string): Promise<ResolvedPeSource> {
+  if (evidenceId.startsWith("source:")) return resolveVersionedSource(cwd, evidenceId);
   const connection = openDataset(cwd);
   try {
+    const managed = connection.database
+      .prepare("SELECT 1 FROM pragma_table_info('documents') WHERE name='version_no'").get()
+      || connection.database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_metadata'").get();
+    if (/^(page|cell|fact):/u.test(evidenceId) && managed) {
+      // Shared resolution verifies the immutable original and document lifecycle.
+      // Keep adjacent PDF page text for the rich preview only after validation.
+      const resolved = await resolveVersionedSource(cwd, evidenceId);
+      if (evidenceId.startsWith("page:") && resolved.payload.kind === "pdf") {
+        const row = evidenceRow(connection, evidenceId);
+        return { ...resolved, payload: { ...resolved.payload, pdf_pages: pdfPages(connection, row) } };
+      }
+      return resolved;
+    }
     const row = evidenceRow(connection, evidenceId);
     const filename = sourceFilename(row);
     const citation = sourceCitation(row);
@@ -333,5 +372,16 @@ export function resolvePeEvidenceSource(cwd: string, evidenceId: string): Resolv
     };
   } finally {
     connection.database.close();
+  }
+}
+
+async function resolveVersionedSource(cwd: string, evidenceId: string): Promise<ResolvedPeSource> {
+  try {
+    return await resolveVersionedEvidence(cwd, evidenceId);
+  } catch (error) {
+    if (error instanceof Error && "status" in error && typeof error.status === "number") {
+      throw new PeSourceError(error.status, error.message);
+    }
+    throw error;
   }
 }

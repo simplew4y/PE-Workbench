@@ -24,6 +24,8 @@ const nextConfig: NextConfig = {
   },
   serverExternalPackages: [
     "undici",
+    "pdfjs-dist",
+    "@napi-rs/canvas",
     "@earendil-works/pe-boot",
     "@earendil-works/pi-coding-agent",
     "@earendil-works/pi-agent-core",

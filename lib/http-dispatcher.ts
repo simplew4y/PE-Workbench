@@ -8,7 +8,6 @@ type DispatcherGlobal = typeof globalThis & {
 };
 
 const dispatcherGlobal = globalThis as DispatcherGlobal;
-const originalGlobalFetch = globalThis.fetch;
 const ignoreUndiciDispatcherError = (): void => {};
 
 function parseHttpIdleTimeoutMs(value: unknown): number | undefined {
@@ -75,12 +74,6 @@ export function configureHttpDispatcher(
     }),
   );
   undici.setGlobalDispatcher(dispatcher);
-
-  // Keep fetch and the dispatcher on the same undici implementation. Preserve
-  // an intentional fetch override installed after this module was loaded.
-  if (globalThis.fetch === originalGlobalFetch) {
-    undici.install?.();
-  }
 
   dispatcherGlobal.__piWebHttpDispatcherConfigured = true;
 }
