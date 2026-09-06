@@ -33,6 +33,12 @@ test("session reads use the live SessionManager before requiring a JSONL path", 
   }
 });
 
+test("session deletion garbage-collects only attachment directories with no surviving references", () => {
+  assert.match(detailRoute, /collectReferencedAttachmentDirectories\(deletedEntries\)/);
+  assert.match(detailRoute, /listAllSessions\(\{ force: true \}\)/);
+  assert.match(detailRoute, /removeUnreferencedAttachmentDirectories\(attachmentCandidates, remainingSessionEntries\)/);
+});
+
 test("live agent state is available before the session file is persisted", () => {
   const liveLookup = stateRoute.indexOf("getRpcSession(id)");
   const pathLookup = stateRoute.indexOf("resolveSessionPath(id)");
