@@ -47,7 +47,8 @@ function ExcelSourcePreview({ source }: { source: PeExcelSource }) {
     };
   })();
   const formulaText = selectedCell?.formula ?? selectedCell?.raw_value ?? selectedCell?.display_value ?? "";
-  const selectedValue = selectedCell?.display_value ?? selectedCell?.raw_value ?? "";
+  const selectedValue = selectedCell?.cached_value
+    ?? (selectedCell?.formula_cache_status === "missing" ? "无缓存" : selectedCell?.display_value ?? selectedCell?.raw_value ?? "");
 
   if (!window) {
     return <p className="m-0 p-5 text-sm text-[var(--text-muted)]">该引用范围没有可展示的单元格数据。</p>;
@@ -68,9 +69,9 @@ function ExcelSourcePreview({ source }: { source: PeExcelSource }) {
               "w-36 shrink-0 truncate rounded bg-[var(--bg-hover)] px-2 py-1 text-[var(--text-muted)]",
               selectedCell?.formula ? "visible" : "invisible",
             ].join(" ")}
-            title={selectedCell?.formula ? `计算值：${selectedValue}` : undefined}
+            title={selectedCell?.formula ? `文件缓存值：${selectedValue}（未重新计算）` : undefined}
           >
-            计算值：{selectedValue}
+            缓存值：{selectedValue}
           </span>
         </div>
       </div>
@@ -112,7 +113,7 @@ function ExcelSourcePreview({ source }: { source: PeExcelSource }) {
                     ].filter(Boolean).join(" ")}
                     key={column}
                     onClick={() => setSelectedCellRef(cell?.cell_ref ?? `${excelColumnLabel(column)}${row}`)}
-                    title={cell?.formula ?? cell?.raw_value ?? cell?.display_value}
+                    title={[cell?.formula ?? cell?.raw_value ?? cell?.display_value, cell?.number_format].filter(Boolean).join("\n")}
                   >
                     <span className="block max-w-44 truncate">
                       {cell?.display_value ?? cell?.raw_value ?? ""}{cell?.unit ?? ""}
@@ -132,7 +133,17 @@ function ExcelSourcePreview({ source }: { source: PeExcelSource }) {
         <div className="border-x border-t border-emerald-600 bg-[var(--bg)] px-5 py-1.5 text-xs font-medium">
           {source.sheet_name ?? "Sheet"}
         </div>
+        {selectedCell?.number_format && (
+          <span className="ml-auto truncate px-2 py-1.5 text-xs text-[var(--text-muted)]">
+            格式：{selectedCell.number_format}
+          </span>
+        )}
       </div>
+      {(source.truncated || (source.warnings?.length ?? 0) > 0) && (
+        <p className="m-0 border-t border-[var(--border)] px-4 py-2 text-xs text-[var(--text-muted)]">
+          {[source.truncated ? "当前展示引用范围的部分单元格。" : "", ...(source.warnings ?? [])].filter(Boolean).join(" ")}
+        </p>
+      )}
     </div>
   );
 }
@@ -224,7 +235,9 @@ export function PeSourceCitation({ cwd, evidenceId, children, className }: PeSou
               <div className="min-w-0 flex-1">
                 <h2 className="m-0 text-sm font-semibold">原始证据</h2>
                 <p className="mt-1 truncate text-xs text-[var(--text-muted)]">
-                  {state.status === "ready" ? state.source.citation : "正在读取引用来源…"}
+                  {state.status === "ready"
+                    ? `${state.source.citation}${state.source.version_no ? ` · v${state.source.version_no}` : ""}`
+                    : "正在读取引用来源…"}
                 </p>
               </div>
               <button

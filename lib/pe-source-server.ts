@@ -1,6 +1,7 @@
 import { realpathSync, statSync } from "node:fs";
 import { isAbsolute, join, relative } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { resolvePeEvidenceSource as resolveVersionedEvidence } from "@earendil-works/pe-boot/evidence";
 import type { PeExcelGridWindow, PeSourceCell, PeSourcePayload } from "./pe-source";
 
 type SqlValue = string | number | bigint | Uint8Array | null;
@@ -304,9 +305,14 @@ function sourceFilePath(workspaceRoot: string, row: SqlRow): string {
   throw new PeSourceError(404, "当前项目的 raw 目录中找不到引用原文件。");
 }
 
-export function resolvePeEvidenceSource(cwd: string, evidenceId: string): ResolvedPeSource {
+export async function resolvePeEvidenceSource(cwd: string, evidenceId: string): Promise<ResolvedPeSource> {
+  if (evidenceId.startsWith("source:")) return resolveVersionedSource(cwd, evidenceId);
   const connection = openDataset(cwd);
   try {
+    if (/^(cell|fact):/u.test(evidenceId) && connection.database
+      .prepare("SELECT 1 FROM pragma_table_info('documents') WHERE name='version_no'").get()) {
+      return await resolveVersionedSource(cwd, evidenceId);
+    }
     const row = evidenceRow(connection, evidenceId);
     const filename = sourceFilename(row);
     const citation = sourceCitation(row);
@@ -357,5 +363,16 @@ export function resolvePeEvidenceSource(cwd: string, evidenceId: string): Resolv
     };
   } finally {
     connection.database.close();
+  }
+}
+
+async function resolveVersionedSource(cwd: string, evidenceId: string): Promise<ResolvedPeSource> {
+  try {
+    return await resolveVersionedEvidence(cwd, evidenceId);
+  } catch (error) {
+    if (error instanceof Error && "status" in error && typeof error.status === "number") {
+      throw new PeSourceError(error.status, error.message);
+    }
+    throw error;
   }
 }

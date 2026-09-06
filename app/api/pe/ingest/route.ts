@@ -3,7 +3,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { parseFormDataWithinLimit, RequestBodyTooLargeError } from "@/lib/bounded-form-data";
 import { validateUploadFileNames } from "@/lib/file-upload";
 import {
-  PE_PDF_MIME_TYPE,
   PE_SUPPORTED_EXTENSIONS,
   queuePePdfIngest,
   type PePdfUpload,
@@ -24,9 +23,9 @@ function textField(form: FormData, name: string): string {
 
 function requestErrorStatus(message: string): number {
   if (/already running|已有.+任务正在运行/iu.test(message)) return 409;
-  if (/already exists|selected twice|duplicate pdf filename/iu.test(message)) return 409;
+  if (/already exists|selected twice|duplicate .*filename/iu.test(message)) return 409;
   if (/Legacy .*Pipeline|Legacy documents table|schema version/iu.test(message)) return 409;
-  if (/required|not found|unsupported|invalid pdf|MIME|file name/iu.test(message)) return 400;
+  if (/required|not found|unsupported|invalid|OOXML|workbook|MIME|file name/iu.test(message)) return 400;
   return 500;
 }
 
@@ -46,17 +45,16 @@ export async function POST(request: NextRequest) {
     const nameError = validateUploadFileNames(names);
     if (nameError) return NextResponse.json({ error: nameError }, { status: 400 });
     if (files.some((file) => file.size > MAX_UPLOAD_FILE_BYTES)) {
-      return NextResponse.json({ error: "Each PDF must be 100MB or smaller" }, { status: 413 });
+      return NextResponse.json({ error: "Each document must be 100MB or smaller" }, { status: 413 });
     }
     if (files.reduce((total, file) => total + file.size, 0) > MAX_UPLOAD_TOTAL_BYTES) {
-      return NextResponse.json({ error: "PDF uploads must total 300MB or less" }, { status: 413 });
+      return NextResponse.json({ error: "Document uploads must total 300MB or less" }, { status: 413 });
     }
     const unsupported = files.find((file) => (
       !PE_SUPPORTED_EXTENSIONS.has(path.extname(file.name).toLocaleLowerCase())
-      || file.type.toLocaleLowerCase() !== PE_PDF_MIME_TYPE
     ));
     if (unsupported) {
-      return NextResponse.json({ error: `Only application/pdf files are supported: ${unsupported.name}` }, { status: 400 });
+      return NextResponse.json({ error: `Only PDF, XLSX and XLSM files are supported: ${unsupported.name}` }, { status: 400 });
     }
 
     const uploads: PePdfUpload[] = [];
@@ -76,7 +74,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ job, project }, { status: job.status === "completed" ? 200 : 202 });
   } catch (error) {
     if (error instanceof RequestBodyTooLargeError) {
-      return NextResponse.json({ error: "PDF upload request is too large" }, { status: 413 });
+      return NextResponse.json({ error: "Document upload request is too large" }, { status: 413 });
     }
     const message = error instanceof Error ? error.message : String(error);
     return NextResponse.json({ error: message }, { status: requestErrorStatus(message) });

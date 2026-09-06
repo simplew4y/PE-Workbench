@@ -25,6 +25,10 @@ export type PeProjectDocumentStatus =
 
 export interface PeProjectDocumentSummary {
   filename: string;
+  docId?: string;
+  fileType?: string;
+  versionNo?: number;
+  isCurrent?: boolean;
   status: PeProjectDocumentStatus;
   pageCount: number;
   sizeBytes: number | null;
@@ -39,6 +43,7 @@ export interface PeProjectDocumentSummary {
 
 export interface PeProjectDocumentCatalog {
   documents: PeProjectDocumentSummary[];
+  currentCount?: number;
 }
 
 export interface CreatePeProjectInput {

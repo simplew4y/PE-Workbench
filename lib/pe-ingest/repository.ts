@@ -40,7 +40,7 @@ export function findPeDocumentByHash(
     const row = database.prepare(`
       SELECT doc_id, original_filename, raw_path
       FROM documents
-      WHERE dataset_id = ? AND sha256 = ?
+      WHERE dataset_id = ? AND file_type = 'pdf' AND sha256 = ?
       LIMIT 1
     `).get(datasetId, digest) as unknown as ExistingDocumentRow | undefined;
     return row ? {
@@ -64,7 +64,7 @@ export function findPeDocumentByFilename(
     const row = database.prepare(`
       SELECT doc_id, original_filename, raw_path
       FROM documents
-      WHERE dataset_id = ? AND filename_key = ?
+      WHERE dataset_id = ? AND file_type = 'pdf' AND filename_key = ?
       LIMIT 1
     `).get(datasetId, pePdfFilenameKey(filename)) as unknown as ExistingDocumentRow | undefined;
     return row ? {
@@ -132,7 +132,7 @@ export function saveParsedPeDocument(
     database.exec("BEGIN IMMEDIATE");
     try {
       const existing = database.prepare(
-        "SELECT doc_id FROM documents WHERE dataset_id = ? AND (sha256 = ? OR filename_key = ?)",
+        "SELECT doc_id FROM documents WHERE dataset_id = ? AND file_type = 'pdf' AND (sha256 = ? OR filename_key = ?)",
       ).get(
         paths.datasetId,
         document.sha256,
@@ -304,7 +304,7 @@ export function updatePeProjectRegistry(paths: PeProjectPaths): void {
   try {
     const row = collection.prepare(`
       SELECT COUNT(*) AS count FROM documents
-      WHERE dataset_id = ?
+      WHERE dataset_id = ? AND is_current = 1 AND deleted_at IS NULL AND lifecycle_state = 'active'
     `).get(paths.datasetId) as unknown as CountRow;
     fileCount = Number(row.count);
   } finally {

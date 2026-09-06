@@ -13,6 +13,7 @@ import { spawn } from "node:child_process";
 import type { PeIngestJob, PeIngestStatus } from "./contracts.ts";
 import type { PeProjectPaths } from "./paths.ts";
 import { savePeIngestJobToDatabase } from "./repository.ts";
+import { assertPeCollectionDataset, openPeCollectionDatabase } from "./schema.ts";
 
 export const PE_INGEST_ACTIVE_STATUSES = new Set<PeIngestStatus>(["queued", "running"]);
 export const PE_INGEST_SUCCESS_STATUSES = new Set<PeIngestStatus>([
@@ -77,6 +78,43 @@ export function readPeIngestJob(paths: PeProjectPaths, jobId: string): PeIngestJ
   if (job.jobId !== jobId || job.datasetId !== paths.datasetId) {
     throw new Error("Ingest job does not belong to the selected dataset");
   }
+  return reconcilePeIngestJob(paths, job);
+}
+
+export function failPeIngestJob(paths: PeProjectPaths, job: PeIngestJob, message: string): PeIngestJob {
+  if (!PE_INGEST_ACTIVE_STATUSES.has(job.status)) return job;
+  const finished = new Set(job.result.files.map((file) => file.originalFilename));
+  const pending = job.files.filter((file) => !finished.has(file.originalFilename));
+  job.result.files.push(...pending.map((file) => ({
+    originalFilename: file.originalFilename,
+    docId: file.docId,
+    status: "failed" as const,
+    error: message,
+  })));
+  job.result.failedCount += pending.length;
+  job.status = "failed";
+  job.message = message;
+  job.finishedAt = new Date().toISOString();
+  updatePeIngestJob(paths, job);
+  return job;
+}
+
+function reconcilePeIngestJob(paths: PeProjectPaths, job: PeIngestJob): PeIngestJob {
+  if (!PE_INGEST_ACTIVE_STATUSES.has(job.status)) return job;
+  if (job.workerPid) {
+    try {
+      process.kill(job.workerPid, 0);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ESRCH") {
+        return failPeIngestJob(paths, job, "文档处理进程已退出，可以重试失败的 Excel。");
+      }
+    }
+  }
+  const lastActivity = Date.parse(job.heartbeatAt ?? job.startedAt ?? job.createdAt);
+  const timeout = job.workerPid ? 30 * 60_000 : 2 * 60_000;
+  if (Number.isFinite(lastActivity) && Date.now() - lastActivity > timeout) {
+    return failPeIngestJob(paths, job, "文档处理任务已超时，可以重试失败的 Excel。");
+  }
   return job;
 }
 
@@ -87,20 +125,64 @@ export function readPeIngestJobFile(target: string): PeIngestJob {
 }
 
 export function findActivePeIngestJob(paths: PeProjectPaths): PeIngestJob | null {
-  if (!existsSync(paths.jobDirectory)) return null;
-  const candidates = readdirSync(paths.jobDirectory)
+  assertPeCollectionDataset(paths.collectionPath, paths.datasetId);
+  const candidates = (existsSync(paths.jobDirectory) ? readdirSync(paths.jobDirectory) : [])
     .filter((name) => /^[a-f0-9]{16}\.json$/u.test(name))
     .sort()
     .reverse();
+  const active: PeIngestJob[] = [];
   for (const name of candidates) {
     try {
-      const job = parsePeIngestJob(readFileSync(path.join(paths.jobDirectory, name), "utf8"));
-      if (job.datasetId === paths.datasetId && PE_INGEST_ACTIVE_STATUSES.has(job.status)) return job;
+      const job = readPeIngestJob(paths, name.slice(0, -5));
+      if (job.datasetId === paths.datasetId && PE_INGEST_ACTIVE_STATUSES.has(job.status)) active.push(job);
     } catch {
       // Damaged files are not active-job authorities.
     }
   }
-  return null;
+  recoverOrphanedExcelDocuments(paths, active);
+  return active[0] ?? null;
+}
+
+function recoverOrphanedExcelDocuments(paths: PeProjectPaths, active: PeIngestJob[]): void {
+  const activeDocIds = new Set(active.flatMap((job) => job.files.flatMap((file) => file.docId ? [file.docId] : [])));
+  const now = Date.now();
+  const cutoff = new Date(now - 2 * 60_000).toISOString();
+  const database = openPeCollectionDatabase(paths.collectionPath);
+  try {
+    // Registration and UI job creation are separate commits. Recover a server killed between
+    // them, while preserving valid agent leases and UI jobs whose worker is still alive.
+    database.exec("BEGIN IMMEDIATE");
+    try {
+      const orphans = database.prepare(`SELECT d.doc_id, d.warnings_json FROM documents d
+        WHERE d.dataset_id = ? AND d.file_type IN ('xlsx', 'xlsm')
+          AND d.status IN ('queued', 'processing') AND d.deleted_at IS NULL AND d.lifecycle_state = 'active'
+          AND julianday(d.updated_at) < julianday(?)
+          AND NOT EXISTS (SELECT 1 FROM processing_jobs p
+            WHERE p.doc_id = d.doc_id AND p.status = 'processing' AND p.lease_expires_at > ?)
+          AND NOT EXISTS (SELECT 1 FROM ingest_jobs j,
+            json_tree(CASE WHEN json_valid(j.input_files_json) THEN j.input_files_json ELSE '[]' END) f
+            WHERE j.dataset_id = d.dataset_id AND j.status IN ('queued', 'running')
+              AND julianday(j.updated_at) >= julianday(?) AND f.key = 'docId' AND f.value = d.doc_id)
+      `).all(paths.datasetId, cutoff, now, cutoff);
+      const fail = database.prepare("UPDATE documents SET status='failed', warnings_json=?, updated_at=? WHERE doc_id=? AND dataset_id=?");
+      for (const document of orphans) {
+        if (activeDocIds.has(String(document.doc_id))) continue;
+        let warnings: string[] = [];
+        try {
+          const value: unknown = JSON.parse(String(document.warnings_json));
+          if (Array.isArray(value)) warnings = value.filter((item): item is string => typeof item === "string");
+        } catch { /* Preserve the recovery message when old warning metadata is malformed. */ }
+        warnings.push("文档处理未启动或进程已退出，可以重试解析。");
+        fail.run(JSON.stringify([...new Set(warnings)]), new Date(now).toISOString(), document.doc_id, paths.datasetId);
+      }
+      database.exec("COMMIT");
+    } catch (error) {
+      database.exec("ROLLBACK");
+      throw error;
+    }
+  } finally {
+    database.close();
+  }
 }
 
 export function newPeIngestJob(datasetId: string): PeIngestJob {
@@ -108,7 +190,7 @@ export function newPeIngestJob(datasetId: string): PeIngestJob {
     jobId: randomBytes(8).toString("hex"),
     datasetId,
     status: "queued",
-    message: "PDF 已上传，等待解析。",
+    message: "文档已上传，等待解析。",
     files: [],
     createdAt: new Date().toISOString(),
     result: {
@@ -140,6 +222,8 @@ export function startPeIngestJob(paths: PeProjectPaths, job: PeIngestJob): void 
       env: { ...process.env },
     },
   );
+  job.workerPid = child.pid;
+  job.heartbeatAt = new Date().toISOString();
   let spawnFailureRecorded = false;
   const recordSpawnFailure = (message: string) => {
     if (spawnFailureRecorded) return;
@@ -151,35 +235,21 @@ export function startPeIngestJob(paths: PeProjectPaths, job: PeIngestJob): void 
     } catch {
       // Fall back to the initial queued job below.
     }
-    const completedFiles = new Set(current.result.files.map((file) => file.originalFilename));
-    const pendingFiles = current.files.filter((file) => !completedFiles.has(file.originalFilename));
-    const failed: PeIngestJob = {
-      ...current,
-      status: "failed",
-      message,
-      finishedAt: new Date().toISOString(),
-      result: {
-        ...current.result,
-        failedCount: current.result.failedCount + pendingFiles.length,
-        files: [
-          ...current.result.files,
-          ...pendingFiles.map((file) => ({
-            originalFilename: file.originalFilename,
-            status: "failed" as const,
-            error: message,
-          })),
-        ],
-      },
-    };
     try {
-      updatePeIngestJob(paths, failed);
+      failPeIngestJob(paths, current, message);
     } catch {
       // The API can still report the queued status file if both stores are unavailable.
     }
   };
   child.once("error", (error) => recordSpawnFailure(error.message));
-  child.once("exit", (code) => {
-    if (code !== null && code !== 0) recordSpawnFailure(`PE ingest worker exited with code ${code}`);
+  child.once("exit", (code, signal) => {
+    if (code !== 0) recordSpawnFailure(`PE ingest worker exited: ${signal ?? code}`);
   });
+  try {
+    updatePeIngestJob(paths, job);
+  } catch (error) {
+    child.kill();
+    throw error;
+  }
   child.unref();
 }

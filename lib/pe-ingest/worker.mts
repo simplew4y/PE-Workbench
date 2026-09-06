@@ -10,8 +10,9 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { preparePeDocument } from "@earendil-works/pe-boot/documents";
 import type { PeIngestFileResult, PeIngestJob } from "./contracts.ts";
-import { readPeIngestJobFile, updatePeIngestJob } from "./jobs.ts";
+import { failPeIngestJob, readPeIngestJobFile, updatePeIngestJob } from "./jobs.ts";
 import {
   ensureDirectoryWithin,
   isPathInside,
@@ -55,10 +56,10 @@ function appendResult(job: PeIngestJob, result: PeIngestFileResult): void {
   else job.result.failedCount += 1;
 }
 
-function failureMessage(error: unknown): string {
+function failureMessage(error: unknown, fileType?: string): string {
   const message = error instanceof Error ? error.message : String(error);
-  if (/password|encrypted/iu.test(message)) return "PDF 已加密，暂不支持解析。";
-  if (/InvalidPDF|invalid pdf|header|corrupt|format/iu.test(message)) return "PDF 文件已损坏或格式无效。";
+  if (fileType === "pdf" && /password|encrypted/iu.test(message)) return "PDF 已加密，暂不支持解析。";
+  if (fileType === "pdf" && /InvalidPDF|invalid pdf|header|corrupt|format/iu.test(message)) return "PDF 文件已损坏或格式无效。";
   return message;
 }
 
@@ -72,93 +73,118 @@ export async function runPeIngestJob(jobFile: string): Promise<PeIngestJob> {
   ensureDirectoryWithin(paths.metaPath, "documents");
   ensureDirectoryWithin(paths.metaPath, "text");
   job.status = "running";
+  job.workerPid = process.pid;
+  job.heartbeatAt = new Date().toISOString();
   job.startedAt = new Date().toISOString();
-  job.message = `正在顺序解析 ${job.files.length} 份 PDF。`;
+  job.message = `正在顺序解析 ${job.files.length} 份文档。`;
   updatePeIngestJob(paths, job);
+  const heartbeat = setInterval(() => {
+    job.heartbeatAt = new Date().toISOString();
+    try { updatePeIngestJob(paths, job); } catch { /* Final update reports storage failures. */ }
+  }, 10_000);
+  heartbeat.unref();
+  try {
+    for (const input of job.files) {
+      try {
+        if (path.basename(input.originalFilename) !== input.originalFilename) {
+          throw new Error("Invalid PDF filename in ingest job");
+        }
+        if (input.fileType === "xlsx" || input.fileType === "xlsm") {
+          if (!input.docId) throw new Error("Excel ingest input has no registered document ID");
+          const prepared = await preparePeDocument(paths.projectPath, { docId: input.docId, datasetId: paths.datasetId });
+          appendResult(job, {
+            originalFilename: input.originalFilename, docId: input.docId, status: "created",
+            warnings: prepared.warnings, warningCount: prepared.warnings.length,
+          });
+          job.warnings.push(...prepared.warnings.map((warning) => `${input.originalFilename}: ${warning}`));
+          updatePeIngestJob(paths, job);
+          continue;
+        }
+        const existingByName = findPeDocumentByFilename(
+          paths.collectionPath,
+          paths.datasetId,
+          input.originalFilename,
+        );
+        if (existingByName) {
+          throw new Error(`PDF filename already exists in this project: ${input.originalFilename}`);
+        }
+        const existingByHash = findPeDocumentByHash(paths.collectionPath, paths.datasetId, input.sha256);
+        if (existingByHash) {
+          throw new Error(`The same PDF content already exists as ${existingByHash.originalFilename}`);
+        }
 
-  for (const input of job.files) {
+        const rawAbsolutePath = resolveProjectFile(paths, input.rawPath);
+        if (sha256(readFileSync(rawAbsolutePath)) !== input.sha256) {
+          throw new Error("Raw PDF content changed after upload");
+        }
+        const docId = stablePeId("doc", paths.datasetId, input.sha256);
+        const stagingDocumentDirectory = path.join(jobStaging, docId);
+        if (existsSync(stagingDocumentDirectory)) {
+          const resolved = realpathSync(stagingDocumentDirectory);
+          if (!isPathInside(jobStaging, resolved)) throw new Error("Document staging path escapes the job directory");
+          rmSync(resolved, { recursive: true, force: true });
+        }
+        mkdirSync(stagingDocumentDirectory);
+        const parsed = await processPePdf({
+          datasetId: paths.datasetId,
+          originalFilename: input.originalFilename,
+          rawPath: input.rawPath,
+          rawAbsolutePath,
+          sha256: input.sha256,
+          stagingDocumentDirectory,
+        });
+        commitParsedPeDocument(paths, stagingDocumentDirectory, parsed);
+        appendResult(job, {
+          originalFilename: input.originalFilename,
+          status: "created",
+          docId: parsed.docId,
+          warningCount: parsed.warnings.length,
+          warnings: parsed.warnings,
+        });
+        job.warnings.push(...parsed.warnings.map((warning) => `${input.originalFilename}: ${warning}`));
+      } catch (error) {
+        appendResult(job, {
+          originalFilename: input.originalFilename,
+          docId: input.docId,
+          status: "failed",
+          error: failureMessage(error, input.fileType ?? "pdf"),
+        });
+      }
+      updatePeIngestJob(paths, job);
+    }
+
     try {
-      if (path.basename(input.originalFilename) !== input.originalFilename) {
-        throw new Error("Invalid PDF filename in ingest job");
-      }
-      const existingByName = findPeDocumentByFilename(
-        paths.collectionPath,
-        paths.datasetId,
-        input.originalFilename,
-      );
-      if (existingByName) {
-        throw new Error(`PDF filename already exists in this project: ${input.originalFilename}`);
-      }
-      const existingByHash = findPeDocumentByHash(paths.collectionPath, paths.datasetId, input.sha256);
-      if (existingByHash) {
-        throw new Error(`The same PDF content already exists as ${existingByHash.originalFilename}`);
-      }
+      updatePeProjectRegistry(paths);
+    } catch (error) {
+      job.warnings.push(`项目列表统计更新失败：${failureMessage(error)}`);
+    }
 
-      const rawAbsolutePath = resolveProjectFile(paths, input.rawPath);
-      if (sha256(readFileSync(rawAbsolutePath)) !== input.sha256) {
-        throw new Error("Raw PDF content changed after upload");
-      }
-      const docId = stablePeId("doc", paths.datasetId, input.sha256);
-      const stagingDocumentDirectory = path.join(jobStaging, docId);
-      if (existsSync(stagingDocumentDirectory)) {
-        const resolved = realpathSync(stagingDocumentDirectory);
-        if (!isPathInside(jobStaging, resolved)) throw new Error("Document staging path escapes the job directory");
+    if (job.result.createdCount === 0 && job.result.failedCount > 0) {
+      job.status = "failed";
+      job.message = `${job.result.failedCount} 份文档均解析失败。`;
+    } else if (job.result.failedCount > 0 || job.warnings.length > 0) {
+      job.status = "completed_with_warnings";
+      job.message = `文档处理完成：${job.result.createdCount} 份成功，${job.result.failedCount} 份失败。`;
+    } else {
+      job.status = "completed";
+      job.message = `文档处理完成：${job.result.createdCount} 份成功。`;
+    }
+    job.finishedAt = new Date().toISOString();
+    updatePeIngestJob(paths, job);
+
+    if (existsSync(jobStaging)) {
+      const resolved = realpathSync(jobStaging);
+      if (isPathInside(stagingRoot, resolved) && statSync(resolved).isDirectory()) {
         rmSync(resolved, { recursive: true, force: true });
       }
-      mkdirSync(stagingDocumentDirectory);
-      const parsed = await processPePdf({
-        datasetId: paths.datasetId,
-        originalFilename: input.originalFilename,
-        rawPath: input.rawPath,
-        rawAbsolutePath,
-        sha256: input.sha256,
-        stagingDocumentDirectory,
-      });
-      commitParsedPeDocument(paths, stagingDocumentDirectory, parsed);
-      appendResult(job, {
-        originalFilename: input.originalFilename,
-        status: "created",
-        docId: parsed.docId,
-        warningCount: parsed.warnings.length,
-        warnings: parsed.warnings,
-      });
-      job.warnings.push(...parsed.warnings.map((warning) => `${input.originalFilename}: ${warning}`));
-    } catch (error) {
-      appendResult(job, {
-        originalFilename: input.originalFilename,
-        status: "failed",
-        error: failureMessage(error),
-      });
     }
-    updatePeIngestJob(paths, job);
-  }
-
-  try {
-    updatePeProjectRegistry(paths);
+    return job;
   } catch (error) {
-    job.warnings.push(`项目列表统计更新失败：${failureMessage(error)}`);
+    failPeIngestJob(paths, job, failureMessage(error));
+    throw error;
+  } finally {
+    clearInterval(heartbeat);
   }
-
-  if (job.result.createdCount === 0 && job.result.failedCount > 0) {
-    job.status = "failed";
-    job.message = `${job.result.failedCount} 份 PDF 均解析失败。`;
-  } else if (job.result.failedCount > 0 || job.warnings.length > 0) {
-    job.status = "completed_with_warnings";
-    job.message = `PDF 处理完成：${job.result.createdCount} 份新增，${job.result.failedCount} 份失败。`;
-  } else {
-    job.status = "completed";
-    job.message = `PDF 处理完成：${job.result.createdCount} 份新增。`;
-  }
-  job.finishedAt = new Date().toISOString();
-  updatePeIngestJob(paths, job);
-
-  if (existsSync(jobStaging)) {
-    const resolved = realpathSync(jobStaging);
-    if (isPathInside(stagingRoot, resolved) && statSync(resolved).isDirectory()) {
-      rmSync(resolved, { recursive: true, force: true });
-    }
-  }
-  return job;
 }
 
 function commandJobFile(): string {

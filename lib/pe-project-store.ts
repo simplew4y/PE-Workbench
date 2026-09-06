@@ -107,6 +107,7 @@ function renderProjectOverview(
     "- `raw/`：用户上传的原始资料。",
     "- `meta/text/`：从当前资料提取的、供研究与检索使用的 Markdown 文本。",
     "- `meta/documents/`：PDF 页面图片和布局数据。",
+    "- `meta/excel/`：按 Excel 文档版本保存的解析结果与可读文本。",
     "- `generated/`：Memo、Research Note 等研究产物。",
     "",
   ].join("\n");

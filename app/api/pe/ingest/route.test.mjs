@@ -12,10 +12,9 @@ test("requires a registered project and never accepts a browser-supplied workspa
   assert.doesNotMatch(source, /identifyPeUploads|findCanonicalPeProject|createPeProject/);
 });
 
-test("accepts only PDF extension, MIME, and content validated by the pipeline", () => {
+test("applies mixed-document limits and delegates content validation to the pipeline", () => {
   assert.match(source, /PE_SUPPORTED_EXTENSIONS/);
-  assert.match(source, /file\.type\.toLocaleLowerCase\(\) !== PE_PDF_MIME_TYPE/);
   assert.match(source, /queuePePdfIngest/);
-  assert.match(source, /Each PDF must be 100MB or smaller/);
-  assert.match(source, /PDF uploads must total 300MB or less/);
+  assert.match(source, /Each document must be 100MB or smaller/);
+  assert.match(source, /Document uploads must total 300MB or less/);
 });

@@ -36,8 +36,8 @@ function upload(
         onProgress(Math.round((event.loaded / event.total) * 100));
       }
     };
-    request.onerror = () => reject(new Error("Network error while uploading PDF files"));
-    request.onabort = () => reject(new Error("PDF upload cancelled"));
+    request.onerror = () => reject(new Error("Network error while uploading documents"));
+    request.onabort = () => reject(new Error("Document upload cancelled"));
     request.onload = () => {
       let body: { job?: IngestJob; error?: string } = {};
       try {
@@ -46,7 +46,7 @@ function upload(
         // The HTTP status supplies the fallback error below.
       }
       if (request.status < 200 || request.status >= 300 || !body.job) {
-        reject(new Error(body.error ?? `PDF upload failed (HTTP ${request.status})`));
+        reject(new Error(body.error ?? `Document upload failed (HTTP ${request.status})`));
         return;
       }
       resolve(body.job);
@@ -81,7 +81,7 @@ export function PeResearchUpload({ project, onComplete, onBusyChange, onDocument
     event.target.value = "";
     if (selected.length === 0 || busy || !project) return;
     const unsupported = selected.find((file) => (
-      !file.name.toLocaleLowerCase().endsWith(".pdf") || file.type.toLocaleLowerCase() !== "application/pdf"
+      !/\.(pdf|xlsx|xlsm)$/iu.test(file.name)
     ));
     if (unsupported) {
       setStage("failed");
@@ -122,6 +122,7 @@ export function PeResearchUpload({ project, onComplete, onBusyChange, onDocument
         onComplete?.();
       } catch (cause) {
         if (!mountedRef.current) return;
+        onDocumentsChanged?.();
         setStage("failed");
         setMessage(cause instanceof Error ? cause.message : String(cause));
       }
@@ -136,7 +137,7 @@ export function PeResearchUpload({ project, onComplete, onBusyChange, onDocument
         type="file"
         multiple
         hidden
-        accept="application/pdf,.pdf"
+        accept="application/pdf,.pdf,.xlsx,.xlsm"
         onChange={handleFiles}
       />
       <button

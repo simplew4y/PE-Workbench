@@ -1,7 +1,8 @@
 import { statSync } from "node:fs";
 import type { PeIngestFileResult, PeIngestInputFile, PeIngestJobResult, PeIngestStatus } from "./pe-ingest/contracts";
 import { resolvePeProjectPaths, resolveProjectFile } from "./pe-ingest/paths";
-import { openPeCollectionDatabase } from "./pe-ingest/schema";
+import { assertPeCollectionDataset, openPeCollectionDatabase } from "./pe-ingest/schema";
+import { findActivePeIngestJob } from "./pe-ingest/jobs";
 import { getPeProject, peProjectStorePaths } from "./pe-project-store";
 import type {
   PeProjectDocumentCatalog,
@@ -15,6 +16,10 @@ interface PeProjectDocumentOptions {
 }
 
 interface DocumentRow {
+  doc_id: string;
+  file_type: string;
+  version_no: number;
+  is_current: number;
   original_filename: string;
   raw_path: string;
   status: string;
@@ -24,6 +29,7 @@ interface DocumentRow {
   created_at: string;
   updated_at: string;
   needs_ocr_page_count: number;
+  active_processing_lease: number;
 }
 
 interface IngestJobRow {
@@ -86,6 +92,7 @@ function ingestResults(raw: string): PeIngestJobResult {
 }
 
 function documentStatus(value: string): PeProjectDocumentStatus {
+  if (value === "processing") return "running";
   if (
     value === "queued"
     || value === "running"
@@ -136,10 +143,13 @@ export function listPeProjectDocuments(
 ): PeProjectDocumentCatalog {
   const project = getPeProject(datasetId, options);
   const paths = resolvePeProjectPaths(project, peProjectStorePaths(options).registryPath);
+  assertPeCollectionDataset(paths.collectionPath, datasetId);
+  findActivePeIngestJob(paths);
   const database = openPeCollectionDatabase(paths.collectionPath);
   try {
     const documentRows = database.prepare(`
       SELECT
+        d.doc_id, d.file_type, d.version_no, d.is_current,
         d.original_filename,
         d.raw_path,
         d.status,
@@ -148,16 +158,20 @@ export function listPeProjectDocuments(
         d.warnings_json,
         d.created_at,
         d.updated_at,
+        EXISTS(SELECT 1 FROM processing_jobs j WHERE j.doc_id = d.doc_id
+          AND j.status = 'processing' AND j.lease_expires_at > ?) AS active_processing_lease,
         SUM(CASE WHEN p.text_quality = 'needs_ocr' THEN 1 ELSE 0 END) AS needs_ocr_page_count
       FROM documents d
       LEFT JOIN pdf_pages p ON p.doc_id = d.doc_id
-      WHERE d.dataset_id = ?
+      WHERE d.dataset_id = ? AND d.deleted_at IS NULL AND d.lifecycle_state = 'active'
       GROUP BY d.doc_id
       ORDER BY d.created_at DESC
-    `).all(datasetId) as unknown as DocumentRow[];
+    `).all(Date.now(), datasetId) as unknown as DocumentRow[];
 
     const documents: PeProjectDocumentSummary[] = [];
     const knownFilenames = new Set<string>();
+    const summariesByDocId = new Map<string, PeProjectDocumentSummary>();
+    const activeProcessingDocIds = new Set(documentRows.filter((row) => row.active_processing_lease === 1).map((row) => row.doc_id));
     for (const row of documentRows) {
       const rawFile = safeProjectFile(paths, row.raw_path);
       const markdownFile = safeProjectFile(paths, row.document_markdown_path);
@@ -165,6 +179,9 @@ export function listPeProjectDocuments(
       const needsOcrPageCount = Number(row.needs_ocr_page_count) || 0;
       documents.push({
         filename: row.original_filename,
+        ...(row.file_type !== "pdf" ? {
+          docId: row.doc_id, fileType: row.file_type, versionNo: Number(row.version_no), isCurrent: row.is_current === 1,
+        } : {}),
         status: documentStatus(row.status),
         pageCount: Number(row.page_count) || 0,
         sizeBytes: rawFile?.sizeBytes ?? null,
@@ -176,7 +193,8 @@ export function listPeProjectDocuments(
         rawRelativePath: rawFile?.relativePath ?? null,
         markdownRelativePath: markdownFile?.relativePath ?? null,
       });
-      knownFilenames.add(row.original_filename.normalize("NFKC").toLocaleLowerCase("und"));
+      summariesByDocId.set(row.doc_id, documents[documents.length - 1]);
+      if (row.file_type === "pdf") knownFilenames.add(row.original_filename.normalize("NFKC").toLocaleLowerCase("und"));
     }
 
     const jobRows = database.prepare(`
@@ -185,12 +203,29 @@ export function listPeProjectDocuments(
       WHERE dataset_id = ?
       ORDER BY updated_at DESC
     `).all(datasetId) as unknown as IngestJobRow[];
+    const seenJobDocuments = new Set<string>();
     for (const row of jobRows) {
       const status = jobStatus(row.status);
       if (!status) continue;
       const results = ingestResults(row.result_json);
       const resultsByFilename = new Map(results.files.map((file) => [file.originalFilename, file]));
       for (const input of ingestInputs(row.input_files_json)) {
+        if (input.docId) {
+          if (seenJobDocuments.has(input.docId)) continue;
+          seenJobDocuments.add(input.docId);
+          if (activeProcessingDocIds.has(input.docId)) continue;
+          const summary = summariesByDocId.get(input.docId);
+          const result = resultsByFilename.get(input.originalFilename);
+          if (summary && result?.status !== "created" && Date.parse(row.updated_at) >= Date.parse(summary.updatedAt)) {
+            if (status === "queued" || status === "running") summary.status = status;
+            else if (result?.status === "failed" && summary.status !== "completed" && summary.status !== "completed_with_warnings") {
+              summary.status = "failed";
+              summary.warnings = [...new Set([...summary.warnings, publicMessage(result.error ?? row.message)])];
+              summary.warningCount = summary.warnings.length;
+            }
+          }
+          continue;
+        }
         const filenameKey = input.originalFilename.normalize("NFKC").toLocaleLowerCase("und");
         if (knownFilenames.has(filenameKey)) continue;
         const result = resultsByFilename.get(input.originalFilename);
@@ -220,7 +255,7 @@ export function listPeProjectDocuments(
     }
 
     documents.sort((left, right) => right.uploadedAt.localeCompare(left.uploadedAt));
-    return { documents };
+    return { documents, currentCount: documentRows.filter((document) => document.is_current === 1).length };
   } finally {
     database.close();
   }
