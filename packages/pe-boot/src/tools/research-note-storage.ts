@@ -2,6 +2,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, realpathSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
+import { resolvePeEvidenceSources } from "../evidence.ts";
+import type { PeSourcePayload } from "../source.ts";
 import { openWritablePeDataset, type SqlRow, sourceCitation } from "./database.ts";
 
 const MAX_CONTENT_HTML_CHARS = 50_000;
@@ -101,7 +103,20 @@ function activeDocumentPredicate(): string {
 	return "d.deleted_at IS NULL AND COALESCE(d.is_current, 1) = 1 AND COALESCE(d.lifecycle_state, 'active') = 'active'";
 }
 
-function resolveEvidence(database: DatabaseSync, datasetId: string, evidenceId: string): EvidenceResolution {
+function resolveEvidence(
+	database: DatabaseSync,
+	datasetId: string,
+	evidenceId: string,
+	sources: ReadonlyMap<string, PeSourcePayload>,
+): EvidenceResolution {
+	const source = sources.get(evidenceId);
+	if (source) return { evidenceId, resolved: true, citation: source.citation };
+	if (
+		evidenceId.startsWith("source:") ||
+		(/^(cell|fact):/u.test(evidenceId) &&
+			(database.prepare("PRAGMA table_info(documents)").all() as SqlRow[]).some((row) => row.name === "stored_path"))
+	)
+		return { evidenceId, resolved: false };
 	const separator = evidenceId.indexOf(":");
 	if (separator <= 0 || separator === evidenceId.length - 1) return { evidenceId, resolved: false };
 	const kind = evidenceId.slice(0, separator);
@@ -177,11 +192,11 @@ function writeAtomicFile(finalPath: string, content: string): void {
 	}
 }
 
-export function savePeResearchNote(
+export async function savePeResearchNote(
 	cwd: string,
 	options: SavePeResearchNoteOptions,
 	signal?: AbortSignal,
-): PeResearchNoteResult {
+): Promise<PeResearchNoteResult> {
 	const title = normalizeText(options.title);
 	const summary = normalizeText(options.summary);
 	if (!title) throw new Error("title is required");
@@ -197,6 +212,7 @@ export function savePeResearchNote(
 	let committed = false;
 	let finalPath: string | undefined;
 	try {
+		const sources = await resolvePeEvidenceSources(cwd, evidenceIds, signal);
 		ensureResearchNoteSchema(connection.database);
 		const researchNotesRoot = ensureResearchNotesRoot(connection.workspaceRoot);
 		const createdAt = new Date().toISOString();
@@ -208,7 +224,7 @@ export function savePeResearchNote(
 		if (!isInside(researchNotesRoot, finalPath)) throw new Error("Research Note path escapes its managed directory");
 		const htmlRelativePath = relative(connection.workspaceRoot, finalPath).split(sep).join("/");
 		const evidence = evidenceIds.map((evidenceId) =>
-			resolveEvidence(connection.database, connection.datasetId, evidenceId),
+			resolveEvidence(connection.database, connection.datasetId, evidenceId, sources),
 		);
 
 		connection.database.exec("BEGIN IMMEDIATE");

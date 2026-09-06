@@ -1,0 +1,241 @@
+import { createHash } from "node:crypto";
+import { existsSync, lstatSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { basename, extname, isAbsolute, join, relative, resolve } from "node:path";
+import { initializePeCollectionDatabase, openPeCollectionDatabase } from "./collection-schema.ts";
+import { type PreparedWorkbook, prepareWorkbook, validatePeExcelUpload, verifyPeOriginal } from "./excel-processing.ts";
+import { documentFilePath, openPeDataset, openWritablePeDataset, type SqlRow, textValue } from "./tools/database.ts";
+
+export const DOCUMENT_EXTENSIONS = new Set([".xlsx", ".xlsm"]);
+
+export interface PeDocumentOptions {
+	docId?: string;
+	path?: string;
+	datasetId?: string;
+}
+
+export interface PreparedPeDocument {
+	document: SqlRow;
+	datasetId: string;
+	workspaceRoot: string;
+	filePath: string;
+	readablePath: string;
+	cachePath: string;
+	warnings: string[];
+}
+
+export class PeSourceError extends Error {
+	readonly status: number;
+	constructor(status: number, message: string) {
+		super(message);
+		this.name = "PeSourceError";
+		this.status = status;
+	}
+}
+
+function projectRoot(cwd: string): string {
+	const root = realpathSync(cwd);
+	for (const name of ["raw", "meta"]) {
+		const entry = lstatSync(join(root, name));
+		if (!entry.isDirectory() || entry.isSymbolicLink())
+			throw new PeSourceError(400, `${name}/ must be a real project directory`);
+	}
+	const database = join(root, "meta", "collection.sqlite3");
+	if (existsSync(database) && lstatSync(database).isSymbolicLink())
+		throw new PeSourceError(400, "Project database must not be a symlink");
+	return root;
+}
+
+/** Register immutable Excel originals. The upload worker prepares their derived data separately. */
+export function registerPeDocuments(
+	cwd: string,
+	datasetId: string,
+	files: Array<{ name: string; bytes: Uint8Array }>,
+): { documents: SqlRow[]; fileCount: number } {
+	const root = projectRoot(cwd);
+	const inputs = files.map(({ name, bytes }) => {
+		const extension = extname(name).toLowerCase();
+		if (basename(name) !== name || /[\\/\x00-\x1f]/u.test(name) || !DOCUMENT_EXTENSIONS.has(extension))
+			throw new PeSourceError(400, `Unsupported Excel filename: ${name}`);
+		try {
+			validatePeExcelUpload(bytes, extension.slice(1));
+		} catch (error) {
+			throw new PeSourceError(400, error instanceof Error ? error.message : String(error));
+		}
+		return { name, bytes, extension, checksum: createHash("sha256").update(bytes).digest("hex") };
+	});
+	initializePeCollectionDatabase(join(root, "meta", "collection.sqlite3"));
+	const metadata = openPeCollectionDatabase(join(root, "meta", "collection.sqlite3"));
+	try {
+		const now = new Date().toISOString();
+		metadata
+			.prepare("INSERT OR IGNORE INTO project_metadata(id,dataset_id,name,created_at,updated_at) VALUES (1,?,?,?,?)")
+			.run(datasetId, basename(root), now, now);
+	} finally {
+		metadata.close();
+	}
+	const connection = openWritablePeDataset(root, datasetId);
+	const database = connection.database;
+	const created: string[] = [];
+	try {
+		database.exec("BEGIN IMMEDIATE");
+		const documents: SqlRow[] = [];
+		for (const { name, bytes, extension, checksum } of inputs) {
+			const generatedLogicalId = createHash("sha256").update(`${datasetId}\0${name}`).digest("hex").slice(0, 40);
+			const current = database
+				.prepare(`SELECT * FROM documents WHERE dataset_id=? AND file_type IN ('xlsx','xlsm')
+				AND (logical_doc_id=? OR source_relpath=? OR source_relpath=?) AND is_current=1 AND lifecycle_state='active' AND deleted_at IS NULL ORDER BY version_no DESC LIMIT 1`)
+				.get(datasetId, generatedLogicalId, name, `raw/${name}`) as SqlRow | undefined;
+			const logicalId = textValue(current ?? {}, "logical_doc_id") ?? generatedLogicalId;
+			if (current && textValue(current, "checksum") === checksum) {
+				if (
+					createHash("sha256")
+						.update(readFileSync(documentFilePath(root, current)))
+						.digest("hex") !== checksum
+				)
+					throw new PeSourceError(
+						409,
+						"Stored original was modified; restore it before uploading this version again",
+					);
+				documents.push(current);
+				continue;
+			}
+			const sequence = database
+				.prepare(
+					"SELECT COALESCE(MAX(version_no),0)+1 AS version FROM documents WHERE dataset_id=? AND logical_doc_id=?",
+				)
+				.get(datasetId, logicalId) as SqlRow;
+			const version = Number(sequence.version);
+			const docId = createHash("sha256").update(`${logicalId}\0${version}\0${checksum}`).digest("hex").slice(0, 40);
+			const storedName = existsSync(join(root, "raw", name))
+				? `${name.slice(0, -extension.length)}--${docId}${extension}`
+				: name;
+			const target = join(root, "raw", storedName);
+			writeFileSync(target, bytes, { flag: "wx", mode: 0o600 });
+			created.push(target);
+			const now = new Date().toISOString();
+			database
+				.prepare("UPDATE documents SET is_current=0 WHERE dataset_id=? AND logical_doc_id=?")
+				.run(datasetId, logicalId);
+			database
+				.prepare(`INSERT INTO documents
+				(doc_id,dataset_id,logical_doc_id,version_no,supersedes_doc_id,is_current,title,original_filename,filename_key,
+				source_relpath,stored_path,raw_path,file_type,checksum,sha256,file_size,status,page_count,created_at,updated_at)
+				VALUES (?,?,?,?,?,1,?,?,?,?,?,?,?,?,?,?,'queued',0,?,?)`)
+				.run(
+					docId,
+					datasetId,
+					logicalId,
+					version,
+					current?.doc_id ?? null,
+					name,
+					name,
+					name.normalize("NFKC").toLocaleLowerCase("und"),
+					name,
+					`raw/${storedName}`,
+					`raw/${storedName}`,
+					extension.slice(1),
+					checksum,
+					checksum,
+					bytes.byteLength,
+					now,
+					now,
+				);
+			documents.push(database.prepare("SELECT * FROM documents WHERE doc_id=?").get(docId) as SqlRow);
+		}
+		const count = database
+			.prepare(
+				"SELECT COUNT(*) AS count FROM documents WHERE dataset_id=? AND is_current=1 AND lifecycle_state='active' AND deleted_at IS NULL",
+			)
+			.get(datasetId) as SqlRow;
+		database.exec("COMMIT");
+		return { documents, fileCount: Number(count.count) };
+	} catch (error) {
+		database.exec("ROLLBACK");
+		for (const path of created) rmSync(path, { force: true });
+		throw error;
+	} finally {
+		database.close();
+	}
+}
+
+/** Shared readiness barrier for upload workers, Excel tools, and historical source previews. */
+export async function preparePeDocument(
+	cwd: string,
+	options: PeDocumentOptions,
+	signal?: AbortSignal,
+): Promise<PreparedPeDocument> {
+	signal?.throwIfAborted();
+	if (!options.docId?.trim() && !options.path?.trim())
+		throw new PeSourceError(400, "Specify a document filename or doc_id");
+	const root = projectRoot(cwd);
+	initializePeCollectionDatabase(join(root, "meta", "collection.sqlite3"));
+	const connection = openPeDataset(root, options.datasetId);
+	let document: SqlRow | undefined;
+	try {
+		if (options.docId)
+			document = connection.database
+				.prepare("SELECT * FROM documents WHERE dataset_id=? AND doc_id=? AND deleted_at IS NULL")
+				.get(connection.datasetId, options.docId) as SqlRow | undefined;
+		else {
+			const requested = options.path?.trim() ?? "";
+			const local = isAbsolute(requested) ? relative(root, resolve(requested)) : requested;
+			if (local.startsWith("..") || isAbsolute(local))
+				throw new PeSourceError(400, "Document path is outside the project");
+			const name = local.replaceAll("\\", "/").replace(/^raw\//u, "");
+			document = connection.database
+				.prepare(`SELECT * FROM documents WHERE dataset_id=? AND is_current=1 AND lifecycle_state='active' AND deleted_at IS NULL
+				AND (source_relpath=? OR source_relpath=? OR stored_path=? OR stored_path=?) ORDER BY version_no DESC LIMIT 1`)
+				.get(connection.datasetId, name, `raw/${name}`, `raw/${name}`, resolve(root, "raw", name)) as
+				| SqlRow
+				| undefined;
+		}
+	} finally {
+		connection.database.close();
+	}
+	if (!document) throw new PeSourceError(404, "Document not found in this project's upload catalog");
+	if (!DOCUMENT_EXTENSIONS.has(`.${document.file_type}`))
+		throw new PeSourceError(400, "This reader prepares Excel workbooks; PDF documents use the PDF Pipeline");
+	let filePath: string;
+	try {
+		filePath = documentFilePath(root, document);
+		await verifyPeOriginal(filePath, textValue(document, "checksum") ?? textValue(document, "sha256") ?? "", signal);
+	} catch (error) {
+		signal?.throwIfAborted();
+		const missing = error instanceof Error && "code" in error && error.code === "ENOENT";
+		throw new PeSourceError(
+			missing ? 404 : 409,
+			missing ? "Document original is missing" : error instanceof Error ? error.message : String(error),
+		);
+	}
+	let prepared: PreparedWorkbook;
+	try {
+		prepared = await prepareWorkbook(root, document, filePath, signal);
+	} catch (error) {
+		signal?.throwIfAborted();
+		try {
+			await verifyPeOriginal(filePath, String(document.sha256), signal);
+		} catch (originalError) {
+			signal?.throwIfAborted();
+			const missing = originalError instanceof Error && "code" in originalError && originalError.code === "ENOENT";
+			throw new PeSourceError(
+				missing ? 404 : 409,
+				missing
+					? "Document original is missing"
+					: originalError instanceof Error
+						? originalError.message
+						: String(originalError),
+			);
+		}
+		throw error;
+	}
+	const refreshed = openPeDataset(root, connection.datasetId);
+	try {
+		document =
+			(refreshed.database.prepare("SELECT * FROM documents WHERE doc_id=?").get(document.doc_id) as
+				| SqlRow
+				| undefined) ?? document;
+	} finally {
+		refreshed.database.close();
+	}
+	return { document, datasetId: connection.datasetId, workspaceRoot: root, filePath, ...prepared };
+}

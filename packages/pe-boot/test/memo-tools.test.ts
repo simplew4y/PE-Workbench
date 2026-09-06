@@ -122,6 +122,7 @@ describe("PE Memo tools", () => {
 				description: expect.stringContaining("persistent, evidence-backed PE Memo"),
 			}),
 			expect.objectContaining({ name: "pe-research-note" }),
+			expect.objectContaining({ name: "valuation-model-explainer" }),
 		]);
 	});
 

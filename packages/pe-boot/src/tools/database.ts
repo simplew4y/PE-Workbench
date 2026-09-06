@@ -1,6 +1,7 @@
 import { realpathSync, statSync } from "node:fs";
-import { isAbsolute, join, relative } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { sourceId } from "../source.ts";
 
 export type SqlValue = string | number | bigint | Uint8Array | null;
 export type SqlRow = Record<string, SqlValue>;
@@ -22,6 +23,9 @@ export interface EvidenceLocator {
 	sheet_name?: string;
 	cell_range?: string;
 	heading_path?: string;
+	line_start?: number;
+	line_end?: number;
+	block_index?: number;
 }
 
 const PE_SOURCE_HASH = "#pe-source";
@@ -93,7 +97,7 @@ export function sourceMarkdownCitation(row: SqlRow, evidenceId: string): string 
 	return `[${escapeMarkdownLinkText(citation)}](${evidenceSourceUrl(evidenceId)})`;
 }
 
-function resolvePeDatasetLocation(cwd: string): PeDatasetLocation {
+export function resolvePeDatasetLocation(cwd: string): PeDatasetLocation {
 	let workspaceRoot: string;
 	try {
 		workspaceRoot = realpathSync(cwd);
@@ -167,4 +171,46 @@ export function openPeDataset(cwd: string, expectedDatasetId?: string): PeDatase
 
 export function openWritablePeDataset(cwd: string, expectedDatasetId?: string): PeDatasetDatabase {
 	return openResolvedPeDataset(resolvePeDatasetLocation(cwd), expectedDatasetId, false);
+}
+
+export function sourceEvidenceId(row: SqlRow): string {
+	const docId = textValue(row, "doc_id");
+	if (!docId) throw new Error("A source must identify a document version");
+	const locator = evidenceLocator(row);
+	if (locator.sheet_name && locator.cell_range) {
+		return sourceId({ docId, location: { kind: "excel", sheet: locator.sheet_name, range: locator.cell_range } });
+	}
+	if (locator.page_start !== undefined) {
+		return sourceId({
+			docId,
+			location: { kind: "pdf", pageStart: locator.page_start, pageEnd: locator.page_end ?? locator.page_start },
+		});
+	}
+	if (locator.line_start !== undefined) {
+		return sourceId({
+			docId,
+			location: { kind: "text", lineStart: locator.line_start, lineEnd: locator.line_end ?? locator.line_start },
+		});
+	}
+	if (locator.block_index !== undefined)
+		return sourceId({ docId, location: { kind: "block", blockIndex: locator.block_index } });
+	throw new Error("A source must include a concrete file location");
+}
+
+export function documentFilePath(workspaceRoot: string, document: SqlRow): string {
+	const stored = textValue(document, "stored_path") ?? textValue(document, "raw_path");
+	if (!stored) throw new Error("Document has no original file path");
+	const candidate = realpathSync(resolve(workspaceRoot, stored));
+	const rel = relative(realpathSync(join(workspaceRoot, "raw")), candidate);
+	if (!rel || rel.startsWith("..") || isAbsolute(rel) || !statSync(candidate).isFile()) {
+		throw new Error("Document original must resolve to a file inside raw/");
+	}
+	return candidate;
+}
+
+export function normalizeText(value: unknown): string {
+	return String(value ?? "")
+		.normalize("NFKC")
+		.replace(/\s+/gu, " ")
+		.trim();
 }

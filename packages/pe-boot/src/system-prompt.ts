@@ -1,4 +1,3 @@
-import { PE_PRESENTATION_SELECTION } from "./presentation-policy.ts";
 import { PE_TOOL_PROMPT_SNIPPETS } from "./tools/index.ts";
 
 //hardcode暂时拼接
@@ -45,5 +44,16 @@ ${PE_WORKSPACE}
 Available tools:
 ${toolsList}
 
-For PE evidence, place the exact markdown_citation after each material claim; never expose a bare evidence_id. Preserve the internal #pe-source?evidence_id= fragment exactly. It is an application action, not a website URL. Never expand it into https://pe-workbench.local, another host, a file link, or a source_collection URL. Green citation controls and their original-document preview must remain available in every presentation style.`;
+PDF uploads are processed by the background PDF pipeline. Use pe_pdf_search to find evidence pages and pe_pdf_read to inspect exact pages; use native read on returned page-image paths when visual inspection is needed. Preserve their page: citations.
+Excel uploads register immutable original versions and are prepared by the background Excel pipeline. Use pe_workbook_inspect to select one active workbook. Excel tools wait for preparation or rebuild a missing cache. Call pe_document_open for its readable_path and use native read/grep (or bash with rg) for fallback inspection. Never modify originals or the managed file catalog/cache.
+Excel source: links bind a document version to its worksheet and cell range independently of parser caches. Legacy cell: links remain resolvable. Copy exact citations from tool output. pe_source_detail resolves the same location used by the right-hand source preview; historical citations must never silently resolve to the latest version.
+
+For PE evidence, place the exact markdown_citation after each material claim; never expose a bare evidence_id. Preserve the internal #pe-source?evidence_id= fragment exactly. It is an application action, not a website URL. Never expand it into https://pe-workbench.local, another host, a file link, or a source_collection URL. Green citation controls and their original-document preview must remain available in every presentation style.
+For valuation-model analysis, call pe_valuation_output_locate before choosing an output cell. A selected result is a ranked candidate, not recalculation proof; preserve ambiguous candidates instead of choosing the first label match.
+For valuation-model date claims, call pe_valuation_date_resolve with the selected output candidate ID, sheet, and cell. Only status=verified supports the phrase "verified valuation date"; never substitute a forecast period, document filename date, or file timestamp.
+
+For broad valuation-model analysis requests, default to a structured Chinese analysis with four sections: 模型逻辑框架, 核心驱动因素, 盈利预测与敏感性分析, and 模型核心风险点. Explain the model's investment thesis, how its key operating assumptions drive earnings or cash flow, and how those forecasts support the valuation. Include the target price, reference price and upside/downside, valuation year and method, and any supported cross-check; include a prior target or rating only when the source provides them. Adapt EPS, EBITDA, or FCF coverage to the actual valuation method.
+Use compact tables for valuation metrics and a few key forecast periods, followed by focused explanations of the main drivers and risks. Do not repeat a table as a text list, restate every figure in prose, or append a redundant full summary. A general model analysis is not limited to 3-5 lines or 250 Chinese characters. Use a results-only summary when the user explicitly asks for a brief answer or only the conclusion; for a narrow question, answer only that question. Expand further when requested.
+Separate model-provided sensitivity results from supplemental hypothetical calculations. Quantify a scenario only with verified inputs, the applicable formula, consistent units, and stated fixed assumptions; label supplemental calculations as such. Missing inputs support a qualitative impact path, not invented EPS changes, rankings of sensitivity, or market-based scenario labels. Treat user examples as structure references, not facts about the current model.
+Keep required tool verification and decisive markdown_citation references, preserve ambiguous output candidates, and disclose unresolved valuation dates, price conflicts, or other limitations affecting the result. A model-entered or cached price is not a live quote. Do not hide material uncertainty for brevity.`;
 }

@@ -139,14 +139,14 @@ afterEach(() => {
 });
 
 describe("PE page-level PDF retrieval", () => {
-	it("advertises and exposes only the new PDF retrieval tools", () => {
+	it("keeps PDF retrieval registered alongside the complete Excel tool chain", () => {
 		expect(pePdfSearchTool.name).toBe("pe_pdf_search");
 		expect(pePdfReadTool.name).toBe("pe_pdf_read");
 		const prompt = buildPeSystemPrompt("/workspace");
 		expect(prompt).toContain("- pe_pdf_search:");
 		expect(prompt).toContain("- pe_pdf_read:");
 		expect(prompt).not.toContain("- pe_dataset_search:");
-		expect(prompt).not.toContain("- pe_source_detail:");
+		expect(prompt).toContain("- pe_source_detail:");
 		const registered: string[] = [];
 		const extension = {
 			registerTool(tool: { name: string }) {
@@ -158,7 +158,21 @@ describe("PE page-level PDF retrieval", () => {
 		expect(registered).toContain("pe_pdf_search");
 		expect(registered).toContain("pe_pdf_read");
 		expect(registered).not.toContain("pe_dataset_search");
-		expect(registered).not.toContain("pe_source_detail");
+		expect(registered).toContain("pe_source_detail");
+		expect(new Set(registered).size).toBe(registered.length);
+		expect(registered).toEqual(
+			expect.arrayContaining([
+				"pe_document_open",
+				"pe_workbook_inspect",
+				"pe_excel_range",
+				"pe_formula_trace",
+				"pe_valuation_output_locate",
+				"pe_valuation_date_resolve",
+				"pe_model_validate",
+			]),
+		);
+		expect(prompt).toContain("Preserve their page: citations");
+		expect(prompt).toContain("Historical citations".toLowerCase());
 	});
 
 	it("searches complete pages without hardcoded synonym expansion", () => {
@@ -237,7 +251,7 @@ describe("PE page-level PDF retrieval", () => {
 
 	it("accepts page evidence in Research Notes and Memo Citation Gate", async () => {
 		const root = createPageDatasetFixture();
-		const note = savePeResearchNote(root, {
+		const note = await savePeResearchNote(root, {
 			title: "储能盈利研究笔记",
 			summary: "核验储能单位盈利。",
 			presentationMode: "text",
