@@ -8,6 +8,14 @@ import {
 
 export const runtime = "nodejs";
 
+function projectErrorResponse(error: unknown): NextResponse {
+  const message = error instanceof Error ? error.message : String(error);
+  return NextResponse.json(
+    { error: message },
+    { status: /already exists/iu.test(message) ? 409 : 400 },
+  );
+}
+
 export async function GET() {
   try {
     const catalog = listPeProjects();
@@ -31,7 +39,7 @@ export async function POST(request: Request) {
     });
     return NextResponse.json({ project }, { status: 201 });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 400 });
+    return projectErrorResponse(error);
   }
 }
 
@@ -45,7 +53,7 @@ export async function PATCH(request: Request) {
     const project = activatePeProject(datasetId);
     return NextResponse.json({ project });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 400 });
+    return projectErrorResponse(error);
   }
 }
 

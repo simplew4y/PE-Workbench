@@ -2,15 +2,18 @@ import { randomBytes } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
+  readdirSync,
   realpathSync,
   renameSync,
   rmSync,
   statSync,
+  writeFileSync,
 } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { allowFileRoot } from "./file-access";
+import { initializePeCollectionDatabase } from "./pe-ingest/schema";
 import { disallowFileRoot } from "./allowed-roots";
 import { projectIdentityKey } from "./project-identity";
 import type {
@@ -40,6 +43,7 @@ const REGISTRY_SCHEMA = `
   CREATE TABLE IF NOT EXISTS datasets (
     dataset_id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
+    name_key TEXT NOT NULL UNIQUE,
     status TEXT NOT NULL,
     source_dir TEXT,
     dataset_root TEXT NOT NULL UNIQUE,
@@ -59,15 +63,54 @@ const REGISTRY_SCHEMA = `
   );
 `;
 
-const PROJECT_METADATA_SCHEMA = `
-  CREATE TABLE IF NOT EXISTS project_metadata (
-    id INTEGER PRIMARY KEY CHECK(id = 1),
-    dataset_id TEXT NOT NULL UNIQUE,
-    name TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-  );
-`;
+const WINDOWS_RESERVED_NAME = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/iu;
+
+function normalizeProjectName(value: string): string {
+  const name = value.normalize("NFKC").trim();
+  if (!name) throw new Error("Project name is required");
+  if (name.length > 100 || Buffer.byteLength(name, "utf8") > 200) {
+    throw new Error("Project name is too long");
+  }
+  if (
+    name === "."
+    || name === ".."
+    || name.startsWith(".")
+    || /[<>:"/\\|?*\u0000-\u001F]/u.test(name)
+    || /[. ]$/u.test(name)
+    || WINDOWS_RESERVED_NAME.test(name)
+  ) {
+    throw new Error("Project name contains characters that cannot be used in a workspace directory");
+  }
+  return name;
+}
+
+function projectNameKey(name: string): string {
+  return name.normalize("NFKC").toLocaleLowerCase("und");
+}
+
+function renderProjectOverview(
+  name: string,
+  companyName: string,
+  companyTicker: string,
+): string {
+  const identity = [
+    companyName ? `- 公司：${companyName}` : "",
+    companyTicker ? `- 股票代码：${companyTicker}` : "",
+  ].filter(Boolean);
+  return [
+    `# ${name}`,
+    "",
+    ...identity,
+    ...(identity.length > 0 ? [""] : []),
+    "## 工作区目录",
+    "",
+    "- `raw/`：用户上传的原始资料。",
+    "- `meta/text/`：从当前资料提取的、供研究与检索使用的 Markdown 文本。",
+    "- `meta/documents/`：PDF 页面图片和布局数据。",
+    "- `generated/`：Memo、Research Note 等研究产物。",
+    "",
+  ].join("\n");
+}
 
 function storePaths(options: PeProjectStoreOptions = {}): {
   registryPath: string;
@@ -218,53 +261,71 @@ export function createPeProject(
   input: CreatePeProjectInput,
   options: PeProjectStoreOptions = {},
 ): PeProjectSummary {
-  const name = input.name.trim();
-  if (!name) throw new Error("Project name is required");
-  if (name.length > 100) throw new Error("Project name must not exceed 100 characters");
+  const name = normalizeProjectName(input.name);
+  const nameKey = projectNameKey(name);
+  const companyName = input.companyName?.trim() ?? "";
+  const companyTicker = input.companyTicker?.trim() ?? "";
 
   const paths = storePaths(options);
   mkdirSync(paths.projectsRoot, { recursive: true });
   const projectsRoot = realpathSync(paths.projectsRoot);
   const datasetId = `dataset_${randomBytes(10).toString("hex")}`;
-  const projectRoot = join(projectsRoot, datasetId);
-  if (!isInside(projectsRoot, projectRoot) || existsSync(projectRoot)) {
-    throw new Error("Unable to allocate a safe project workspace");
+  const projectRoot = join(projectsRoot, name);
+  const directoryNameExists = readdirSync(projectsRoot).some(
+    (entry) => projectNameKey(entry) === nameKey,
+  );
+  if (!isInside(projectsRoot, projectRoot) || directoryNameExists || existsSync(projectRoot)) {
+    throw new Error(`Project name already exists: ${name}`);
+  }
+
+  const existingRegistry = openRegistry(options);
+  try {
+    const existing = existingRegistry.prepare(
+      "SELECT dataset_id FROM datasets WHERE name_key = ?",
+    ).get(nameKey);
+    if (existing) throw new Error(`Project name already exists: ${name}`);
+  } finally {
+    existingRegistry.close();
   }
 
   const now = new Date().toISOString();
   let projectCreated = false;
   try {
-    mkdirSync(join(projectRoot, "raw"), { recursive: true });
-    mkdirSync(join(projectRoot, "meta"), { recursive: true });
-    mkdirSync(join(projectRoot, "generated"), { recursive: true });
+    mkdirSync(projectRoot);
     projectCreated = true;
+    mkdirSync(join(projectRoot, "raw"));
+    mkdirSync(join(projectRoot, "meta"));
+    mkdirSync(join(projectRoot, "meta", "text"));
+    mkdirSync(join(projectRoot, "meta", "documents"));
+    mkdirSync(join(projectRoot, "generated"));
+    writeFileSync(
+      join(projectRoot, "meta", "project.md"),
+      renderProjectOverview(name, companyName, companyTicker),
+      "utf8",
+    );
 
-    const collection = new DatabaseSync(join(projectRoot, "meta", "collection.sqlite3"));
-    try {
-      collection.exec(PROJECT_METADATA_SCHEMA);
-      collection.prepare(`
-        INSERT INTO project_metadata (id, dataset_id, name, created_at, updated_at)
-        VALUES (1, ?, ?, ?, ?)
-      `).run(datasetId, name, now, now);
-    } finally {
-      collection.close();
-    }
+    initializePeCollectionDatabase(join(projectRoot, "meta", "collection.sqlite3"), {
+      datasetId,
+      name,
+      now,
+    });
 
     const database = openRegistry(options);
     try {
       database.exec("BEGIN IMMEDIATE");
       database.prepare(`
         INSERT INTO datasets (
-          dataset_id, name, status, source_dir, dataset_root, company_name,
+          dataset_id, name, name_key, status, source_dir, dataset_root, company_name,
           company_ticker, file_count, created_at, updated_at, metadata_json
-        ) VALUES (?, ?, 'draft', ?, ?, ?, ?, 0, ?, ?, ?)
+        ) VALUES (?, ?, ?, 'draft', ?, ?, ?, ?, 0, ?, ?, ?)
       `).run(
         datasetId,
         name,
+        nameKey,
         join(projectRoot, "raw"),
         projectRoot,
-        input.companyName?.trim() ?? "",
-        input.companyTicker?.trim() ?? "",
+        companyName,
+        companyTicker,
         now,
         now,
         JSON.stringify({ source: "pe_workbench_web" }),
@@ -291,8 +352,8 @@ export function createPeProject(
       status: "draft",
       root: projectRoot,
       projectKey: projectIdentityKey(projectRoot),
-      companyName: input.companyName?.trim() ?? "",
-      companyTicker: input.companyTicker?.trim() ?? "",
+      companyName,
+      companyTicker,
       fileCount: 0,
       createdAt: now,
       updatedAt: now,
@@ -316,7 +377,6 @@ export function deletePeProject(
 
   const paths = storePaths(options);
   const projectsRoot = resolve(paths.projectsRoot);
-  const expectedProjectRoot = join(projectsRoot, normalizedDatasetId);
   const database = openRegistry(options);
   let row: SqlRow | undefined;
   try {
@@ -329,6 +389,7 @@ export function deletePeProject(
     database.close();
   }
   if (!row) throw new Error(`Project not found: ${normalizedDatasetId}`);
+  const expectedProjectRoot = join(projectsRoot, normalizeProjectName(row.name));
   if (resolve(row.dataset_root) !== expectedProjectRoot || dirname(expectedProjectRoot) !== projectsRoot) {
     throw new Error("Registered project root is outside the PE projects directory");
   }
