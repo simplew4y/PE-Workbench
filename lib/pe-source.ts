@@ -72,7 +72,7 @@ export function parsePeSourceHref(href: string | undefined): PeSourceReference |
   }
   if (!suffix.startsWith("?")) return null;
   const evidenceId = new URLSearchParams(suffix.slice(1)).get("evidence_id")?.trim();
-  if (!evidenceId || !/^(?:chunk|fact|cell):[^\s:]+$/u.test(evidenceId)) return null;
+  if (!evidenceId || !/^(?:page|chunk|fact|cell):[^\s:]+$/u.test(evidenceId)) return null;
   return { evidenceId };
 }
 
