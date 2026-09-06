@@ -113,13 +113,16 @@ afterEach(() => {
 describe("PE Research Note tool", () => {
 	it("registers the tool prompt and loads pe-research-note", () => {
 		expect(peResearchNoteSaveTool.name).toBe("pe_research_note_save");
-		expect(buildPeSystemPrompt("/workspace")).toContain("- pe_research_note_save:");
+		const prompt = buildPeSystemPrompt("/workspace");
+		expect(prompt).not.toContain("- pe_research_note_save:");
+		expect(prompt).toContain("- pe_pdf_search:");
+		expect(prompt).toContain("- pe_pdf_read:");
 
 		const packageDirectory = dirname(dirname(fileURLToPath(import.meta.url)));
 		const result = loadSkillsFromDir({ dir: join(packageDirectory, "skills"), source: "test" });
 		expect(result.diagnostics).toEqual([]);
-		expect(result.skills.map((skill) => skill.name)).toEqual(["pe-memo", "pe-research-note"]);
-		expect(result.skills[1]?.description).toContain("Research Note");
+		expect(result.skills.map((skill) => skill.name)).toEqual(["pe-generative-ui", "pe-memo", "pe-research-note"]);
+		expect(result.skills[2]?.description).toContain("Research Note");
 	});
 
 	it("saves all presentation modes as exact, independent HTML assets", () => {

@@ -106,8 +106,8 @@ describe("PE Memo tools", () => {
 		const prompt = buildPeSystemPrompt("/workspace");
 		expect(prompt).not.toContain("- pe_dataset_memo:");
 		expect(prompt).not.toContain("- pe_history_compare:");
-		expect(prompt).toContain("- pe_dataset_search:");
-		expect(prompt).toContain("- pe_source_detail:");
+		expect(prompt).toContain("- pe_pdf_search:");
+		expect(prompt).toContain("- pe_pdf_read:");
 
 		const packageDirectory = dirname(dirname(fileURLToPath(import.meta.url)));
 		const result = loadSkillsFromDir({ dir: join(packageDirectory, "skills"), source: "test" });

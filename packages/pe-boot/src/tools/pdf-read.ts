@@ -1,0 +1,198 @@
+import { extname } from "node:path";
+import { defineTool } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
+import {
+	numberValue,
+	openPeDataset,
+	type SqlRow,
+	sourceCitation,
+	sourceMarkdownCitation,
+	textValue,
+} from "./database.ts";
+
+const MAX_PAGE_RANGE = 10;
+const MAX_PAGE_TEXT_CHARS = 30_000;
+
+export const PE_PDF_READ_PROMPT_SNIPPET =
+	"Read complete pages from a named project PDF, including neighboring context, page images, and citations";
+
+export interface PePdfReadOptions {
+	documentName: string;
+	pageStart: number;
+	pageEnd?: number;
+	datasetId?: string;
+}
+
+export interface PePdfReadPage {
+	evidence_id: string;
+	page_number: number;
+	page_role: string;
+	text_quality: string;
+	page_header: string;
+	content: string;
+	content_truncated: boolean;
+	page_image_paths: string[];
+	citation: string;
+	markdown_citation: string;
+}
+
+export interface PePdfReadResult {
+	dataset_id: string;
+	document: {
+		filename: string;
+		title?: string;
+		page_count: number;
+		document_markdown_path: string;
+		layout_json_path: string;
+	};
+	page_start: number;
+	page_end: number;
+	pages: PePdfReadPage[];
+	answer_contract: string;
+}
+
+function normalizeDocumentName(value: string): string {
+	const normalized = value.normalize("NFKC").trim().toLocaleLowerCase("und");
+	if (!normalized) throw new Error("document_name is required");
+	return extname(normalized).toLocaleLowerCase("und") === ".pdf" ? normalized : `${normalized}.pdf`;
+}
+
+function jsonStringArray(value: string | undefined): string[] {
+	if (!value) return [];
+	try {
+		const parsed: unknown = JSON.parse(value);
+		return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+	} catch {
+		return [];
+	}
+}
+
+function pagePayload(row: SqlRow, filename: string): PePdfReadPage {
+	const pageId = textValue(row, "page_id") ?? "";
+	const pageNumber = numberValue(row, "page_number") ?? 0;
+	const evidenceId = `page:${pageId}`;
+	const citationRow: SqlRow = {
+		original_filename: filename,
+		page_start: pageNumber,
+		page_end: pageNumber,
+	};
+	const fullText = textValue(row, "page_text") ?? "";
+	const truncated = fullText.length > MAX_PAGE_TEXT_CHARS;
+	return {
+		evidence_id: evidenceId,
+		page_number: pageNumber,
+		page_role: textValue(row, "role") ?? "body",
+		text_quality: textValue(row, "text_quality") ?? "passed",
+		page_header: textValue(row, "page_header") ?? "",
+		content: truncated
+			? `${fullText.slice(0, MAX_PAGE_TEXT_CHARS)}\n[本页文本过长，余下内容请读取文档 Markdown。]`
+			: fullText,
+		content_truncated: truncated,
+		page_image_paths: jsonStringArray(textValue(row, "image_paths_json")),
+		citation: sourceCitation(citationRow),
+		markdown_citation: sourceMarkdownCitation(citationRow, evidenceId),
+	};
+}
+
+export function readPePdfPages(cwd: string, options: PePdfReadOptions, signal?: AbortSignal): PePdfReadResult {
+	const documentName = normalizeDocumentName(options.documentName);
+	const pageStart = Math.trunc(options.pageStart);
+	const pageEnd = Math.trunc(options.pageEnd ?? pageStart);
+	if (pageStart < 1 || pageEnd < pageStart) throw new Error("page range is invalid");
+	if (pageEnd - pageStart + 1 > MAX_PAGE_RANGE) {
+		throw new Error(`page range must not exceed ${MAX_PAGE_RANGE} pages`);
+	}
+	const connection = openPeDataset(cwd, options.datasetId);
+	try {
+		signal?.throwIfAborted();
+		const pageTextColumn = connection.database
+			.prepare("SELECT 1 FROM pragma_table_info('pdf_pages') WHERE name='page_text'")
+			.get();
+		if (!pageTextColumn)
+			throw new Error("pe_pdf_read requires the page-level PDF Pipeline schema; rebuild this project");
+		const document = connection.database
+			.prepare(
+				`SELECT doc_id, original_filename, title, page_count,
+				        document_markdown_path, layout_json_path
+				 FROM documents
+				 WHERE dataset_id=? AND lower(original_filename)=?
+				   AND status IN ('completed', 'completed_with_warnings')`,
+			)
+			.get(connection.datasetId, documentName) as SqlRow | undefined;
+		if (!document) throw new Error(`PDF is not indexed in the current project: ${options.documentName}`);
+		const pageCount = numberValue(document, "page_count") ?? 0;
+		if (pageStart > pageCount || pageEnd > pageCount) {
+			throw new Error(`requested page range exceeds the document's ${pageCount} pages`);
+		}
+		const docId = textValue(document, "doc_id") ?? "";
+		const rows = connection.database
+			.prepare(
+				`SELECT page_id, page_number, page_text, page_header, role,
+				        text_quality, image_paths_json
+				 FROM pdf_pages
+				 WHERE doc_id=? AND page_number BETWEEN ? AND ?
+				 ORDER BY page_number`,
+			)
+			.all(docId, pageStart, pageEnd) as SqlRow[];
+		const filename = textValue(document, "original_filename") ?? options.documentName;
+		const title = textValue(document, "title");
+		return {
+			dataset_id: connection.datasetId,
+			document: {
+				filename,
+				...(title ? { title } : {}),
+				page_count: pageCount,
+				document_markdown_path: textValue(document, "document_markdown_path") ?? "",
+				layout_json_path: textValue(document, "layout_json_path") ?? "",
+			},
+			page_start: pageStart,
+			page_end: pageEnd,
+			pages: rows.map((row) => pagePayload(row, filename)),
+			answer_contract:
+				"Use the complete page text and neighboring pages to interpret evidence. Put each exact markdown_citation immediately after the claim it supports; never expose a bare evidence_id. Check the page image when text_quality is needs_ocr or layout matters.",
+		};
+	} finally {
+		connection.database.close();
+	}
+}
+
+export const pePdfReadTool = defineTool({
+	name: "pe_pdf_read",
+	label: "PE PDF Read",
+	description:
+		"Read one to ten complete pages from a named PDF in the current project. Use after pe_pdf_search to inspect the full page, adjacent pages, source location, extraction quality, and page image before relying on decisive evidence.",
+	promptSnippet: PE_PDF_READ_PROMPT_SNIPPET,
+	parameters: Type.Object({
+		document_name: Type.String({
+			description: "Exact PDF filename returned by pe_pdf_search, with or without .pdf.",
+			minLength: 1,
+			maxLength: 500,
+		}),
+		page_start: Type.Integer({ description: "First one-based page number to read.", minimum: 1 }),
+		page_end: Type.Optional(
+			Type.Integer({
+				description: "Last one-based page number, inclusive. Defaults to page_start; maximum range is 10 pages.",
+				minimum: 1,
+			}),
+		),
+		dataset_id: Type.Optional(
+			Type.String({ description: "Optional dataset ID. It must match the dataset bound to the current workspace." }),
+		),
+	}),
+	async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+		const result = readPePdfPages(
+			ctx.cwd,
+			{
+				documentName: params.document_name,
+				pageStart: params.page_start,
+				pageEnd: params.page_end,
+				datasetId: params.dataset_id,
+			},
+			signal,
+		);
+		return {
+			content: [{ type: "text", text: JSON.stringify(result) }],
+			details: result,
+		};
+	},
+});

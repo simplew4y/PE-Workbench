@@ -132,7 +132,18 @@ function openResolvedPeDataset(
 				"SELECT DISTINCT dataset_id FROM documents WHERE dataset_id IS NOT NULL AND trim(dataset_id) <> '' ORDER BY dataset_id",
 			)
 			.all() as SqlRow[];
-		const datasetIds = rows.map((row) => textValue(row, "dataset_id")).filter((value) => value !== undefined);
+		let datasetIds = rows.map((row) => textValue(row, "dataset_id")).filter((value) => value !== undefined);
+		if (
+			datasetIds.length === 0 &&
+			database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='project_metadata'").get()
+		) {
+			const projectRows = database
+				.prepare(
+					"SELECT DISTINCT dataset_id FROM project_metadata WHERE dataset_id IS NOT NULL AND trim(dataset_id) <> '' ORDER BY dataset_id",
+				)
+				.all() as SqlRow[];
+			datasetIds = projectRows.map((row) => textValue(row, "dataset_id")).filter((value) => value !== undefined);
+		}
 		if (datasetIds.length === 0) {
 			throw new Error("collection.sqlite3 contains no dataset ID");
 		}

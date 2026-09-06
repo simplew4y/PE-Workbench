@@ -276,7 +276,16 @@ function resolveEvidence(database: DatabaseSync, datasetId: string, evidenceId: 
 	const kind = evidenceId.slice(0, separator);
 	const rawId = evidenceId.slice(separator + 1);
 	let row: SqlRow | undefined;
-	if (kind === "chunk") {
+	if (kind === "page" && tableExists(database, "pdf_pages")) {
+		row = database
+			.prepare(
+				`SELECT d.original_filename, p.page_number AS page_start, p.page_number AS page_end
+				 FROM pdf_pages p
+				 JOIN documents d ON d.doc_id=p.doc_id
+				 WHERE d.dataset_id=? AND p.page_id=?`,
+			)
+			.get(datasetId, rawId) as SqlRow | undefined;
+	} else if (kind === "chunk" && tableExists(database, "chunks")) {
 		row = database
 			.prepare(
 				`SELECT c.chunk_id, c.title_path, d.original_filename, d.source_relpath,
