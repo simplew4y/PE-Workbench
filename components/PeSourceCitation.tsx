@@ -288,16 +288,22 @@ export function PeSourceCitation({ cwd, evidenceId, children, className }: PeSou
   return (
     <>
       <button
+        aria-expanded={open}
+        aria-haspopup="dialog"
         className={[
-          "mx-0.5 inline-flex cursor-pointer items-center rounded-full border border-emerald-600/25 bg-emerald-600/10 px-2 py-0.5 align-baseline text-[0.86em] font-medium leading-5 text-emerald-700 no-underline transition-colors hover:bg-emerald-600/20 dark:text-emerald-300",
+          "relative -top-[0.4em] mx-0.5 inline-flex h-3.5 w-3.5 cursor-pointer items-center justify-center rounded-sm align-baseline leading-none text-[var(--text-muted)] transition-colors hover:text-[var(--accent)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]",
           className,
         ].filter(Boolean).join(" ")}
         data-pe-source-citation="true"
         onClick={openDrawer}
-        title="点击查看原始证据"
+        title={typeof children === "string" ? `查看原始证据：${children}` : "查看原始证据"}
         type="button"
       >
-        {children}
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
+          <path d="M14 2v6h6M8 13h8M8 17h5" />
+        </svg>
+        <span className="sr-only">查看原始证据：{children}</span>
       </button>
       {dialog}
     </>
