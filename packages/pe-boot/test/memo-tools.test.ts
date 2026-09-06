@@ -59,6 +59,10 @@ describe("PE Memo tools", () => {
 		expect(result.diagnostics).toEqual([]);
 		expect(result.skills).toEqual([
 			expect.objectContaining({
+				name: "pe-generative-ui",
+				description: expect.stringContaining("pre-registered native UI surfaces"),
+			}),
+			expect.objectContaining({
 				name: "pe-memo",
 				description: expect.stringContaining("persistent, evidence-backed PE Memo"),
 			}),

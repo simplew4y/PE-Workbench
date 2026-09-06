@@ -7,6 +7,7 @@ import { peExcelRangeTool } from "./excel-range.ts";
 import { peFormulaTraceTool } from "./formula-trace.ts";
 import { peHistoryCompareTool } from "./history-compare.ts";
 import { peModelValidateTool } from "./model-validate.ts";
+import { peRenderUiTool } from "./render-ui.ts";
 import { peResearchNoteSaveTool } from "./research-note-save.ts";
 import { peSourceDetailTool } from "./source-detail.ts";
 import { peValuationDateTool } from "./valuation-date.ts";
@@ -17,6 +18,8 @@ const toolsDirectory = dirname(fileURLToPath(import.meta.url));
 const memoSkillPath = join(toolsDirectory, "../../skills/pe-memo/SKILL.md");
 const researchNoteSkillPath = join(toolsDirectory, "../../skills/pe-research-note/SKILL.md");
 const valuationModelExplainerSkillPath = join(toolsDirectory, "../../skills/valuation-model-explainer/SKILL.md");
+
+const generativeUiSkillPath = join(toolsDirectory, "../../skills/pe-generative-ui/SKILL.md");
 
 //注册所有pe工具
 export function registerPeTools(pi: ExtensionAPI): void {
@@ -31,8 +34,9 @@ export function registerPeTools(pi: ExtensionAPI): void {
 	pi.registerTool(peDatasetMemoTool);
 	pi.registerTool(peHistoryCompareTool);
 	pi.registerTool(peResearchNoteSaveTool);
+	pi.registerTool(peRenderUiTool);
 	pi.on("resources_discover", () => ({
-		skillPaths: [memoSkillPath, researchNoteSkillPath, valuationModelExplainerSkillPath],
+		skillPaths: [memoSkillPath, researchNoteSkillPath, valuationModelExplainerSkillPath, generativeUiSkillPath],
 	}));
 }
 
@@ -43,6 +47,7 @@ export {
 	peFormulaTraceTool,
 	peHistoryCompareTool,
 	peModelValidateTool,
+	peRenderUiTool,
 	peResearchNoteSaveTool,
 	peSourceDetailTool,
 	peValuationDateTool,

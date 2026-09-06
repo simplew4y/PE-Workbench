@@ -46,12 +46,15 @@ describe("PE Research Note tool", () => {
 		const result = loadSkillsFromDir({ dir: join(packageDirectory, "skills"), source: "test" });
 		expect(result.diagnostics).toEqual([]);
 		expect(result.skills.map((skill) => skill.name)).toEqual([
+			"pe-generative-ui",
 			"pe-memo",
 			"pe-research-note",
 			"valuation-model-explainer",
 		]);
-		expect(result.skills[1]?.description).toContain("Research Note");
-		expect(result.skills[2]?.description).toContain("估值模型");
+		expect(result.skills.find((skill) => skill.name === "pe-research-note")?.description).toContain("Research Note");
+		expect(result.skills.find((skill) => skill.name === "valuation-model-explainer")?.description).toContain(
+			"估值模型",
+		);
 	});
 
 	it("saves all presentation modes as exact, independent HTML assets", async () => {

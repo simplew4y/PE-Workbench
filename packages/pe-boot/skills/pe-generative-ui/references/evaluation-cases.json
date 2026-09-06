@@ -1,0 +1,275 @@
+[
+	{
+		"id": "change-two-values",
+		"prompt": "练习数据：收入从100增至103百万元。用一句话解释变化。",
+		"expected": "prose",
+		"required": [],
+		"forbidden": ["financial_trend", "kpi_strip", "research_brief"],
+		"relation": "change"
+	},
+	{
+		"id": "change-quarterly-divergence",
+		"prompt": "练习数据：过去12季A业务收入为10、11、12、13、14、15、16、17、18、19、20、21，B业务为10、11、12、13、12、11、10、9、8、7、6、5，单位均为百万元。画出两条趋势，指出何时分化。",
+		"expected": "leaf",
+		"required": ["financial_trend"],
+		"forbidden": ["research_brief", "kpi_strip"],
+		"relation": "change"
+	},
+	{
+		"id": "lookup-one-metric",
+		"prompt": "练习数据：A公司毛利率30%，B公司25%。谁高，高多少个百分点？",
+		"expected": "prose",
+		"required": [],
+		"forbidden": ["metric_comparison", "research_brief"],
+		"relation": "lookup"
+	},
+	{
+		"id": "lookup-dense-matrix",
+		"prompt": "用原生对比表展示练习数据，便于逐项查找。列为收入百万元、毛利率%、净利率%、负债率%、ROE%：A[100,30,10,40,12]、B[120,25,8,35,10]、C[90,40,15,20,14]、D[150,20,6,50,9]、E[80,35,12,25,13]。保留单位，不合成评分。",
+		"expected": "leaf",
+		"required": ["metric_comparison"],
+		"forbidden": ["radar_chart", "research_brief"],
+		"relation": "lookup"
+	},
+	{
+		"id": "bridge-qualitative-causes",
+		"prompt": "访谈仅称利润下降受价格和原料成本影响，没有量化贡献。解释原因和证据缺口。",
+		"expected": "prose",
+		"required": [],
+		"forbidden": ["waterfall_chart", "segment_breakdown"],
+		"relation": "bridge"
+	},
+	{
+		"id": "bridge-reconciled-profit",
+		"prompt": "练习数据：去年利润100百万元，销量贡献+20、价格-15、原料-10、费用+5，今年利润100。用图展示这个有正负贡献的完整利润桥，不把它当成占比。",
+		"expected": "leaf",
+		"required": ["waterfall_chart"],
+		"forbidden": ["segment_breakdown", "sankey_chart"],
+		"relation": "bridge"
+	},
+	{
+		"id": "composition-negative-values",
+		"prompt": "只有A业务利润+20、B业务亏损-10百万元。能把二者画成利润占比饼图吗？说明问题，不创造收入数据。",
+		"expected": "safe-alternative",
+		"required": [],
+		"forbidden": ["segment_breakdown"],
+		"relation": "composition"
+	},
+	{
+		"id": "composition-revenue-concentration",
+		"prompt": "练习数据：同一年度同一口径收入共100百万元，业务A至F分别为40、25、15、10、6、4。直观展示业务构成和头部集中度。",
+		"expected": "leaf",
+		"required": ["segment_breakdown"],
+		"forbidden": ["waterfall_chart", "research_brief"],
+		"relation": "composition"
+	},
+	{
+		"id": "geography-missing-coordinates",
+		"prompt": "只知道客户代号A、B、C，没有地址或坐标。画出客户地理分布。",
+		"expected": "safe-alternative",
+		"required": [],
+		"forbidden": ["place_map"],
+		"relation": "geography"
+	},
+	{
+		"id": "geography-supplied-coordinates",
+		"prompt": "以下为虚构站点练习坐标，均为纬度、经度：A(31.20,121.40)、B(31.25,121.45)、C(31.30,121.60)、D(31.35,121.55)、E(31.40,121.70)。用地图比较空间分布；不要声称这些坐标对应真实企业。",
+		"expected": "leaf",
+		"required": ["place_map"],
+		"forbidden": ["research_brief"],
+		"relation": "geography"
+	},
+	{
+		"id": "appearance-no-images",
+		"prompt": "比较三个产品的外观，但当前没有图片、可核实的图片链接或外观描述。",
+		"expected": "safe-alternative",
+		"required": [],
+		"forbidden": ["image_gallery"],
+		"relation": "appearance"
+	},
+	{
+		"id": "appearance-verified-grid",
+		"prompt": "练习前提：工具已确认/workspace/raw/a.png、/workspace/raw/b.png、/workspace/raw/c.png是现有的三款产品实拍图。并排展示，便于同时比较外观；只使用这些已确认路径。",
+		"expected": "leaf",
+		"required": ["image_gallery"],
+		"forbidden": ["research_brief"],
+		"relation": "appearance"
+	},
+	{
+		"id": "assumptions-fixed-product",
+		"prompt": "假设净利润100百万元、PE为20倍，股权估值是多少？只需结果和假设。",
+		"expected": "prose",
+		"required": [],
+		"forbidden": ["scenario_calculator", "research_brief"],
+		"relation": "assumptions"
+	},
+	{
+		"id": "assumptions-editable-product",
+		"prompt": "做一个练习计算器，让我拖动净利润和PE观察股权估值。净利润默认100百万元、范围50至150、步长5；PE默认20倍、范围10至30、步长1。估值=净利润乘PE，注明是假设测算。",
+		"expected": "leaf",
+		"required": ["scenario_calculator"],
+		"forbidden": ["research_brief"],
+		"relation": "assumptions"
+	},
+	{
+		"id": "ohlc-close-only",
+		"prompt": "只给出了练习股票今天收盘价10元，没有开盘、最高、最低价。展示今天的蜡烛图。",
+		"expected": "safe-alternative",
+		"required": [],
+		"forbidden": ["candlestick_chart"],
+		"relation": "ohlc"
+	},
+	{
+		"id": "ohlc-complete-intervals",
+		"prompt": "查看练习行情的日内区间，用蜡烛图保留精确数值。日期及开收低高（元）：2025-01-06[10,11,9,12]、2025-01-07[11,10,9,12]、2025-01-08[10,12,10,13]、2025-01-09[12,13,11,14]、2025-01-10[13,12,11,14]。这些是假数据，不是实时行情。",
+		"expected": "leaf",
+		"required": ["candlestick_chart"],
+		"forbidden": ["research_brief"],
+		"relation": "ohlc"
+	},
+	{
+		"id": "sequence-single-date",
+		"prompt": "练习资料称公司在2024年5月完成交割。交割是什么时候？",
+		"expected": "prose",
+		"required": [],
+		"forbidden": ["research_timeline", "catalyst_calendar"],
+		"relation": "sequence"
+	},
+	{
+		"id": "sequence-transaction-history",
+		"prompt": "用时间线梳理练习交易的顺序：2024-01-15签意向书，02-10启动尽调，03-20签协议，04-30获批，05-15交割，06-01开始整合。突出获批在交割前。",
+		"expected": "leaf",
+		"required": ["research_timeline"],
+		"forbidden": ["catalyst_calendar", "research_brief"],
+		"relation": "sequence"
+	},
+	{
+		"id": "risk-unscored-warning",
+		"prompt": "访谈提到一个客户流失风险，没有概率或影响评估。解释这个风险，不编造评分。",
+		"expected": "prose",
+		"required": [],
+		"forbidden": ["risk_matrix", "research_brief"],
+		"relation": "risk"
+	},
+	{
+		"id": "risk-supplied-assessments",
+		"prompt": "练习假设：专家已按1至5分评估风险的可能性和影响，分数越高越严重。客户流失[4,5]、汇率[3,2]、供应中断[2,5]、延期[4,3]。用矩阵展示优先级，明确这是给定的主观评估，不是统计概率。",
+		"expected": "leaf",
+		"required": ["risk_matrix"],
+		"forbidden": ["radar_chart", "research_brief"],
+		"relation": "risk"
+	},
+	{
+		"id": "profile-incommensurate-metrics",
+		"prompt": "公司收入100百万元、毛利率30%、员工50人。直接用雷达图比较三项强弱，不做额外假设。",
+		"expected": "safe-alternative",
+		"required": [],
+		"forbidden": ["radar_chart"],
+		"relation": "profile"
+	},
+	{
+		"id": "profile-normalized-dimensions",
+		"prompt": "比较练习产品在耐用、易用、兼容、维护四个维度的轮廓。已按同一测试量表归一到0至100，均为越高越好：A[90,60,80,70]、B[65,90,70,85]、C[75,75,95,60]。用雷达图并披露给定的归一化口径，不把得分当财务指标。",
+		"expected": "leaf",
+		"required": ["radar_chart"],
+		"forbidden": ["research_brief"],
+		"relation": "profile"
+	},
+	{
+		"id": "identity-single-name",
+		"prompt": "练习资料只记载公司名称为甲公司。公司叫什么？",
+		"expected": "prose",
+		"required": [],
+		"forbidden": ["entity_cards", "company_overview", "research_brief"],
+		"relation": "identity"
+	},
+	{
+		"id": "identity-product-catalog",
+		"prompt": "将四款虚构产品做成便于浏览的目录卡片，每张保留类别、用途和事实，不配图。A：手持检测仪，用于巡检，重1kg、续航8h；B：台式检测仪，用于实验室，重5kg、需外接电源；C：便携校准仪，用于现场校准，重2kg、续航6h；D：在线传感器，用于连续监测，重0.2kg、采样1Hz。",
+		"expected": "leaf",
+		"required": ["entity_cards"],
+		"forbidden": ["image_gallery", "research_brief"],
+		"relation": "identity"
+	},
+	{
+		"id": "company-profile-adaptive",
+		"prompt": "练习资料：甲公司2005年成立，主营工业泵，总部苏州，2025年收入100百万元、员工200人，产品用于水处理。给初次了解它的人一份简短概览，选择最清楚的呈现方式。",
+		"expected": "adaptive",
+		"required": [],
+		"forbidden": ["research_brief", "place_map"],
+		"relation": "identity",
+		"acceptedPresentations": [{ "mode": "prose" }, { "mode": "leaf", "kinds": ["company_overview"] }]
+	},
+	{
+		"id": "explicit-decisive-warning",
+		"prompt": "练习合同明确规定：本周五前未获贷款人同意就不能交割。请单独突出这一决定性交割风险，保留原意，不添加概率评分。",
+		"expected": "leaf",
+		"required": ["insight_callout"],
+		"forbidden": ["risk_matrix", "research_brief"],
+		"relation": "risk"
+	},
+	{
+		"id": "requested-source-navigation",
+		"prompt": "练习前提：工具已确认/workspace/raw/annual.pdf、/workspace/raw/interview.txt、/workspace/raw/model.xlsx存在，分别是年报、访谈和估值模型。请整理成可导航的资料列表。分析中的原文引用仍使用工具返回的#pe-source链接，不用资料列表替代。",
+		"expected": "leaf",
+		"required": ["source_collection"],
+		"forbidden": ["research_brief"],
+		"relation": "lookup"
+	},
+	{
+		"id": "qualitative-topology",
+		"prompt": "画出练习供应链拓扑：A供给C和D，B供给D，C供给E，D供给E和F，E供给G，F供给G。只有供货关系，没有数量、金额或持股比例；展示依赖关系，不假设流量。",
+		"expected": "leaf",
+		"required": ["relationship_map"],
+		"forbidden": ["sankey_chart", "research_brief"],
+		"relation": "flow"
+	},
+	{
+		"id": "requested-metric-snapshot",
+		"prompt": "将给定的四项2025年度练习指标做成一行便于快速扫读的快照：收入100百万元、毛利率30%、净利润10百万元、经营现金流12百万元。不再重复生成同数据的表格。",
+		"expected": "leaf",
+		"required": ["kpi_strip"],
+		"forbidden": ["metric_comparison", "research_brief"],
+		"relation": "lookup"
+	},
+	{
+		"id": "explicit-visual-brief",
+		"prompt": "制作一份练习用的可视化研究简报，以增长放缓且业务集中为主线，包含趋势和业务构成两个互补区块。2022至2025年收入为60、80、95、100百万元；2025年A、B、C业务收入为70、20、10百万元。标明练习数据，不重复展示相同指标，不加无证据的风险评分。",
+		"expected": "brief",
+		"required": ["research_brief", "financial_trend", "segment_breakdown"],
+		"forbidden": ["risk_matrix", "kpi_strip"],
+		"relation": "composition"
+	},
+	{
+		"id": "comparable-valuation-intervals",
+		"prompt": "用区间图比较练习估值情景，均为同一日期的股权价值、单位百万元：悲观800至1000，基准1100至1400，乐观1500至1800。分别基于利润下滑、持平、增长的给定假设；不要声称是重新计算的结果。",
+		"expected": "leaf",
+		"required": ["valuation_range"],
+		"forbidden": ["research_brief"],
+		"relation": "assumptions"
+	},
+	{
+		"id": "peer-position-two-axes",
+		"prompt": "用二维图比较练习同行的2025年收入增速和毛利率，均为百分比：甲[5,30]、乙[15,20]、丙[10,40]、丁[20,35]、戊[-5,25]。突出甲的相对位置，不合成综合评分。",
+		"expected": "leaf",
+		"required": ["peer_quadrant"],
+		"forbidden": ["radar_chart", "research_brief"],
+		"relation": "profile"
+	},
+	{
+		"id": "future-decision-checkpoints",
+		"prompt": "以2025-01-01为练习时点，整理未来决策日历：2025-02-15披露年报，已确认，关注利润变化；2025-03-10贷款续约截止，已确认，关注融资风险；2025年第二季度新产线试产，管理层目标尚未确认，关注产能兑现。区分时间和证据置信度。",
+		"expected": "leaf",
+		"required": ["catalyst_calendar"],
+		"forbidden": ["research_timeline", "research_brief"],
+		"relation": "sequence"
+	},
+	{
+		"id": "measured-transfers",
+		"prompt": "用桑基图展示练习物流的数量去向，单位均为吨，节点按供应商、工厂、客户排列且没有回流：供应商A到工厂X为60，供应商B到X为40，X到客户C为70，X到客户D为30。数值非负且守恒。",
+		"expected": "leaf",
+		"required": ["sankey_chart"],
+		"forbidden": ["waterfall_chart", "research_brief"],
+		"relation": "flow"
+	}
+]
