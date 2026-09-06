@@ -56,8 +56,9 @@ export const peDatasetMemoTool = defineTool({
 				section: Type.String({ description: "Client-facing section title.", minLength: 1, maxLength: 200 }),
 				text: Type.String({ description: "One claim without citation markup.", minLength: 1, maxLength: 4_000 }),
 				status: Type.Union([Type.Literal("supported"), Type.Literal("not_covered"), Type.Literal("needs_review")]),
-				evidence_ids: Type.Array(Type.String({ minLength: 3, maxLength: 300 }), {
-					description: "Exact chunk:, fact:, or cell: IDs. Leave empty for not_covered or needs_review.",
+				evidence_ids: Type.Array(Type.String({ minLength: 3, maxLength: 2048 }), {
+					description:
+						"Exact source: IDs returned by the document reader. Leave empty for not_covered or needs_review.",
 					maxItems: 20,
 				}),
 			}),

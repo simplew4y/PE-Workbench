@@ -8,7 +8,15 @@
 	"exports": {
 		".": {
 			"types": "./dist/index.d.ts",
-			"import": "./dist/index.js"
+			"default": "./dist/index.js"
+		},
+		"./documents": {
+			"types": "./dist/documents.d.ts",
+			"default": "./dist/documents.js"
+		},
+		"./source": {
+			"types": "./dist/source.d.ts",
+			"default": "./dist/source.js"
 		}
 	},
 	"bin": {
@@ -16,7 +24,10 @@
 	},
 	"files": [
 		"dist",
-		"skills"
+		"skills",
+		"python/*.py",
+		"python/requirements.txt",
+		"python/setup.sh"
 	],
 	"scripts": {
 		"clean": "shx rm -rf dist",

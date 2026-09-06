@@ -1,4 +1,4 @@
-import fs, { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync } from "node:fs";
+import fs, { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -6,11 +6,16 @@ import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { loadSkillsFromDir } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
+import { sourceId } from "../src/source.ts";
 import { buildPeSystemPrompt } from "../src/system-prompt.ts";
 import { peResearchNoteSaveTool } from "../src/tools/research-note-save.ts";
 import { type ResearchNotePresentationMode, savePeResearchNote } from "../src/tools/research-note-storage.ts";
+import { createTextDocumentProject } from "./document-fixture.ts";
 
 const temporaryDirectories: string[] = [];
+const evidenceA = sourceId({ docId: "doc-1", location: { kind: "text", lineStart: 1, lineEnd: 1 } });
+const evidenceB = sourceId({ docId: "doc-1", location: { kind: "text", lineStart: 2, lineEnd: 2 } });
+const evidenceC = sourceId({ docId: "doc-1", location: { kind: "text", lineStart: 3, lineEnd: 3 } });
 
 function temporaryDirectory(prefix: string): string {
 	const directory = mkdtempSync(join(tmpdir(), prefix));
@@ -19,86 +24,8 @@ function temporaryDirectory(prefix: string): string {
 }
 
 function createResearchNoteFixture(datasetId = "dataset-1"): string {
-	const root = temporaryDirectory("pe-boot-research-note-");
-	mkdirSync(join(root, "meta"));
-	const database = new DatabaseSync(join(root, "meta", "collection.sqlite3"));
-	database.exec(`
-		CREATE TABLE documents (
-			doc_id TEXT PRIMARY KEY,
-			dataset_id TEXT NOT NULL,
-			original_filename TEXT NOT NULL,
-			source_relpath TEXT,
-			file_type TEXT NOT NULL,
-			doc_type TEXT,
-			document_date TEXT,
-			version_no INTEGER NOT NULL DEFAULT 1,
-			is_current INTEGER NOT NULL DEFAULT 1,
-			lifecycle_state TEXT NOT NULL DEFAULT 'active',
-			deleted_at TEXT
-		);
-		CREATE TABLE chunks (
-			chunk_id TEXT PRIMARY KEY,
-			dataset_id TEXT NOT NULL,
-			doc_id TEXT NOT NULL,
-			content TEXT NOT NULL,
-			content_type TEXT NOT NULL,
-			title_path TEXT,
-			summary TEXT,
-			source_ref TEXT
-		);
-		CREATE TABLE chunk_locations (
-			chunk_id TEXT NOT NULL,
-			location_index INTEGER NOT NULL,
-			page_start INTEGER,
-			page_end INTEGER,
-			sheet_name TEXT,
-			cell_range TEXT,
-			heading_path TEXT
-		);
-		CREATE TABLE metric_facts (
-			fact_id TEXT PRIMARY KEY,
-			dataset_id TEXT NOT NULL,
-			doc_id TEXT NOT NULL,
-			metric_name TEXT NOT NULL,
-			period TEXT,
-			value_text TEXT,
-			value_numeric REAL,
-			unit TEXT,
-			sheet_name TEXT NOT NULL,
-			cell_ref TEXT NOT NULL
-		);
-		CREATE TABLE excel_cells (
-			cell_id TEXT PRIMARY KEY,
-			dataset_id TEXT NOT NULL,
-			doc_id TEXT NOT NULL,
-			sheet_name TEXT NOT NULL,
-			cell_ref TEXT NOT NULL
-		);
-	`);
-	database
-		.prepare(
-			"INSERT INTO documents (doc_id, dataset_id, original_filename, source_relpath, file_type, doc_type, document_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
-		)
-		.run("doc-1", datasetId, "经营数据.pdf", "raw/经营数据.pdf", "pdf", "financial", "2026-08-01");
-	database
-		.prepare(
-			"INSERT INTO chunks (chunk_id, dataset_id, doc_id, content, content_type, title_path, summary, source_ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-		)
-		.run("chunk-a", datasetId, "doc-1", "收入增长20%。", "pdf_page", "经营表现", "收入增长", "经营数据.pdf p.2");
-	database
-		.prepare(
-			"INSERT INTO chunk_locations (chunk_id, location_index, page_start, page_end, heading_path) VALUES (?, 0, ?, ?, ?)",
-		)
-		.run("chunk-a", 2, 2, "经营表现");
-	database
-		.prepare(
-			"INSERT INTO metric_facts (fact_id, dataset_id, doc_id, metric_name, period, value_text, value_numeric, unit, sheet_name, cell_ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-		)
-		.run("fact-a", datasetId, "doc-1", "收入", "2025", "120", 120, "百万元", "数据", "B2");
-	database
-		.prepare("INSERT INTO excel_cells (cell_id, dataset_id, doc_id, sheet_name, cell_ref) VALUES (?, ?, ?, ?, ?) ")
-		.run("cell-a", datasetId, "doc-1", "数据", "C3");
-	database.close();
+	const root = createTextDocumentProject("经营数据.txt", datasetId);
+	temporaryDirectories.push(root);
 	return root;
 }
 
@@ -111,18 +38,23 @@ afterEach(() => {
 });
 
 describe("PE Research Note tool", () => {
-	it("registers the tool prompt and loads pe-research-note", () => {
+	it("registers the tool prompt and loads package Skills", async () => {
 		expect(peResearchNoteSaveTool.name).toBe("pe_research_note_save");
-		expect(buildPeSystemPrompt("/workspace")).toContain("- pe_research_note_save:");
+		expect(buildPeSystemPrompt("/workspace")).not.toContain("- pe_research_note_save:");
 
 		const packageDirectory = dirname(dirname(fileURLToPath(import.meta.url)));
 		const result = loadSkillsFromDir({ dir: join(packageDirectory, "skills"), source: "test" });
 		expect(result.diagnostics).toEqual([]);
-		expect(result.skills.map((skill) => skill.name)).toEqual(["pe-memo", "pe-research-note"]);
+		expect(result.skills.map((skill) => skill.name)).toEqual([
+			"pe-memo",
+			"pe-research-note",
+			"valuation-model-explainer",
+		]);
 		expect(result.skills[1]?.description).toContain("Research Note");
+		expect(result.skills[2]?.description).toContain("估值模型");
 	});
 
-	it("saves all presentation modes as exact, independent HTML assets", () => {
+	it("saves all presentation modes as exact, independent HTML assets", async () => {
 		const root = createResearchNoteFixture();
 		const documents: Array<[ResearchNotePresentationMode, string]> = [
 			["text", completeHtml("<article>文字分析</article>")],
@@ -138,7 +70,7 @@ describe("PE Research Note tool", () => {
 		];
 		const ids = new Set<string>();
 		for (const [mode, html] of documents) {
-			const result = savePeResearchNote(root, {
+			const result = await savePeResearchNote(root, {
 				title: "收入研究",
 				summary: `${mode} 摘要`,
 				presentationMode: mode,
@@ -167,18 +99,18 @@ describe("PE Research Note tool", () => {
 		database.close();
 	});
 
-	it("registers valid citations and returns unresolved evidence without blocking the save", () => {
+	it("registers valid citations and returns unresolved evidence without blocking the save", async () => {
 		const root = createResearchNoteFixture();
-		const result = savePeResearchNote(root, {
+		const result = await savePeResearchNote(root, {
 			title: "证据登记",
 			summary: "核验证据解析结果。",
 			presentationMode: "metrics",
 			contentHtml: completeHtml("<p>收入为120百万元。</p>"),
-			evidenceIds: ["chunk:chunk-a", "fact:fact-a", "cell:cell-a", "chunk:missing", "invalid-evidence"],
+			evidenceIds: [evidenceA, evidenceB, evidenceC, "source:invalid", "invalid-evidence"],
 		});
 
-		expect(result.resolved_evidence_ids).toEqual(["chunk:chunk-a", "fact:fact-a", "cell:cell-a"]);
-		expect(result.unresolved_evidence_ids).toEqual(["chunk:missing", "invalid-evidence"]);
+		expect(result.resolved_evidence_ids).toEqual([evidenceA, evidenceB, evidenceC]);
+		expect(result.unresolved_evidence_ids).toEqual(["source:invalid", "invalid-evidence"]);
 		expect(existsSync(join(root, result.research_note_html_path))).toBe(true);
 		const database = new DatabaseSync(join(root, "meta", "collection.sqlite3"), { readOnly: true });
 		const evidence = database
@@ -188,18 +120,18 @@ describe("PE Research Note tool", () => {
 			.all(result.research_note_id);
 		expect(evidence).toEqual(
 			expect.arrayContaining([
-				expect.objectContaining({ evidence_id: "chunk:chunk-a", resolved: 1, citation: "raw/经营数据.pdf p.2" }),
-				expect.objectContaining({ evidence_id: "fact:fact-a", resolved: 1, citation: "raw/经营数据.pdf 数据!B2" }),
-				expect.objectContaining({ evidence_id: "cell:cell-a", resolved: 1, citation: "raw/经营数据.pdf 数据!C3" }),
-				expect.objectContaining({ evidence_id: "chunk:missing", resolved: 0, citation: null }),
+				expect.objectContaining({ evidence_id: evidenceA, resolved: 1, citation: "经营数据.txt:1-1" }),
+				expect.objectContaining({ evidence_id: evidenceB, resolved: 1, citation: "经营数据.txt:2-2" }),
+				expect.objectContaining({ evidence_id: evidenceC, resolved: 1, citation: "经营数据.txt:3-3" }),
+				expect.objectContaining({ evidence_id: "source:invalid", resolved: 0, citation: null }),
 			]),
 		);
 		database.close();
 	});
 
-	it("rejects invalid workspaces, dataset mismatches, and symlink escapes", () => {
+	it("rejects invalid workspaces, dataset mismatches, and symlink escapes", async () => {
 		const missingRoot = join(temporaryDirectory("pe-boot-missing-parent-"), "missing");
-		expect(() =>
+		await expect(
 			savePeResearchNote(missingRoot, {
 				title: "缺失目录",
 				summary: "缺失目录",
@@ -207,10 +139,10 @@ describe("PE Research Note tool", () => {
 				contentHtml: completeHtml("<p>内容</p>"),
 				evidenceIds: [],
 			}),
-		).toThrow("PE project workspace does not exist");
+		).rejects.toThrow("PE project workspace does not exist");
 
 		const root = createResearchNoteFixture();
-		expect(() =>
+		await expect(
 			savePeResearchNote(root, {
 				title: "错误数据集",
 				summary: "错误数据集",
@@ -219,12 +151,12 @@ describe("PE Research Note tool", () => {
 				evidenceIds: [],
 				datasetId: "another-dataset",
 			}),
-		).toThrow("does not match the current project dataset");
+		).rejects.toThrow("does not match the current project dataset");
 
 		const escapedRoot = createResearchNoteFixture();
 		const outside = temporaryDirectory("pe-boot-research-note-outside-");
 		symlinkSync(outside, join(escapedRoot, "generated"), "dir");
-		expect(() =>
+		await expect(
 			savePeResearchNote(escapedRoot, {
 				title: "越界",
 				summary: "越界",
@@ -232,13 +164,13 @@ describe("PE Research Note tool", () => {
 				contentHtml: completeHtml("<p>内容</p>"),
 				evidenceIds: [],
 			}),
-		).toThrow("generated resolves outside");
+		).rejects.toThrow("generated resolves outside");
 		expect(readdirSync(outside)).toEqual([]);
 	});
 
-	it("rolls back metadata and removes the artifact when database persistence fails", () => {
+	it("rolls back metadata and removes the artifact when database persistence fails", async () => {
 		const root = createResearchNoteFixture();
-		const baseline = savePeResearchNote(root, {
+		const baseline = await savePeResearchNote(root, {
 			title: "基准笔记",
 			summary: "用于初始化表。",
 			presentationMode: "text",
@@ -258,7 +190,7 @@ describe("PE Research Note tool", () => {
 		`);
 		database.close();
 
-		expect(() =>
+		await expect(
 			savePeResearchNote(root, {
 				title: "失败笔记",
 				summary: "应完整回滚。",
@@ -266,7 +198,7 @@ describe("PE Research Note tool", () => {
 				contentHtml: completeHtml("<table><tr><td>失败</td></tr></table>"),
 				evidenceIds: ["chunk:forced-failure"],
 			}),
-		).toThrow("forced evidence failure");
+		).rejects.toThrow("forced evidence failure");
 		expect(readdirSync(notesDirectory)).toEqual(filesBeforeFailure);
 		expect(existsSync(join(root, baseline.research_note_html_path))).toBe(true);
 
@@ -277,7 +209,7 @@ describe("PE Research Note tool", () => {
 		inspection.close();
 	});
 
-	it("rolls back metadata and leaves no artifact when the file write fails", () => {
+	it("rolls back metadata and leaves no artifact when the file write fails", async () => {
 		const root = createResearchNoteFixture();
 		const originalWriteFileSync = fs.writeFileSync;
 		const failingWriteFileSync: typeof fs.writeFileSync = () => {
@@ -286,7 +218,7 @@ describe("PE Research Note tool", () => {
 		Object.defineProperty(fs, "writeFileSync", { configurable: true, value: failingWriteFileSync });
 		syncBuiltinESMExports();
 		try {
-			expect(() =>
+			await expect(
 				savePeResearchNote(root, {
 					title: "写入失败",
 					summary: "文件失败时回滚。",
@@ -294,7 +226,7 @@ describe("PE Research Note tool", () => {
 					contentHtml: completeHtml("<p>不会落盘</p>"),
 					evidenceIds: [],
 				}),
-			).toThrow("forced file write failure");
+			).rejects.toThrow("forced file write failure");
 		} finally {
 			Object.defineProperty(fs, "writeFileSync", { configurable: true, value: originalWriteFileSync });
 			syncBuiltinESMExports();
@@ -306,9 +238,9 @@ describe("PE Research Note tool", () => {
 		database.close();
 	});
 
-	it("requires complete HTML and enforces the content size limit", () => {
+	it("requires complete HTML and enforces the content size limit", async () => {
 		const root = createResearchNoteFixture();
-		expect(() =>
+		await expect(
 			savePeResearchNote(root, {
 				title: "不完整",
 				summary: "不完整",
@@ -316,8 +248,8 @@ describe("PE Research Note tool", () => {
 				contentHtml: "<p>fragment</p>",
 				evidenceIds: [],
 			}),
-		).toThrow("complete HTML document");
-		expect(() =>
+		).rejects.toThrow("complete HTML document");
+		await expect(
 			savePeResearchNote(root, {
 				title: "过长",
 				summary: "过长",
@@ -325,6 +257,6 @@ describe("PE Research Note tool", () => {
 				contentHtml: `<html><body>${"x".repeat(50_000)}</body></html>`,
 				evidenceIds: [],
 			}),
-		).toThrow("must not exceed 50000 characters");
+		).rejects.toThrow("must not exceed 50000 characters");
 	});
 });

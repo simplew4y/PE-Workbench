@@ -1,93 +1,25 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { loadSkillsFromDir } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
+import { registerPeDocuments } from "../src/documents.ts";
+import { sourceId } from "../src/source.ts";
 import { buildPeSystemPrompt } from "../src/system-prompt.ts";
 import { peDatasetMemoTool } from "../src/tools/dataset-memo.ts";
 import { peHistoryCompareTool } from "../src/tools/history-compare.ts";
 import { comparePeMemoVersions, getPeMemoVersion, listPeMemoHistory, savePeMemo } from "../src/tools/memo-storage.ts";
+import { createTextDocumentProject } from "./document-fixture.ts";
 
 const temporaryDirectories: string[] = [];
+const evidenceA = sourceId({ docId: "doc-1", location: { kind: "text", lineStart: 1, lineEnd: 1 } });
+const evidenceB = sourceId({ docId: "doc-1", location: { kind: "text", lineStart: 2, lineEnd: 2 } });
+const evidenceC = sourceId({ docId: "doc-1", location: { kind: "text", lineStart: 3, lineEnd: 3 } });
 
 function createMemoFixture(datasetId = "dataset-1"): string {
-	const root = mkdtempSync(join(tmpdir(), "pe-boot-memo-"));
+	const root = createTextDocumentProject("访谈.txt", datasetId);
 	temporaryDirectories.push(root);
-	mkdirSync(join(root, "meta"));
-	const database = new DatabaseSync(join(root, "meta", "collection.sqlite3"));
-	database.exec(`
-		CREATE TABLE documents (
-			doc_id TEXT PRIMARY KEY,
-			dataset_id TEXT NOT NULL,
-			original_filename TEXT NOT NULL,
-			source_relpath TEXT,
-			file_type TEXT NOT NULL,
-			doc_type TEXT,
-			document_date TEXT,
-			version_no INTEGER NOT NULL DEFAULT 1,
-			is_current INTEGER NOT NULL DEFAULT 1,
-			lifecycle_state TEXT NOT NULL DEFAULT 'active',
-			deleted_at TEXT
-		);
-		CREATE TABLE chunks (
-			chunk_id TEXT PRIMARY KEY,
-			dataset_id TEXT NOT NULL,
-			doc_id TEXT NOT NULL,
-			content TEXT NOT NULL,
-			content_type TEXT NOT NULL,
-			title_path TEXT,
-			summary TEXT,
-			source_ref TEXT
-		);
-		CREATE TABLE chunk_locations (
-			chunk_id TEXT NOT NULL,
-			location_index INTEGER NOT NULL,
-			page_start INTEGER,
-			page_end INTEGER,
-			sheet_name TEXT,
-			cell_range TEXT,
-			heading_path TEXT
-		);
-		CREATE TABLE metric_facts (
-			fact_id TEXT PRIMARY KEY,
-			dataset_id TEXT NOT NULL,
-			doc_id TEXT NOT NULL,
-			metric_name TEXT NOT NULL,
-			period TEXT,
-			value_text TEXT,
-			value_numeric REAL,
-			unit TEXT,
-			sheet_name TEXT NOT NULL,
-			cell_ref TEXT NOT NULL
-		);
-		CREATE TABLE excel_cells (
-			cell_id TEXT PRIMARY KEY,
-			dataset_id TEXT NOT NULL,
-			doc_id TEXT NOT NULL,
-			sheet_name TEXT NOT NULL,
-			cell_ref TEXT NOT NULL
-		);
-	`);
-	database
-		.prepare(
-			"INSERT INTO documents (doc_id, dataset_id, original_filename, source_relpath, file_type, doc_type, document_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
-		)
-		.run("doc-1", datasetId, "访谈.pdf", "raw/访谈.pdf", "pdf", "expert_interview", "2026-08-01");
-	const insertChunk = database.prepare(
-		"INSERT INTO chunks (chunk_id, dataset_id, doc_id, content, content_type, title_path, summary, source_ref) VALUES (?, ?, 'doc-1', ?, 'pdf_page', ?, ?, ?)",
-	);
-	insertChunk.run("chunk-a", datasetId, "收入增长20%。", "访谈 > page 2", "收入增长", "访谈.pdf p.2");
-	insertChunk.run("chunk-b", datasetId, "毛利率改善。", "访谈 > page 3", "毛利率改善", "访谈.pdf p.3");
-	insertChunk.run("chunk-c", datasetId, "新增订单。", "访谈 > page 4", "新增订单", "访谈.pdf p.4");
-	const insertLocation = database.prepare(
-		"INSERT INTO chunk_locations (chunk_id, location_index, page_start, page_end, heading_path) VALUES (?, 0, ?, ?, ?)",
-	);
-	insertLocation.run("chunk-a", 2, 2, "访谈 > page 2");
-	insertLocation.run("chunk-b", 3, 3, "访谈 > page 3");
-	insertLocation.run("chunk-c", 4, 4, "访谈 > page 4");
-	database.close();
 	return root;
 }
 
@@ -100,24 +32,38 @@ afterEach(() => {
 });
 
 describe("PE Memo tools", () => {
+	it("records the referenced original version after a newer upload", async () => {
+		const root = createMemoFixture();
+		registerPeDocuments(root, "dataset-1", [{ name: "访谈.txt", bytes: Buffer.from("新版本收入增长30%。") }]);
+		const result = await savePeMemo(root, {
+			operation: "create",
+			topic: "历史版本",
+			claims: [supported("结论", "原版本收入增长20%。", evidenceA)],
+		});
+		expect(result.citation_gate).toMatchObject({ passed: true });
+		expect(getPeMemoVersion(root, result.memo_version_id).document_versions).toEqual([
+			expect.objectContaining({ doc_id: "doc-1", version_no: 1 }),
+		]);
+	});
 	it("exposes Memo tools and loads the package Skill", () => {
 		expect(peDatasetMemoTool.name).toBe("pe_dataset_memo");
 		expect(peHistoryCompareTool.name).toBe("pe_history_compare");
 		const prompt = buildPeSystemPrompt("/workspace");
 		expect(prompt).not.toContain("- pe_dataset_memo:");
 		expect(prompt).not.toContain("- pe_history_compare:");
-		expect(prompt).toContain("- pe_dataset_search:");
-		expect(prompt).toContain("- pe_source_detail:");
+		expect(prompt).toContain("pe_document_open");
+		expect(prompt).toContain("pe_source_detail");
 
 		const packageDirectory = dirname(dirname(fileURLToPath(import.meta.url)));
 		const result = loadSkillsFromDir({ dir: join(packageDirectory, "skills"), source: "test" });
 		expect(result.diagnostics).toEqual([]);
 		expect(result.skills).toEqual([
-				expect.objectContaining({
-					name: "pe-memo",
-					description: expect.stringContaining("persistent, evidence-backed PE Memo"),
-				}),
+			expect.objectContaining({
+				name: "pe-memo",
+				description: expect.stringContaining("persistent, evidence-backed PE Memo"),
+			}),
 			expect.objectContaining({ name: "pe-research-note" }),
+			expect.objectContaining({ name: "valuation-model-explainer" }),
 		]);
 	});
 
@@ -128,8 +74,8 @@ describe("PE Memo tools", () => {
 			topic: "收入与盈利",
 			title: "收入与盈利 Memo",
 			claims: [
-				supported("核心结论", "收入增长20%。", "chunk:chunk-a"),
-				supported("风险", "<script>alert('x')</script> 需要核验。", "chunk:missing"),
+				supported("核心结论", "收入增长20%。", evidenceA),
+				supported("风险", "<script>alert('x')</script> 需要核验。", "source:invalid"),
 				{ section: "待跟踪", text: "海外订单资料不足。", status: "not_covered", evidenceIds: [] },
 			],
 		});
@@ -141,7 +87,7 @@ describe("PE Memo tools", () => {
 			citation_gate: {
 				status: "needs_review",
 				needs_review: true,
-				invalid_evidence_ids: ["chunk:missing"],
+				invalid_evidence_ids: ["source:invalid"],
 			},
 		});
 		expect(result.memo_markdown_path).toMatch(/^generated\/memo\/ms_[a-f0-9]+\/v1\/memo\.md$/u);
@@ -150,22 +96,22 @@ describe("PE Memo tools", () => {
 		const markdown = readFileSync(join(root, result.memo_markdown_path ?? ""), "utf8");
 		const html = readFileSync(join(root, result.memo_html_path ?? ""), "utf8");
 		const pdf = readFileSync(join(root, result.memo_pdf_path ?? ""));
-		const citationGate = JSON.parse(
-			readFileSync(join(root, result.citation_gate_audit_path ?? ""), "utf8"),
-		) as { claims: Array<{ claim_id: string; text: string; evidence_ids: string[] }> };
-		expect(markdown).toContain("访谈.pdf p.2");
+		const citationGate = JSON.parse(readFileSync(join(root, result.citation_gate_audit_path ?? ""), "utf8")) as {
+			claims: Array<{ claim_id: string; text: string; evidence_ids: string[] }>;
+		};
+		expect(markdown).toContain("访谈.txt:1-1");
 		expect(markdown).toContain("内容：收入增长20%。");
-		expect(markdown).not.toContain("chunk:chunk-a");
+		expect(markdown).not.toContain(evidenceA);
 		expect(markdown).toContain("待复核");
-		expect(html).toContain("访谈.pdf p.2");
+		expect(html).toContain("访谈.txt:1-1");
 		expect(html).toContain("收入增长20%。");
-		expect(html).not.toContain("chunk:chunk-a");
+		expect(html).not.toContain(evidenceA);
 		expect(html).toContain("&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;");
 		expect(html).not.toContain("<script>");
 		expect(citationGate.claims[0]).toMatchObject({
 			claim_id: "claim-1",
 			text: "收入增长20%。",
-			evidence_ids: ["chunk:chunk-a"],
+			evidence_ids: [evidenceA],
 		});
 		expect(pdf.subarray(0, 5).toString("ascii")).toBe("%PDF-");
 		expect(pdf.byteLength).toBeGreaterThan(5_000);
@@ -173,7 +119,7 @@ describe("PE Memo tools", () => {
 
 		const version = getPeMemoVersion(root, result.memo_version_id);
 		expect(version.sections).toHaveLength(3);
-		expect(version.sections[0]).toMatchObject({ evidence_ids: ["chunk:chunk-a"], needs_review: false });
+		expect(version.sections[0]).toMatchObject({ evidence_ids: [evidenceA], needs_review: false });
 		expect(version.markdown_path).toBe(result.memo_markdown_path);
 		expect(version.pdf_path).toBe(result.memo_pdf_path);
 	});
@@ -183,12 +129,12 @@ describe("PE Memo tools", () => {
 		const first = await savePeMemo(root, {
 			operation: "create",
 			topic: "稳定主题",
-			claims: [supported("结论", "收入增长20%。", "chunk:chunk-a")],
+			claims: [supported("结论", "收入增长20%。", evidenceA)],
 		});
 		const duplicate = await savePeMemo(root, {
 			operation: "create",
 			topic: "稳定主题",
-			claims: [supported("结论", "另一版本。", "chunk:chunk-b")],
+			claims: [supported("结论", "另一版本。", evidenceB)],
 		});
 
 		expect(duplicate).toMatchObject({
@@ -203,7 +149,7 @@ describe("PE Memo tools", () => {
 			savePeMemo(root, {
 				operation: "revise",
 				topic: "稳定主题",
-				claims: [supported("结论", "修订。", "chunk:chunk-b")],
+				claims: [supported("结论", "修订。", evidenceB)],
 			}),
 		).rejects.toThrow("revision_of is required");
 	});
@@ -214,9 +160,9 @@ describe("PE Memo tools", () => {
 			operation: "create",
 			topic: "版本测试",
 			claims: [
-				supported("保持", "收入增长20%。", "chunk:chunk-a"),
+				supported("保持", "收入增长20%。", evidenceA),
 				{ section: "旧章节", text: "暂缺资料。", status: "not_covered", evidenceIds: [] },
-				supported("变化", "毛利率改善。", "chunk:chunk-b"),
+				supported("变化", "毛利率改善。", evidenceB),
 			],
 		});
 		const firstMarkdown = readFileSync(join(root, first.memo_markdown_path ?? ""), "utf8");
@@ -225,9 +171,9 @@ describe("PE Memo tools", () => {
 			topic: "不应创建新主题",
 			revisionOf: first.memo_version_id,
 			claims: [
-				supported("保持", "收入增长20%。", "chunk:chunk-a"),
-				supported("变化", "毛利率显著改善。", "chunk:chunk-b"),
-				supported("新增", "新增订单。", "chunk:chunk-c"),
+				supported("保持", "收入增长20%。", evidenceA),
+				supported("变化", "毛利率显著改善。", evidenceB),
+				supported("新增", "新增订单。", evidenceC),
 			],
 		});
 
@@ -253,7 +199,7 @@ describe("PE Memo tools", () => {
 		const first = await savePeMemo(root, {
 			operation: "create",
 			topic: "事务测试",
-			claims: [supported("结论", "收入增长20%。", "chunk:chunk-a")],
+			claims: [supported("结论", "收入增长20%。", evidenceA)],
 		});
 		const database = new DatabaseSync(join(root, "meta", "collection.sqlite3"));
 		database.exec(`
@@ -271,7 +217,7 @@ describe("PE Memo tools", () => {
 				operation: "revise",
 				topic: "事务测试",
 				revisionOf: first.memo_version_id,
-				claims: [supported("结论", "毛利率改善。", "chunk:chunk-b")],
+				claims: [supported("结论", "毛利率改善。", evidenceB)],
 			}),
 		).rejects.toThrow("forced section failure");
 		expect(existsSync(join(root, "generated", "memo", first.memo_series_id, "v2"))).toBe(false);
