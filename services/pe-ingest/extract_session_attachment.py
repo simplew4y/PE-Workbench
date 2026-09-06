@@ -10,7 +10,7 @@ from pathlib import Path
 import pymupdf as fitz
 from openpyxl import load_workbook
 
-from format_adapters import adapt_document
+from pipeline.private_fund_format_adapters import adapt_document
 
 
 MAX_OUTPUT_CHARS = 500_000

@@ -83,16 +83,20 @@ interface ResearchIngestJob {
   message: string;
 }
 
-const RESEARCH_UPLOAD_SUFFIXES = new Set(["pdf"]);
+const RESEARCH_UPLOAD_SUFFIXES = new Set([
+  "pdf", "xlsx", "xlsm", "docx", "pptx", "csv", "md", "markdown", "txt",
+]);
 
 function uploadResearchFiles(
   datasetId: string,
+  cwd: string,
   files: File[],
   onProgress: (progress: number) => void,
 ): Promise<ResearchIngestJob> {
   return new Promise((resolve, reject) => {
     const formData = new FormData();
     formData.append("datasetId", datasetId);
+    formData.append("cwd", cwd);
     files.forEach((file) => formData.append("files", file, file.name));
     const xhr = new XMLHttpRequest();
     xhr.open("POST", "/api/pe/ingest");
@@ -729,7 +733,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
       setResearchStage("uploading");
       setResearchMessage(t("files.researchUploading"));
       try {
-        let job = await uploadResearchFiles(datasetId, files, setUploadProgress);
+        let job = await uploadResearchFiles(datasetId, cwd, files, setUploadProgress);
         setUploadProgress(100);
         while (["queued", "running"].includes(job.status)) {
           setResearchStage(job.status as "queued" | "running");
@@ -756,7 +760,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
         setResearchMessage(researchFailure instanceof Error ? researchFailure.message : String(researchFailure));
       }
     })();
-  }, [datasetId, t, uploadBusy]);
+  }, [cwd, datasetId, t, uploadBusy]);
 
   useImperativeHandle(ref, () => ({
     openUploadPicker() {
@@ -837,7 +841,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
         type="file"
         multiple
         hidden
-        accept="application/pdf,.pdf"
+        accept=".pdf,.xlsx,.xlsm,.docx,.pptx,.csv,.md,.markdown,.txt"
         onChange={handleResearchUploadInput}
       />
       {researchStage !== "idle" && (

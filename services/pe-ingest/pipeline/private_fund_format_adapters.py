@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Format adapters retained for chat session attachments.
+"""Format adapters for the private-fund directory ingestion pipeline.
 
 The adapters in this module only extract source content and provenance.  They
-return dictionaries consumed by the session attachment text extractor and do
-not write to SQLite.
+return dictionaries accepted by ``private_fund_directory_ingest._write_chunks``
+and deliberately do not write to SQLite themselves.  Keeping this boundary
+makes it possible for the main pipeline to register a document once and then
+dispatch its content extraction by suffix.
 
 DOCX and PPTX are parsed as Office Open XML packages with the Python standard
 library.  No optional Office dependency is required, and malformed packages

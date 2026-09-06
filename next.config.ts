@@ -5,10 +5,6 @@ import { fileURLToPath } from "url";
 
 const configDir = dirname(fileURLToPath(import.meta.url));
 const workspaceRoot = dirname(configDir);
-const configuredAllowedHosts = (process.env.PI_WEB_ALLOWED_HOSTS ?? "")
-  .split(",")
-  .map((origin) => origin.trim())
-  .filter(Boolean);
 const { version } = JSON.parse(readFileSync(join(configDir, "package.json"), "utf8")) as { version: string };
 let piVersion = "unknown";
 try {
@@ -28,15 +24,13 @@ const nextConfig: NextConfig = {
   },
   serverExternalPackages: [
     "undici",
-    "pdfjs-dist",
-    "@napi-rs/canvas",
     "@earendil-works/pe-boot",
     "@earendil-works/pi-coding-agent",
     "@earendil-works/pi-agent-core",
     "@earendil-works/pi-ai",
     "@earendil-works/pi-tui",
   ],
-  allowedDevOrigins: ["127.0.0.1", "192.168.*.*", ...configuredAllowedHosts],
+  allowedDevOrigins: ["127.0.0.1", "192.168.*.*"],
   async headers() {
     return [
       {

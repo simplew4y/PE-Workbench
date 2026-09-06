@@ -19,7 +19,6 @@
 
 # production
 /build
-/dist/
 
 # misc
 .DS_Store
@@ -42,9 +41,7 @@ yarn-error.log*
 next-env.d.ts
 .factory
 
-# optional local Python session-attachment runtime
-services/session-attachments/.venv/
-# obsolete local ingest environment may remain after upgrading
+# local Python ingest runtime
 services/pe-ingest/.venv/
 **/__pycache__/
 *.py[cod]

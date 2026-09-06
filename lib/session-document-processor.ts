@@ -26,7 +26,7 @@ export async function prepareSessionDocuments(
   const projectRoot = resolve(cwd);
   const targetDir = join(projectRoot, "meta", "session-attachments", safeSessionId(sessionId));
   await mkdir(targetDir, { recursive: true });
-  const serviceRoot = resolve(process.cwd(), "services", "session-attachments");
+  const serviceRoot = resolve(process.cwd(), "services", "pe-ingest");
   const python = join(serviceRoot, ".venv", "bin", "python");
   const extractor = join(serviceRoot, "extract_session_attachment.py");
   const references: string[] = [];

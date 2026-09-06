@@ -14,19 +14,26 @@ interface IngestJob {
 }
 
 interface Props {
-  project?: PeProjectSummary;
+  onProjectsChanged: (projects: PeProjectSummary[]) => void;
   onComplete?: () => void;
   onBusyChange?: (busy: boolean) => void;
 }
 
-function upload(
-  datasetId: string,
-  files: File[],
-  onProgress: (progress: number) => void,
-): Promise<IngestJob> {
+const SUPPORTED_SUFFIXES = new Set([
+  "pdf", "xlsx", "xlsm", "docx", "pptx", "csv", "md", "markdown", "txt",
+]);
+
+interface GlobalUploadResult {
+  jobs: IngestJob[];
+  projects: PeProjectSummary[];
+  createdProjects: PeProjectSummary[];
+  needsReview: Array<{ fileName: string; reason: string }>;
+  duplicateFiles: string[];
+}
+
+function upload(files: File[], onProgress: (progress: number) => void): Promise<GlobalUploadResult> {
   return new Promise((resolve, reject) => {
     const form = new FormData();
-    form.append("datasetId", datasetId);
     files.forEach((file) => form.append("files", file, file.name));
     const request = new XMLHttpRequest();
     request.open("POST", "/api/pe/ingest");
@@ -35,26 +42,31 @@ function upload(
         onProgress(Math.round((event.loaded / event.total) * 100));
       }
     };
-    request.onerror = () => reject(new Error("Network error while uploading PDF files"));
-    request.onabort = () => reject(new Error("PDF upload cancelled"));
+    request.onerror = () => reject(new Error("Network error while uploading research files"));
+    request.onabort = () => reject(new Error("Research upload cancelled"));
     request.onload = () => {
-      let body: { job?: IngestJob; error?: string } = {};
+      let body: Partial<GlobalUploadResult> & { error?: string } = {};
       try {
         body = JSON.parse(request.responseText) as typeof body;
       } catch {
         // The HTTP status supplies the fallback error below.
       }
-      if (request.status < 200 || request.status >= 300 || !body.job) {
-        reject(new Error(body.error ?? `PDF upload failed (HTTP ${request.status})`));
+      if (
+        request.status < 200 || request.status >= 300
+        || !Array.isArray(body.jobs) || !Array.isArray(body.projects)
+        || !Array.isArray(body.createdProjects) || !Array.isArray(body.needsReview)
+        || !Array.isArray(body.duplicateFiles)
+      ) {
+        reject(new Error(body.error ?? `Research upload failed (HTTP ${request.status})`));
         return;
       }
-      resolve(body.job);
+      resolve(body as GlobalUploadResult);
     };
     request.send(form);
   });
 }
 
-export function PeResearchUpload({ project, onComplete, onBusyChange }: Props) {
+export function PeAutoResearchUpload({ onProjectsChanged, onComplete, onBusyChange }: Props) {
   const { t } = useI18n();
   const inputRef = useRef<HTMLInputElement>(null);
   const mountedRef = useRef(true);
@@ -78,45 +90,57 @@ export function PeResearchUpload({ project, onComplete, onBusyChange }: Props) {
   const handleFiles = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     const selected = Array.from(event.target.files ?? []);
     event.target.value = "";
-    if (selected.length === 0 || busy || !project) return;
-    const unsupported = selected.find((file) => (
-      !file.name.toLocaleLowerCase().endsWith(".pdf") || file.type.toLocaleLowerCase() !== "application/pdf"
-    ));
+    if (selected.length === 0 || busy) return;
+    const unsupported = selected.find((file) => {
+      const suffix = file.name.split(".").pop()?.toLowerCase() ?? "";
+      return !SUPPORTED_SUFFIXES.has(suffix);
+    });
     if (unsupported) {
       setStage("failed");
       setMessage(t("files.researchUnsupported"));
       return;
     }
 
-    const datasetId = project.datasetId;
     void (async () => {
       setProgress(0);
       setStage("uploading");
-      setMessage(t("researchUpload.uploading"));
+      setMessage(t("autoUpload.uploading"));
       try {
-        let job = await upload(datasetId, selected, setProgress);
+        const result = await upload(selected, setProgress);
         if (!mountedRef.current) return;
+        onProjectsChanged(result.projects);
         setProgress(100);
-        while (job.status === "queued" || job.status === "running") {
-          setStage(job.status);
-          setMessage(job.message || t("researchUpload.running"));
+        let jobs = result.jobs;
+        while (jobs.some((job) => ["queued", "running"].includes(job.status))) {
+          setStage(jobs.some((job) => job.status === "running") ? "running" : "queued");
+          setMessage(t("autoUpload.researchingProjects", { count: jobs.length }));
           await new Promise((resolve) => window.setTimeout(resolve, 1500));
           if (!mountedRef.current) return;
-          const response = await fetch(
-            `/api/pe/ingest/${encodeURIComponent(job.jobId)}?${new URLSearchParams({ datasetId }).toString()}`,
-            { cache: "no-store" },
-          );
-          const body = await response.json().catch(() => ({})) as { job?: IngestJob; error?: string };
-          if (!response.ok || !body.job) {
-            throw new Error(body.error ?? `Pipeline status failed (HTTP ${response.status})`);
-          }
-          job = body.job;
+          jobs = await Promise.all(jobs.map(async (job) => {
+            if (!["queued", "running"].includes(job.status)) return job;
+            const response = await fetch(
+              `/api/pe/ingest/${encodeURIComponent(job.jobId)}?${new URLSearchParams({ datasetId: job.datasetId }).toString()}`,
+              { cache: "no-store" },
+            );
+            const body = await response.json().catch(() => ({})) as { job?: IngestJob; error?: string };
+            if (!response.ok || !body.job) {
+              throw new Error(body.error ?? `Pipeline status failed (HTTP ${response.status})`);
+            }
+            return body.job;
+          }));
         }
-        if (job.status !== "completed" && job.status !== "completed_with_warnings") {
-          throw new Error(job.message || t("files.researchFailed"));
+        const failedJob = jobs.find(
+          (job) => job.status !== "completed" && job.status !== "completed_with_warnings",
+        );
+        if (failedJob) {
+          throw new Error(failedJob.message || t("files.researchFailed"));
         }
-        setStage(job.status === "completed" ? "completed" : "warning");
-        setMessage(job.message || t("files.researchComplete"));
+        const warning = result.needsReview.length > 0
+          || jobs.some((job) => job.status === "completed_with_warnings");
+        setStage(warning ? "warning" : "completed");
+        setMessage(result.needsReview.length > 0
+          ? t("autoUpload.needsReview", { count: result.needsReview.length })
+          : t("autoUpload.completeProjects", { count: result.projects.length }));
         onComplete?.();
       } catch (cause) {
         if (!mountedRef.current) return;
@@ -124,9 +148,8 @@ export function PeResearchUpload({ project, onComplete, onBusyChange }: Props) {
         setMessage(cause instanceof Error ? cause.message : String(cause));
       }
     })();
-  }, [busy, onComplete, project, t]);
+  }, [busy, onComplete, onProjectsChanged, t]);
 
-  const disabled = busy || !project;
   return (
     <div style={{ marginTop: 10 }}>
       <input
@@ -134,13 +157,13 @@ export function PeResearchUpload({ project, onComplete, onBusyChange }: Props) {
         type="file"
         multiple
         hidden
-        accept="application/pdf,.pdf"
+        accept=".pdf,.xlsx,.xlsm,.docx,.pptx,.csv,.md,.markdown,.txt"
         onChange={handleFiles}
       />
       <button
         type="button"
         onClick={() => inputRef.current?.click()}
-        disabled={disabled}
+        disabled={busy}
         style={{
           width: "100%",
           minHeight: 38,
@@ -151,13 +174,13 @@ export function PeResearchUpload({ project, onComplete, onBusyChange }: Props) {
           border: "1px solid rgba(37,99,235,0.4)",
           borderRadius: 7,
           background: "rgba(37,99,235,0.08)",
-          color: project ? "var(--accent)" : "var(--text-dim)",
-          cursor: busy ? "wait" : project ? "pointer" : "not-allowed",
+          color: "var(--accent)",
+          cursor: busy ? "wait" : "pointer",
           fontSize: 12,
           fontWeight: 650,
-          opacity: disabled ? 0.65 : 1,
+          opacity: busy ? 0.75 : 1,
         }}
-        title={project ? t("researchUpload.title") : t("researchUpload.noProject")}
+        title={t("autoUpload.title")}
       >
         {busy ? (
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" style={{ animation: "spin 0.8s linear infinite" }} aria-hidden="true">
@@ -168,7 +191,7 @@ export function PeResearchUpload({ project, onComplete, onBusyChange }: Props) {
             <path d="M12 3v12" /><path d="m7 8 5-5 5 5" /><path d="M5 20h14" />
           </svg>
         )}
-        {busy ? t("researchUpload.busy") : t("researchUpload.action")}
+        {busy ? t("autoUpload.busy") : t("autoUpload.action")}
       </button>
       {stage !== "idle" && (
         <div
@@ -190,9 +213,7 @@ export function PeResearchUpload({ project, onComplete, onBusyChange }: Props) {
         </div>
       )}
       <div style={{ marginTop: 5, color: "var(--text-dim)", fontSize: 10, lineHeight: 1.4 }}>
-        {project
-          ? t("researchUpload.hint", { project: project.name })
-          : t("researchUpload.noProject")}
+        {t("autoUpload.hint")}
       </div>
     </div>
   );
