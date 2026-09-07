@@ -33,7 +33,7 @@ describe("PE system prompt", () => {
 		expect(prompt).toContain("Only status=verified");
 		expect(prompt).toContain("distinguish structural_status from calculation_validation.status");
 		expect(prompt).toContain("When only a screenshot, excerpt, or another analysis is available");
-		expect(prompt).toContain("do not invent doc_id, cells, citations, or tool results");
+		expect(prompt).toContain("do not invent workbook verification, doc_id, cells, citations, or tool results");
 	});
 
 	it("keeps complete but natural valuation answers without forcing visual components", () => {

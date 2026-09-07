@@ -166,6 +166,8 @@ export function registerValuationReportGuard(pi: ExtensionAPI): void {
 	let selectedDocId: string | undefined;
 	let latestReportCallId: string | undefined;
 	let ready: ReadyReport | undefined;
+	let sectionRepair: { docId: string; identity: string } | undefined;
+	let repairAttempts = 0;
 	let issues: string[] = [];
 	const calls = new Map<string, PendingCall>();
 
@@ -174,6 +176,8 @@ export function registerValuationReportGuard(pi: ExtensionAPI): void {
 		revision = 0;
 		eligible = false;
 		ready = undefined;
+		sectionRepair = undefined;
+		repairAttempts = 0;
 		issues = [];
 		versions = new Map();
 		lockedDocId = undefined;
@@ -210,6 +214,7 @@ export function registerValuationReportGuard(pi: ExtensionAPI): void {
 
 	function invalidate(reason: string): void {
 		ready = undefined;
+		sectionRepair = undefined;
 		revision++;
 		issues = [reason];
 	}
@@ -267,6 +272,7 @@ export function registerValuationReportGuard(pi: ExtensionAPI): void {
 		if (isReport) {
 			latestReportCallId = event.toolCallId;
 			ready = undefined;
+			sectionRepair = undefined;
 			issues = ["整体报告的校验尚未完成。"];
 		}
 		calls.set(event.toolCallId, { generation, revision, docId, isReport, scope: input?.scope });
@@ -286,7 +292,7 @@ export function registerValuationReportGuard(pi: ExtensionAPI): void {
 					: typeof details?.selected_doc_id === "string"
 						? details.selected_doc_id
 						: call.docId;
-			if (event.isError) {
+			if (event.isError || (call.isReport && details?.status === "blocked")) {
 				invalidate("工作簿读取或报告校验失败，需要补齐证据后重新生成。");
 				if (
 					call.isReport &&
@@ -295,6 +301,23 @@ export function registerValuationReportGuard(pi: ExtensionAPI): void {
 					details.issues.length
 				)
 					issues = details.issues;
+				if (
+					call.isReport &&
+					call.scope === "overview" &&
+					details?.status === "blocked" &&
+					details.repair_scope === "sections" &&
+					Array.isArray(details.issues) &&
+					details.issues.length > 0 &&
+					Array.isArray(details.section_issues) &&
+					details.section_issues.length === details.issues.length &&
+					docId &&
+					docId === call.docId &&
+					docId === selectedDocId &&
+					(!lockedDocId || docId === lockedDocId)
+				) {
+					const version = versions.get(docId);
+					if (version) sectionRepair = { docId, identity: version.identity };
+				}
 				return;
 			}
 			if (!call.isReport) {
@@ -356,7 +379,22 @@ export function registerValuationReportGuard(pi: ExtensionAPI): void {
 		try {
 			if (ready && activeWorkbooks(ctx.cwd).get(ready.docId)?.identity !== ready.identity)
 				invalidate("报告生成后工作簿版本发生变化，需要重新选择并校验。");
-			text = ready?.text ?? blockedReport(issues);
+			if (sectionRepair && activeWorkbooks(ctx.cwd).get(sectionRepair.docId)?.identity !== sectionRepair.identity)
+				invalidate("报告校验后工作簿版本发生变化，需要重新选择并校验。");
+			if (!ready && sectionRepair && repairAttempts < 1) {
+				pi.sendMessage(
+					{
+						customType: "pe-valuation-report-repair",
+						display: false,
+						content:
+							"The current valuation report failed only section prose validation. Continue the existing report request: use section_issues from the latest pe_valuation_report result to revise the affected title/analysis fields, preserving checked facts and calculations. Route numeric claims and observed financial trends through facts/calculations and fact_ids; retain supported qualitative drivers and explicit conditional risks. Remove manual citations and unconfirmed metadata commentary. Do not relabel unchecked facts as hypotheses. Do not reread the workbook for prose-only errors. Call pe_valuation_report again for the same doc_id with scope=overview, then return rendered_report verbatim only if ready. This is one bounded repair attempt; do not repeat the failed request unchanged.",
+					},
+					{ deliverAs: "followUp" },
+				);
+				repairAttempts++;
+				sectionRepair = undefined;
+				text = "正在修正报告文字并重新校验。";
+			} else text = ready?.text ?? blockedReport(issues);
 		} catch {
 			invalidate("无法重新核验当前工作簿版本，暂不交付报告。");
 			text = blockedReport(issues);

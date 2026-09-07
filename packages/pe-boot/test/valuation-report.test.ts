@@ -326,6 +326,61 @@ describe("deterministic valuation reports", () => {
 		expect(buildPeValuationReport(fixture(), options).status).toBe("blocked");
 	});
 
+	it("renders the reported section titles with supported qualitative drivers and conditional risks", () => {
+		const options = focused([request("revenue", "B1", "Revenue", "2023A", "EURm")]);
+		options.scope = "overview";
+		options.sections = [
+			{ title: "估值方法框架", fact_ids: ["revenue"], analysis: "经营假设影响模型的估值依据。" },
+			{ title: "核心驱动因素", fact_ids: ["revenue"], analysis: "若收入下降，利润可能下滑。" },
+			{
+				title: "盈利预测与估值敏感性",
+				fact_ids: ["revenue"],
+				analysis: "品牌定价能力的提升是需要检验的假设。",
+			},
+			{ title: "模型核心风险点", fact_ids: ["revenue"], analysis: "利润下降可能影响目标价。" },
+		];
+		const result = buildPeValuationReport(fixture(), options);
+		expect(result.status, result.issues.join("\n")).toBe("ready");
+		expect(result.section_issues).toEqual([]);
+		for (const section of options.sections) expect(result.rendered_report).toContain(section.analysis);
+	});
+
+	it("identifies prose-only repairs and becomes ready after resubmitting the same checked facts", () => {
+		const root = fixture();
+		const options = focused([request("pe", "B6", "Target P/E", "2026E", "x")]);
+		options.sections[0] = { title: "估值方法框架", fact_ids: ["pe"], analysis: "目标 P/E 为 30 倍。" };
+		const blocked = buildPeValuationReport(root, options);
+		expect(blocked.status).toBe("blocked");
+		expect(blocked.repair_scope).toBe("sections");
+		expect(blocked.section_issues).toEqual([
+			expect.objectContaining({
+				section_index: 0,
+				field: "analysis",
+				code: "numeric_claim",
+				excerpt: "目标 P/E 为 30 倍。",
+			}),
+		]);
+		expect(blocked.rendered_report).toBeUndefined();
+		options.sections[0].analysis = "目标倍数影响模型的估值依据。";
+		const ready = buildPeValuationReport(root, options);
+		expect(ready.status).toBe("ready");
+		expect(ready.facts).toEqual(blocked.facts);
+		expect(ready.repair_scope).toBeUndefined();
+		expect(ready.rendered_report).toContain("30.00 倍");
+		expect(ready.rendered_report).toContain("#pe-source?evidence_id=source%3A");
+	});
+
+	it.each(["source", "fact_id"])("does not mark %s errors as prose-only repairs", (kind) => {
+		const fact = request("pe", "B6", "Target P/E", "2026E", kind === "source" ? "EURm" : "x");
+		const options = focused([fact]);
+		options.sections[0].analysis = "目标 P/E 为 30 倍。";
+		if (kind === "fact_id") options.sections[0].fact_ids.push("nonexistent");
+		const result = buildPeValuationReport(fixture(), options);
+		expect(result.status).toBe("blocked");
+		expect(result.section_issues).toHaveLength(1);
+		expect(result.repair_scope).toBeUndefined();
+	});
+
 	it("preserves qualitative reasoning with evidence and ordinary Chinese words", () => {
 		const options = focused([request("revenue", "B1", "Revenue", "2023A", "EURm")]);
 		options.sections[0].analysis = "一方面，品牌定价能力影响模型假设；另一方面，需进一步核实竞争格局。";

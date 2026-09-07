@@ -12,6 +12,7 @@ import {
 	reportMetricLabel,
 	valuationOverviewLayout,
 } from "./valuation-report-layout.ts";
+import { type ReportSectionIssue, validateReportSectionProse } from "./valuation-report-prose.ts";
 
 export const PE_VALUATION_REPORT_PROMPT_SNIPPET =
 	"Validate source cells and render a readable valuation report with forecast-year/method comparison tables, formula explanations and compact source links; provide checked operating drivers and qualitative analysis, never invented numeric values";
@@ -61,6 +62,8 @@ export interface PeValuationReportResult {
 	doc_id: string;
 	status: "ready" | "blocked";
 	issues: string[];
+	section_issues: ReportSectionIssue[];
+	repair_scope?: "sections";
 	rendered_report?: string;
 	facts: Array<{ id: string; cell: ExcelCellDetail; text: string }>;
 	calculations: Array<{ id: string; value: number; text: string }>;
@@ -115,6 +118,7 @@ export function buildPeValuationReport(cwd: string, options: PeValuationReportOp
 		doc_id: options.docId,
 		status: "blocked",
 		issues,
+		section_issues: [],
 		facts: [],
 		calculations: [],
 		validation_scope:
@@ -360,36 +364,13 @@ export function buildPeValuationReport(cwd: string, options: PeValuationReportOp
 			notes.push(`估值日期：${date.valuation_date}。${dateCitations}`, "");
 	}
 	const usedStatements = new Set<string>();
-	for (const section of options.sections) {
-		const analysis = (section.analysis ?? "")
-			.split(/(?<=[。！？.!?])\s*/u)
-			.filter(
-				(sentence) =>
-					!/未确认|未核实|未确定|尚未确定|待核|无法确认|无法确定|无法验证|未提供|未找到|未定位|未明确|不明确|未知|缺失|不详|未刷新|未重算/u.test(
-						sentence,
-					),
-			)
-			.join(" ")
-			.trim();
-		const prose = `${section.title} ${section.analysis ?? ""}`;
-		const chineseNumericClaim =
-			/(?:百分之|千分之|万分之)|[〇零一二三四五六七八九十百千万亿两壹贰叁肆伍陆柒捌玖拾佰仟点]+\s*(?:年|季度|欧元|美元|人民币|亿|万|股|倍|%|％|个百分点)/u.test(
-				prose,
-			);
-		const quantitativeTrend =
-			/(?:毛利率|利润率|税率|营收|收入|每股收益|股数|利润|盈利|目标价|价格|股价).{0,24}(?:扩张|收缩|提升|提高|增加|上升|下降|降低|减少|回落|稳定|增长|下滑|持平)|(?:revenue|sales|margin|tax rate|earnings|EPS|profit|share count|price).{0,24}(?:increas|decreas|ris(?:e|ing)|fall|grow|declin|stable|expand|contract)/iu.test(
-				prose,
-			);
-		if (
-			/\p{N}/u.test(section.title) ||
-			(section.analysis && /\p{N}|#pe-source|source:|https?:\/\//u.test(section.analysis)) ||
-			chineseNumericClaim ||
-			quantitativeTrend
-		) {
-			issues.push(
-				`Section ${section.title}: put numeric claims, financial trends and citations in source facts or calculations; keep titles neutral`,
-			);
-			continue;
+	for (const [sectionIndex, section] of options.sections.entries()) {
+		const { analysis, issues: sectionIssues } = validateReportSectionProse(section, sectionIndex);
+		result.section_issues.push(...sectionIssues);
+		for (const issue of sectionIssues)
+			issues.push(`章节「${section.title}」的 ${issue.field}：${issue.excerpt} — ${issue.repair}`);
+		for (const id of section.fact_ids) {
+			if (!statements.has(id)) issues.push(`Section ${section.title}: unknown or invalid fact ${id}`);
 		}
 		if (analysis && !section.fact_ids.some((id) => statements.has(id))) {
 			issues.push(
@@ -397,6 +378,7 @@ export function buildPeValuationReport(cwd: string, options: PeValuationReportOp
 			);
 			continue;
 		}
+		if (sectionIssues.length) continue;
 		if (!section.fact_ids.length && !analysis) continue;
 		lines.push(`## ${markdownText(section.title)}`, "");
 		const sectionFacts = section.fact_ids.filter((id) => facts.has(id) && !usedStatements.has(id));
@@ -414,10 +396,7 @@ export function buildPeValuationReport(cwd: string, options: PeValuationReportOp
 		}
 		for (const id of section.fact_ids) {
 			const text = statements.get(id);
-			if (!text) {
-				issues.push(`Section ${section.title}: unknown or invalid fact ${id}`);
-				continue;
-			}
+			if (!text) continue;
 			if (usedStatements.has(id)) continue;
 			usedStatements.add(id);
 			lines.push(`- ${text}`);
@@ -425,8 +404,12 @@ export function buildPeValuationReport(cwd: string, options: PeValuationReportOp
 		if (analysis) lines.push("", `分析推断：${markdownText(analysis)}`);
 		lines.push("");
 	}
-	if (options.scope === "focused" && usedStatements.size === 0)
+	if (
+		options.scope === "focused" &&
+		!options.sections.some((section) => section.fact_ids.some((id) => statements.has(id)))
+	)
 		issues.push("A focused report must include at least one checked fact or calculation");
+	if (issues.length && issues.length === result.section_issues.length) result.repair_scope = "sections";
 	if (!issues.length) {
 		result.status = "ready";
 		result.rendered_report = compactReportCitations([...lines, ...notes, ...appendix].join("\n").trim());
@@ -439,7 +422,7 @@ export const peValuationReportTool = defineTool({
 	label: "PE Valuation Report",
 	promptSnippet: PE_VALUATION_REPORT_PROMPT_SNIPPET,
 	description:
-		"Build the final valuation report from exact source cells. Numeric statements, conversions and financial trends are rendered by code. An overview groups results by source method and forecast period, explains supported formulas, and places historical periods in an appendix. Source links remain clickable with compact labels. Provide sections covering the key operating drivers and model assumptions with qualitative interpretation, not just a parameter list. Use neutral headings; qualitative analyst inference must reference checked facts and may not introduce numbers, financial trends or citations. Omit unconfirmed metadata and missing-information commentary from the report. Keep unknown units internally and never convert or compare them as confirmed units. A blocked result must be corrected before finalizing; return rendered_report verbatim.",
+		"Build the final valuation report from exact source cells. Numeric statements, conversions and observed financial trends are rendered by code. An overview groups results by source method and forecast period, explains supported formulas, and places historical periods in an appendix. Source links remain clickable with compact labels. Provide sections covering the key operating drivers and model assumptions with qualitative interpretation, not just a parameter list. Use neutral headings; qualitative analyst inference must reference checked facts. Explicit conditional impact paths and risks are allowed; numbers, observed financial trends and citations belong in facts/calculations. Omit unconfirmed metadata and missing-information commentary from the report. Keep unknown units internally and never convert or compare them as confirmed units. On repair_scope=sections, use section_issues to revise only the affected prose and call this tool again, preserving the checked facts/calculations; no workbook reread is needed for prose-only errors. Other blocked results require source correction. Once ready, return rendered_report verbatim.",
 	parameters: Type.Object({
 		doc_id: Type.String({ minLength: 1 }),
 		dataset_id: Type.Optional(Type.String()),
@@ -488,7 +471,7 @@ export const peValuationReportTool = defineTool({
 					Type.String({
 						maxLength: 3000,
 						description:
-							"Qualitative inference tied to fact_ids. Use facts/calculations for all numbers, financial trends and citations, including Chinese numerals; use neutral headings.",
+							"Qualitative inference tied to fact_ids. Use facts/calculations for numbers, years, observed financial trends and citations, including Chinese numerals. Explicit conditional risks are allowed, e.g. 若盈利下降，估值可能承压. Do not disguise unchecked factual claims as hypotheses.",
 					}),
 				),
 			}),

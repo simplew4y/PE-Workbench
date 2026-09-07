@@ -39,9 +39,19 @@ function update(cwd: string, sql: string): void {
 
 function harness(cwd = project()) {
 	const handlers = new Map<string, (event: never, ctx: ExtensionContext) => unknown>();
+	const repairs: Array<{
+		message: Parameters<ExtensionAPI["sendMessage"]>[0];
+		options: Parameters<ExtensionAPI["sendMessage"]>[1];
+	}> = [];
 	registerValuationReportGuard({
 		on(name: string, handler: (event: never, ctx: ExtensionContext) => unknown) {
 			handlers.set(name, handler);
+		},
+		sendMessage(
+			message: Parameters<ExtensionAPI["sendMessage"]>[0],
+			options: Parameters<ExtensionAPI["sendMessage"]>[1],
+		) {
+			repairs.push({ message, options });
 		},
 	} as unknown as ExtensionAPI);
 	const session = { id: "session-a" };
@@ -108,8 +118,16 @@ function harness(cwd = project()) {
 			| MessageEndEventResult
 			| undefined;
 	}
-	return { cwd, ctx, session, emit, begin, call, result, finish, message };
+	return { cwd, ctx, session, emit, begin, call, result, finish, message, repairs };
 }
+
+const SECTION_FAILURE = {
+	status: "blocked",
+	rendered_report: undefined,
+	repair_scope: "sections",
+	issues: ["章节「估值方法框架」的 analysis 包含数值，请通过 facts/calculations 表达。"],
+	section_issues: [{ section_index: 0, field: "analysis", code: "numeric_claim", excerpt: "目标倍数为 18 倍。" }],
+};
 
 function text(result: MessageEndEventResult | undefined): string | undefined {
 	return result?.message?.role === "assistant"
@@ -125,6 +143,75 @@ afterEach(() => {
 });
 
 describe("valuation report final-message guard", () => {
+	it("queues one prose repair when the model stops on a repairable error, then delivers the ready report", async () => {
+		const run = harness();
+		await run.begin();
+		await run.call();
+		await run.result("report-1", SECTION_FAILURE, true);
+		expect(text(await run.finish())).toBe("正在修正报告文字并重新校验。");
+		expect(run.repairs).toHaveLength(1);
+		expect(run.repairs[0].options).toEqual({ deliverAs: "followUp" });
+		expect(run.repairs[0].message.display).toBe(false);
+		await run.emit("message_start", { message: { role: "custom", ...run.repairs[0].message } });
+		await run.call("repair");
+		await run.result("repair");
+		expect(text(await run.finish())).toBe(REPORT);
+		expect(run.repairs).toHaveLength(1);
+	});
+
+	it("does not loop if the automatic prose repair fails", async () => {
+		const run = harness();
+		await run.begin();
+		await run.call();
+		await run.result("report-1", SECTION_FAILURE, true);
+		await run.finish();
+		await run.call("repair");
+		await run.result("repair", SECTION_FAILURE, true);
+		expect(text(await run.finish())).toContain("尚未通过校验");
+		expect(run.repairs).toHaveLength(1);
+	});
+
+	it("does not interrupt a model that has already corrected a prose error", async () => {
+		const run = harness();
+		await run.begin();
+		await run.call();
+		await run.result("report-1", SECTION_FAILURE, true);
+		await run.call("corrected");
+		await run.result("corrected");
+		expect(text(await run.finish())).toBe(REPORT);
+		expect(run.repairs).toEqual([]);
+	});
+
+	it("does not automatically repair source failures or malformed repair requests", async () => {
+		for (const details of [
+			{ status: "blocked", issues: ["unit mismatch"] },
+			{ ...SECTION_FAILURE, section_issues: [] },
+			{ ...SECTION_FAILURE, doc_id: "other-book" },
+		]) {
+			const run = harness();
+			await run.begin();
+			await run.call();
+			await run.result("report-1", details, true);
+			expect(text(await run.finish())).toContain("尚未通过校验");
+			expect(run.repairs).toEqual([]);
+		}
+	});
+
+	it.each(["version", "cancel", "source_read", "focused"])("does not retry prose after %s changes", async (change) => {
+		const run = harness();
+		await run.begin();
+		await run.call("report-1", "doc-a", "pe_valuation_report", change === "focused" ? "focused" : "overview");
+		await run.result("report-1", SECTION_FAILURE, true);
+		if (change === "version") update(run.cwd, "UPDATE documents SET version_no=2");
+		if (change === "cancel") await run.emit("message_start", { message: { role: "user", content: "停止" } });
+		if (change === "source_read") {
+			await run.call("read", "doc-a", "pe_excel_range");
+			await run.result("read", {}, true, "pe_excel_range");
+		}
+		await run.finish();
+		expect(run.repairs).toEqual([]);
+	});
+
 	it("uses the ready report verbatim while preserving reasoning and response metadata", async () => {
 		const run = harness();
 		await run.begin();
