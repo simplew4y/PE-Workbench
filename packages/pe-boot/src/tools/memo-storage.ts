@@ -2,13 +2,13 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, realpathSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
+import { resolvePeEvidenceRecord } from "../evidence.ts";
 import {
-	evidenceLocator,
+	type evidenceLocator,
 	numberValue,
 	openPeDataset,
 	openWritablePeDataset,
 	type SqlRow,
-	sourceCitation,
 	textValue,
 } from "./database.ts";
 import { renderMemoPdf } from "./memo-pdf.ts";
@@ -266,62 +266,14 @@ function ensureMemoSchema(database: DatabaseSync): void {
 	`);
 }
 
-function activeDocumentPredicate(): string {
-	return "d.deleted_at IS NULL AND COALESCE(d.is_current, 1) = 1 AND COALESCE(d.lifecycle_state, 'active') = 'active'";
-}
-
 function resolveEvidence(database: DatabaseSync, datasetId: string, evidenceId: string): EvidenceReference | undefined {
-	const separator = evidenceId.indexOf(":");
-	if (separator <= 0 || separator === evidenceId.length - 1) return undefined;
-	const kind = evidenceId.slice(0, separator);
-	const rawId = evidenceId.slice(separator + 1);
-	let row: SqlRow | undefined;
-	if (kind === "page" && tableExists(database, "pdf_pages")) {
-		row = database
-			.prepare(
-				`SELECT d.original_filename, p.page_number AS page_start, p.page_number AS page_end
-				 FROM pdf_pages p
-				 JOIN documents d ON d.doc_id=p.doc_id
-				 WHERE d.dataset_id=? AND p.page_id=?`,
-			)
-			.get(datasetId, rawId) as SqlRow | undefined;
-	} else if (kind === "chunk" && tableExists(database, "chunks")) {
-		row = database
-			.prepare(
-				`SELECT c.chunk_id, c.title_path, d.original_filename, d.source_relpath,
-				        l.page_start, l.page_end, l.sheet_name, l.cell_range, l.heading_path
-				 FROM chunks c
-				 JOIN documents d ON d.doc_id=c.doc_id
-				 LEFT JOIN chunk_locations l ON l.chunk_id=c.chunk_id
-				  AND l.location_index=(SELECT MIN(location_index) FROM chunk_locations WHERE chunk_id=c.chunk_id)
-				 WHERE c.dataset_id=? AND c.chunk_id=? AND ${activeDocumentPredicate()}`,
-			)
-			.get(datasetId, rawId) as SqlRow | undefined;
-	} else if (kind === "fact" && tableExists(database, "metric_facts")) {
-		row = database
-			.prepare(
-				`SELECT f.fact_id, f.sheet_name, f.cell_ref AS cell_range,
-				        d.original_filename, d.source_relpath
-				 FROM metric_facts f JOIN documents d ON d.doc_id=f.doc_id
-				 WHERE f.dataset_id=? AND f.fact_id=? AND ${activeDocumentPredicate()}`,
-			)
-			.get(datasetId, rawId) as SqlRow | undefined;
-	} else if (kind === "cell" && tableExists(database, "excel_cells")) {
-		row = database
-			.prepare(
-				`SELECT c.cell_id, c.sheet_name, c.cell_ref AS cell_range,
-				        d.original_filename, d.source_relpath
-				 FROM excel_cells c JOIN documents d ON d.doc_id=c.doc_id
-				 WHERE c.dataset_id=? AND c.cell_id=? AND ${activeDocumentPredicate()}`,
-			)
-			.get(datasetId, rawId) as SqlRow | undefined;
-	}
-	if (!row) return undefined;
+	const record = resolvePeEvidenceRecord(database, datasetId, evidenceId);
+	if (!record) return undefined;
 	return {
 		evidence_id: evidenceId,
-		citation: sourceCitation(row),
-		filename: textValue(row, "source_relpath") ?? textValue(row, "original_filename") ?? "unknown source",
-		locator: evidenceLocator(row),
+		citation: record.citation,
+		filename: record.filename,
+		locator: record.locator,
 	};
 }
 
@@ -604,26 +556,9 @@ function writeAtomicFile(finalPath: string, content: string | Uint8Array): strin
 }
 
 function currentDocumentSnapshot(database: DatabaseSync): Array<Record<string, unknown>> {
-	const columns = (database.prepare("PRAGMA table_info(documents)").all() as SqlRow[])
-		.map((row) => textValue(row, "name"))
-		.filter((value): value is string => value !== undefined);
-	const available = new Set(columns);
-	const projection = [
-		"doc_id",
-		"logical_doc_id",
-		"version_no",
-		"original_filename",
-		"document_date",
-		"checksum",
-		"doc_type",
-	].filter((column) => available.has(column));
-	const predicates = [
-		available.has("is_current") ? "COALESCE(is_current, 1)=1" : "",
-		available.has("lifecycle_state") ? "COALESCE(lifecycle_state, 'active')='active'" : "",
-		available.has("deleted_at") ? "deleted_at IS NULL" : "",
-	].filter((predicate) => predicate.length > 0);
-	const sql = `SELECT ${projection.join(", ")} FROM documents${predicates.length > 0 ? ` WHERE ${predicates.join(" AND ")}` : ""} ORDER BY doc_id`;
-	return database.prepare(sql).all() as Array<Record<string, unknown>>;
+	return database
+		.prepare("SELECT doc_id,original_filename,document_date,sha256,file_type FROM documents ORDER BY doc_id")
+		.all() as Array<Record<string, unknown>>;
 }
 
 function selectMemoVersion(database: DatabaseSync, datasetId: string, memoVersionId: string): SqlRow | undefined {

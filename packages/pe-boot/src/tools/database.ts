@@ -1,6 +1,7 @@
 import { realpathSync, statSync } from "node:fs";
-import { isAbsolute, join, relative } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { sourceId } from "../source.ts";
 
 export type SqlValue = string | number | bigint | Uint8Array | null;
 export type SqlRow = Record<string, SqlValue>;
@@ -41,6 +42,13 @@ export function numberValue(row: SqlRow, key: string): number | undefined {
 export function booleanValue(row: SqlRow, key: string): boolean {
 	const value = numberValue(row, key);
 	return value === 1;
+}
+
+export function normalizeText(value: unknown): string {
+	return String(value ?? "")
+		.normalize("NFKC")
+		.replace(/\s+/gu, " ")
+		.trim();
 }
 
 export function sourceFilename(row: SqlRow): string {
@@ -91,6 +99,29 @@ export function evidenceSourceUrl(evidenceId: string): string {
 export function sourceMarkdownCitation(row: SqlRow, evidenceId: string): string {
 	const citation = sourceCitation(row);
 	return `[${escapeMarkdownLinkText(citation)}](${evidenceSourceUrl(evidenceId)})`;
+}
+
+export function sourceEvidenceId(row: SqlRow): string {
+	const docId = textValue(row, "doc_id");
+	const sheet = textValue(row, "sheet_name");
+	const range = textValue(row, "cell_range") ?? textValue(row, "cell_ref") ?? textValue(row, "source_range");
+	if (!docId || !sheet || !range) throw new Error("Excel source row is missing doc_id, sheet_name, or range");
+	return sourceId({ docId, sheet, range });
+}
+
+export function documentFilePath(workspaceRoot: string, document: SqlRow): string {
+	const stored = textValue(document, "raw_path");
+	if (!stored) throw new Error("Document has no registered raw path");
+	const candidate = resolve(workspaceRoot, stored);
+	const local = relative(workspaceRoot, candidate);
+	if (local.startsWith("..") || isAbsolute(local))
+		throw new Error("Document path resolves outside the project workspace");
+	const actual = realpathSync(candidate);
+	const actualLocal = relative(workspaceRoot, actual);
+	if (actualLocal.startsWith("..") || isAbsolute(actualLocal) || !statSync(actual).isFile()) {
+		throw new Error("Document original is outside the project workspace or is not a file");
+	}
+	return actual;
 }
 
 function resolvePeDatasetLocation(cwd: string): PeDatasetLocation {

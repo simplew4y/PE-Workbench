@@ -80,12 +80,23 @@ function createPageDatasetFixture(datasetId = "dataset-new"): string {
 			tokenize='trigram'
 		);
 	`);
+	database.exec(`
+		ALTER TABLE documents ADD COLUMN file_type TEXT NOT NULL DEFAULT 'pdf';
+		ALTER TABLE documents ADD COLUMN source_relpath TEXT NOT NULL DEFAULT '';
+		ALTER TABLE documents ADD COLUMN file_size INTEGER NOT NULL DEFAULT 0;
+		ALTER TABLE documents ADD COLUMN readable_text_path TEXT NOT NULL DEFAULT '';
+	`);
 	const now = "2026-09-07T00:00:00.000Z";
 	database.prepare("INSERT INTO schema_metadata VALUES ('pipeline_schema_version', '2', ?)").run(now);
 	database.prepare("INSERT INTO project_metadata VALUES (1, ?, '阳光', ?, ?)").run(datasetId, now, now);
 	database
 		.prepare(`
-		INSERT INTO documents VALUES (
+		INSERT INTO documents (
+			doc_id,dataset_id,original_filename,filename_key,raw_path,sha256,status,page_count,
+			parser_name,parser_version,title,brokerage,document_date,rating,target_price,
+			exhibits_json,pdf_metadata_json,artifact_directory,document_markdown_path,
+			layout_json_path,warnings_json,created_at,updated_at
+		) VALUES (
 			'doc-sungrow', ?, '阳光电源调研.pdf', '阳光电源调研.pdf', 'raw/阳光电源调研.pdf', 'hash',
 			'completed', 3, 'pdfjs-dist', '6.3.289', '阳光电源调研', '', '2026-06-15', '', '',
 			'[]', '{}', 'meta/documents/阳光电源调研', 'meta/text/阳光电源调研.md',
@@ -146,7 +157,7 @@ describe("PE page-level PDF retrieval", () => {
 		expect(prompt).toContain("- pe_pdf_search:");
 		expect(prompt).toContain("- pe_pdf_read:");
 		expect(prompt).not.toContain("- pe_dataset_search:");
-		expect(prompt).not.toContain("- pe_source_detail:");
+		expect(prompt).toContain("- pe_source_detail:");
 		const registered: string[] = [];
 		const extension = {
 			registerTool(tool: { name: string }) {
@@ -158,7 +169,7 @@ describe("PE page-level PDF retrieval", () => {
 		expect(registered).toContain("pe_pdf_search");
 		expect(registered).toContain("pe_pdf_read");
 		expect(registered).not.toContain("pe_dataset_search");
-		expect(registered).not.toContain("pe_source_detail");
+		expect(registered).toContain("pe_source_detail");
 	});
 
 	it("searches complete pages without hardcoded synonym expansion", () => {

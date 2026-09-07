@@ -6,6 +6,8 @@ import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { loadSkillsFromDir } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
+import { initializePeCollectionDatabase } from "../src/collection-schema.ts";
+import { sourceId } from "../src/source.ts";
 import { buildPeSystemPrompt } from "../src/system-prompt.ts";
 import { peResearchNoteSaveTool } from "../src/tools/research-note-save.ts";
 import { type ResearchNotePresentationMode, savePeResearchNote } from "../src/tools/research-note-storage.ts";
@@ -20,84 +22,140 @@ function temporaryDirectory(prefix: string): string {
 
 function createResearchNoteFixture(datasetId = "dataset-1"): string {
 	const root = temporaryDirectory("pe-boot-research-note-");
+	mkdirSync(join(root, "raw"));
 	mkdirSync(join(root, "meta"));
+	mkdirSync(join(root, "generated"));
+	initializePeCollectionDatabase(join(root, "meta", "collection.sqlite3"), {
+		datasetId,
+		name: "Research Note Test",
+	});
 	const database = new DatabaseSync(join(root, "meta", "collection.sqlite3"));
-	database.exec(`
-		CREATE TABLE documents (
-			doc_id TEXT PRIMARY KEY,
-			dataset_id TEXT NOT NULL,
-			original_filename TEXT NOT NULL,
-			source_relpath TEXT,
-			file_type TEXT NOT NULL,
-			doc_type TEXT,
-			document_date TEXT,
-			version_no INTEGER NOT NULL DEFAULT 1,
-			is_current INTEGER NOT NULL DEFAULT 1,
-			lifecycle_state TEXT NOT NULL DEFAULT 'active',
-			deleted_at TEXT
-		);
-		CREATE TABLE chunks (
-			chunk_id TEXT PRIMARY KEY,
-			dataset_id TEXT NOT NULL,
-			doc_id TEXT NOT NULL,
-			content TEXT NOT NULL,
-			content_type TEXT NOT NULL,
-			title_path TEXT,
-			summary TEXT,
-			source_ref TEXT
-		);
-		CREATE TABLE chunk_locations (
-			chunk_id TEXT NOT NULL,
-			location_index INTEGER NOT NULL,
-			page_start INTEGER,
-			page_end INTEGER,
-			sheet_name TEXT,
-			cell_range TEXT,
-			heading_path TEXT
-		);
-		CREATE TABLE metric_facts (
-			fact_id TEXT PRIMARY KEY,
-			dataset_id TEXT NOT NULL,
-			doc_id TEXT NOT NULL,
-			metric_name TEXT NOT NULL,
-			period TEXT,
-			value_text TEXT,
-			value_numeric REAL,
-			unit TEXT,
-			sheet_name TEXT NOT NULL,
-			cell_ref TEXT NOT NULL
-		);
-		CREATE TABLE excel_cells (
-			cell_id TEXT PRIMARY KEY,
-			dataset_id TEXT NOT NULL,
-			doc_id TEXT NOT NULL,
-			sheet_name TEXT NOT NULL,
-			cell_ref TEXT NOT NULL
-		);
-	`);
+	const insertDocument = database.prepare(`INSERT INTO documents (
+		doc_id,dataset_id,original_filename,filename_key,raw_path,sha256,status,page_count,
+		parser_name,parser_version,title,brokerage,document_date,rating,target_price,
+		exhibits_json,pdf_metadata_json,artifact_directory,document_markdown_path,
+		layout_json_path,warnings_json,created_at,updated_at,file_type,source_relpath,
+		file_size,readable_text_path
+	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+	const now = "2026-08-01T00:00:00.000Z";
+	insertDocument.run(
+		"doc-pdf",
+		datasetId,
+		"经营数据.pdf",
+		"经营数据.pdf",
+		"raw/经营数据.pdf",
+		"a".repeat(64),
+		"completed",
+		1,
+		"pdfjs-dist",
+		"6.3.289",
+		"经营数据",
+		"",
+		"2026-08-01",
+		"",
+		"",
+		"[]",
+		"{}",
+		"meta/documents/经营数据",
+		"meta/text/经营数据.md",
+		"meta/documents/经营数据/layout.json",
+		"[]",
+		now,
+		now,
+		"pdf",
+		"经营数据.pdf",
+		0,
+		"meta/text/经营数据.md",
+	);
+	insertDocument.run(
+		"doc-excel",
+		datasetId,
+		"经营模型.xlsx",
+		"经营模型.xlsx",
+		"raw/经营模型.xlsx",
+		"b".repeat(64),
+		"completed",
+		0,
+		"openpyxl",
+		"3.1.5",
+		"经营模型",
+		"",
+		"2026-08-01",
+		"",
+		"",
+		"[]",
+		"{}",
+		"meta/documents/经营模型.xlsx",
+		"",
+		"",
+		"[]",
+		now,
+		now,
+		"xlsx",
+		"经营模型.xlsx",
+		0,
+		"meta/text/经营模型.xlsx.txt",
+	);
 	database
-		.prepare(
-			"INSERT INTO documents (doc_id, dataset_id, original_filename, source_relpath, file_type, doc_type, document_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
-		)
-		.run("doc-1", datasetId, "经营数据.pdf", "raw/经营数据.pdf", "pdf", "financial", "2026-08-01");
-	database
-		.prepare(
-			"INSERT INTO chunks (chunk_id, dataset_id, doc_id, content, content_type, title_path, summary, source_ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-		)
-		.run("chunk-a", datasetId, "doc-1", "收入增长20%。", "pdf_page", "经营表现", "收入增长", "经营数据.pdf p.2");
-	database
-		.prepare(
-			"INSERT INTO chunk_locations (chunk_id, location_index, page_start, page_end, heading_path) VALUES (?, 0, ?, ?, ?)",
-		)
-		.run("chunk-a", 2, 2, "经营表现");
-	database
-		.prepare(
-			"INSERT INTO metric_facts (fact_id, dataset_id, doc_id, metric_name, period, value_text, value_numeric, unit, sheet_name, cell_ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-		)
-		.run("fact-a", datasetId, "doc-1", "收入", "2025", "120", 120, "百万元", "数据", "B2");
-	database
-		.prepare("INSERT INTO excel_cells (cell_id, dataset_id, doc_id, sheet_name, cell_ref) VALUES (?, ?, ?, ?, ?) ")
-		.run("cell-a", datasetId, "doc-1", "数据", "C3");
+		.prepare(`INSERT INTO pdf_pages (
+		page_id,doc_id,page_number,page_text,page_header,role,role_signals_json,text_quality,
+		quality_signals_json,width,height,rotation,image_paths_json,embedded_image_count,
+		large_embedded_image_count,drawing_operator_count
+	) VALUES ('page-a','doc-pdf',2,'收入增长20%。','经营数据.pdf · p.2/2','body','{}','passed','{}',595,842,0,'[]',0,0,0)`)
+		.run();
+	const insertCell = database.prepare(`INSERT INTO excel_cells (
+		cell_id,dataset_id,doc_id,sheet_name,cell_ref,row_index,col_index,value_type,display_value,
+		raw_value,numeric_value,formula,cached_value,number_format,row_label,col_label,period,unit,
+		is_formula,formula_type,formula_cache_status,metadata_json
+	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+	insertCell.run(
+		"cell-b2",
+		datasetId,
+		"doc-excel",
+		"数据",
+		"B2",
+		2,
+		2,
+		"number",
+		"120",
+		"120",
+		120,
+		null,
+		null,
+		"0",
+		"收入",
+		"2025",
+		"2025",
+		"百万元",
+		0,
+		null,
+		"not_applicable",
+		"{}",
+	);
+	insertCell.run(
+		"cell-c3",
+		datasetId,
+		"doc-excel",
+		"数据",
+		"C3",
+		3,
+		3,
+		"number",
+		"30",
+		"30",
+		30,
+		null,
+		null,
+		"0",
+		"利润",
+		"2025",
+		"2025",
+		"百万元",
+		0,
+		null,
+		"not_applicable",
+		"{}",
+	);
 	database.close();
 	return root;
 }
@@ -121,7 +179,12 @@ describe("PE Research Note tool", () => {
 		const packageDirectory = dirname(dirname(fileURLToPath(import.meta.url)));
 		const result = loadSkillsFromDir({ dir: join(packageDirectory, "skills"), source: "test" });
 		expect(result.diagnostics).toEqual([]);
-		expect(result.skills.map((skill) => skill.name)).toEqual(["pe-generative-ui", "pe-memo", "pe-research-note"]);
+		expect(result.skills.map((skill) => skill.name)).toEqual([
+			"pe-generative-ui",
+			"pe-memo",
+			"pe-research-note",
+			"pe-valuation-model-explainer",
+		]);
 		expect(result.skills[2]?.description).toContain("Research Note");
 	});
 
@@ -172,16 +235,18 @@ describe("PE Research Note tool", () => {
 
 	it("registers valid citations and returns unresolved evidence without blocking the save", () => {
 		const root = createResearchNoteFixture();
+		const revenueSource = sourceId({ docId: "doc-excel", sheet: "数据", range: "B2" });
+		const profitSource = sourceId({ docId: "doc-excel", sheet: "数据", range: "C3" });
 		const result = savePeResearchNote(root, {
 			title: "证据登记",
 			summary: "核验证据解析结果。",
 			presentationMode: "metrics",
 			contentHtml: completeHtml("<p>收入为120百万元。</p>"),
-			evidenceIds: ["chunk:chunk-a", "fact:fact-a", "cell:cell-a", "chunk:missing", "invalid-evidence"],
+			evidenceIds: ["page:page-a", revenueSource, profitSource, "page:missing", "invalid-evidence"],
 		});
 
-		expect(result.resolved_evidence_ids).toEqual(["chunk:chunk-a", "fact:fact-a", "cell:cell-a"]);
-		expect(result.unresolved_evidence_ids).toEqual(["chunk:missing", "invalid-evidence"]);
+		expect(result.resolved_evidence_ids).toEqual(["page:page-a", revenueSource, profitSource]);
+		expect(result.unresolved_evidence_ids).toEqual(["page:missing", "invalid-evidence"]);
 		expect(existsSync(join(root, result.research_note_html_path))).toBe(true);
 		const database = new DatabaseSync(join(root, "meta", "collection.sqlite3"), { readOnly: true });
 		const evidence = database
@@ -191,10 +256,10 @@ describe("PE Research Note tool", () => {
 			.all(result.research_note_id);
 		expect(evidence).toEqual(
 			expect.arrayContaining([
-				expect.objectContaining({ evidence_id: "chunk:chunk-a", resolved: 1, citation: "raw/经营数据.pdf p.2" }),
-				expect.objectContaining({ evidence_id: "fact:fact-a", resolved: 1, citation: "raw/经营数据.pdf 数据!B2" }),
-				expect.objectContaining({ evidence_id: "cell:cell-a", resolved: 1, citation: "raw/经营数据.pdf 数据!C3" }),
-				expect.objectContaining({ evidence_id: "chunk:missing", resolved: 0, citation: null }),
+				expect.objectContaining({ evidence_id: "page:page-a", resolved: 1, citation: "经营数据.pdf p.2" }),
+				expect.objectContaining({ evidence_id: revenueSource, resolved: 1, citation: "经营模型.xlsx 数据!B2" }),
+				expect.objectContaining({ evidence_id: profitSource, resolved: 1, citation: "经营模型.xlsx 数据!C3" }),
+				expect.objectContaining({ evidence_id: "page:missing", resolved: 0, citation: null }),
 			]),
 		);
 		database.close();
@@ -226,6 +291,7 @@ describe("PE Research Note tool", () => {
 
 		const escapedRoot = createResearchNoteFixture();
 		const outside = temporaryDirectory("pe-boot-research-note-outside-");
+		rmSync(join(escapedRoot, "generated"), { recursive: true });
 		symlinkSync(outside, join(escapedRoot, "generated"), "dir");
 		expect(() =>
 			savePeResearchNote(escapedRoot, {
@@ -254,7 +320,7 @@ describe("PE Research Note tool", () => {
 		database.exec(`
 			CREATE TRIGGER reject_research_note_evidence
 			BEFORE INSERT ON research_note_evidence
-			WHEN NEW.evidence_id = 'chunk:forced-failure'
+			WHEN NEW.evidence_id = 'page:forced-failure'
 			BEGIN
 				SELECT RAISE(ABORT, 'forced evidence failure');
 			END;
@@ -267,7 +333,7 @@ describe("PE Research Note tool", () => {
 				summary: "应完整回滚。",
 				presentationMode: "table",
 				contentHtml: completeHtml("<table><tr><td>失败</td></tr></table>"),
-				evidenceIds: ["chunk:forced-failure"],
+				evidenceIds: ["page:forced-failure"],
 			}),
 		).toThrow("forced evidence failure");
 		expect(readdirSync(notesDirectory)).toEqual(filesBeforeFailure);

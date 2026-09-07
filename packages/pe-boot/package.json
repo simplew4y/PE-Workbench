@@ -16,11 +16,13 @@
 	},
 	"files": [
 		"dist",
-		"skills"
+		"skills",
+		"python"
 	],
 	"scripts": {
 		"clean": "shx rm -rf dist",
 		"build": "tsgo -p tsconfig.build.json && shx chmod +x dist/cli.js",
+		"setup:python": "node python/setup.mjs",
 		"test": "vitest --run",
 		"prepublishOnly": "npm run clean && npm run build"
 	},
