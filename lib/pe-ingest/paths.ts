@@ -50,8 +50,23 @@ function assertSafeSegment(segment: string): void {
   }
 }
 
+/**
+ * NFKC folds full-width punctuation such as "：" into ASCII, which Windows forbids in file names.
+ * Research platforms export titles with such characters, so map them back to full-width forms
+ * instead of rejecting the upload. Path separators and control characters stay rejected.
+ */
+const PORTABLE_PUNCTUATION: Record<string, string> = {
+  ":": "：",
+  "<": "＜",
+  ">": "＞",
+  '"': "＂",
+  "|": "｜",
+  "?": "？",
+  "*": "＊",
+};
+
 export function normalizePePdfFilename(value: string): string {
-  const filename = value.normalize("NFKC").trim();
+  const filename = value.normalize("NFKC").trim().replace(/[:<>"|?*]/gu, (character) => PORTABLE_PUNCTUATION[character]);
   const parsed = path.parse(filename);
   if (
     !filename

@@ -111,6 +111,8 @@ export interface PePdfRoleSignals {
   matchedKeywords: string[];
   numericLineRatio: number;
   tableLineRatio: number;
+  /** Legal and disclaimer vocabulary hits per 1,000 non-space characters. */
+  disclosureDensity: number;
   embeddedImageCount: number;
   largeEmbeddedImageCount: number;
   drawingOperatorCount: number;

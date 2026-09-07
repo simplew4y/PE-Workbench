@@ -39,6 +39,12 @@ export interface PeProjectDocumentSummary {
   needsOcrPageCount: number;
   rawRelativePath: string | null;
   markdownRelativePath: string | null;
+  /** Cover-page metadata extracted by the PDF pipeline; absent for other file types or when not found. */
+  title?: string;
+  brokerage?: string;
+  documentDate?: string;
+  rating?: string;
+  targetPrice?: string;
 }
 
 export interface PeProjectDocumentCatalog {
