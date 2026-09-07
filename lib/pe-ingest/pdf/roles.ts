@@ -100,11 +100,14 @@ export function classifyPePdfPageRole(
   };
   const hasExhibit = matchedKeywords.includes("exhibit");
   const plainTextPage = !hasExhibit && imageStatistics.drawingOperatorCount < DISCLOSURE_MAX_DRAWING_OPERATORS;
-  const isDisclosure = plainTextPage && (
-    matchedKeywords.includes("disclosure")
-    || (characterCount >= DISCLOSURE_MIN_CHARS && disclosureDensity >= DISCLOSURE_DENSITY_PER_THOUSAND)
-    || (pageNumber >= Math.max(2, totalPages - 1) && /风险|声明|披露|免责/u.test(text))
-  );
+  // An explicit appendix heading is decisive on its own: disclosure pages often carry a captioned
+  // ratings-distribution table, which would otherwise disqualify them through hasExhibit. The
+  // weaker vocabulary and trailing-page heuristics still require a plain text page.
+  const isDisclosure = matchedKeywords.includes("disclosure")
+    || (plainTextPage && (
+      (characterCount >= DISCLOSURE_MIN_CHARS && disclosureDensity >= DISCLOSURE_DENSITY_PER_THOUSAND)
+      || (pageNumber >= Math.max(2, totalPages - 1) && /风险|声明|披露|免责/u.test(text))
+    ));
 
   let role: PePdfPageRole = "body";
   if (pageNumber === 1) {

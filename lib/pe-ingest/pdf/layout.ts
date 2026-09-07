@@ -326,6 +326,15 @@ function orderLines(
     .filter((line) => insideRegion(line, region))
     .map((line) => ({ ...line, columnNo: columnOf(line, gutter) }));
   const columnLines = classified.filter((line) => line.columnNo !== 0);
+  // Merging can leave every line straddling the gutter. Without this guard the empty-array
+  // Math.min/Math.max below yield Infinity/-Infinity, and each line lands in both prefix and
+  // suffix, duplicating the whole page.
+  if (columnLines.length === 0) {
+    return {
+      twoColumn: false,
+      lines: byPosition.map((line, index) => ({ ...line, columnNo: 0, readingOrder: index })),
+    };
+  }
   const columnTop = Math.min(...columnLines.map((line) => line.y));
   const columnBottom = Math.max(...columnLines.map((line) => line.y + line.height));
   const prefix = classified.filter((line) => line.columnNo === 0 && line.y + line.height <= columnTop);
