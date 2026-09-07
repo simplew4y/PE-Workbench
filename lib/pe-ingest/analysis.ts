@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { isPeConsensusEnabled } from "@earendil-works/pe-boot";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -76,7 +77,9 @@ function runAnalyzer(executable: string, args: string[]): Promise<{ stdout: stri
 }
 
 export async function runPeClaimAnalysis(input: PeClaimAnalysisInput): Promise<PeClaimAnalysisSummary> {
-  if (process.env.PE_INGEST_ANALYSIS_DISABLED === "1") return { status: "skipped_disabled" };
+  // Consensus/divergence is still under development: it stays off unless a deployment opts in,
+  // so a production install never spends model calls building cards during ingest.
+  if (!isPeConsensusEnabled()) return { status: "skipped_disabled" };
   const args = [
     analyzerPath(),
     "--collection", input.collectionPath,

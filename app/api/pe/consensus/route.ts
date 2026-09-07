@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isPeConsensusEnabled } from "@earendil-works/pe-boot";
 import { loadPeConsensusCards, parseCardTypes } from "@/lib/pe-consensus";
 
 export const runtime = "nodejs";
@@ -11,6 +12,10 @@ export const runtime = "nodejs";
  * evidence IDs resolve through /api/pe/source.
  */
 export async function GET(request: Request) {
+  // The feature is unreleased; without the opt-in the route does not exist.
+  if (!isPeConsensusEnabled()) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
   const url = new URL(request.url);
   const datasetId = url.searchParams.get("datasetId")?.trim();
   if (!datasetId) {
