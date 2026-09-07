@@ -19,6 +19,7 @@ from excel_date_candidates import (
     extract_cell_date_candidate, workbook_property_date_candidate,
 )
 from excel_formula_parser import extract_formula_references
+from excel_units import infer_formula_units
 
 DEFAULT_MAX_REGION_LABELS = 30
 
@@ -201,14 +202,18 @@ def _unit_from_text(text: str) -> str:
         return "%"
     compact = re.sub(r"\s+", "", text).lower()
     currencies = (
-        (r"€|欧元|(?<![a-z])eur(?:o(?:s)?)?(?=$|[^a-z]|m(?:n|illion)?\b)", "EUR"),
-        (r"港元|港币|(?<![a-z])hkd(?=$|[^a-z]|m(?:n|illion)?\b)", "HKD"),
-        (r"美元|(?<![a-z])usd(?=$|[^a-z]|m(?:n|illion)?\b)", "USD"),
-        (r"人民币|(?<![a-z])cny(?=$|[^a-z]|m(?:n|illion)?\b)", "CNY"),
-        (r"(?<![a-z])rmb(?=$|[^a-z]|m(?:n|illion)?\b)", "RMB"),
-        (r"英镑|£|(?<![a-z])gbp(?=$|[^a-z]|m(?:n|illion)?\b)", "GBP"),
+        (r"€|欧元|(?<![a-z])eur(?:o(?:s)?)?(?=$|[^a-z]|(?:m(?:n|illion)?|b(?:n|illion)?)\b)", "EUR"),
+        (r"港元|港币|HK\$|(?<![a-z])hkd(?=$|[^a-z]|(?:m(?:n|illion)?|b(?:n|illion)?)\b)", "HKD"),
+        (r"美元|US\$|(?<![a-z])usd(?=$|[^a-z]|(?:m(?:n|illion)?|b(?:n|illion)?)\b)", "USD"),
+        (r"人民币|(?<![a-z])cny(?=$|[^a-z]|(?:m(?:n|illion)?|b(?:n|illion)?)\b)", "CNY"),
+        (r"(?<![a-z])rmb(?=$|[^a-z]|(?:m(?:n|illion)?|b(?:n|illion)?)\b)", "RMB"),
+        (r"英镑|£|(?<![a-z])gbp(?=$|[^a-z]|(?:m(?:n|illion)?|b(?:n|illion)?)\b)", "GBP"),
+        (r"日元|(?<![a-z])jpy(?=$|[^a-z]|(?:m(?:n|illion)?|b(?:n|illion)?)\b)", "JPY"),
     )
-    currency = next((code for pattern, code in currencies if re.search(pattern, text, re.IGNORECASE)), "")
+    matched_currencies = [code for pattern, code in currencies if re.search(pattern, text, re.IGNORECASE)]
+    if len(matched_currencies) > 1:
+        return ""
+    currency = matched_currencies[0] if matched_currencies else ""
     per_share = bool(
         re.search(r"(?:/|per)shares?\b", compact) or "/股" in compact or "每股" in compact
         or re.search(r"\bEPS\b|\b(?:target|share|current)\s+price\b|\bimplied\s+TP\b|目标价|股价", text, re.IGNORECASE)
@@ -217,7 +222,7 @@ def _unit_from_text(text: str) -> str:
         if not currency and "元/股" in compact:
             currency = "CNY"
         return f"{currency}/share" if currency else "per_share"
-    share_count = bool(re.search(r"\bshares?\b|股数|股份数", text, re.IGNORECASE)) and not bool(
+    share_count = bool(re.search(r"\bshares?\b|股数|股份数|百万股", text, re.IGNORECASE)) and not bool(
         re.search(r"\bshare\s+(?:capital|premium|payment|buyback)\b|\bvalue\s+of\s+shares\b", text, re.IGNORECASE)
     )
     if share_count:
@@ -227,7 +232,11 @@ def _unit_from_text(text: str) -> str:
             return "shares"
         return "share_count_unspecified_scale"
     if currency:
-        if re.search(r"\b(?:million|mn)\b|百万|(?:eur|euro|usd|cny|rmb|hkd|gbp|€|£)\s*m(?:n)?\b|\(m\)", text, re.IGNORECASE):
+        if re.search(r"\b(?:billion|bn)\b|十亿|(?:eur|euro|usd|cny|rmb|hkd|gbp|jpy|€|£|US\$|HK\$)\s*b(?:n)?\b", text, re.IGNORECASE):
+            return currency + "bn"
+        if "亿" in text:
+            return currency + "_100m"
+        if re.search(r"\b(?:million|mn)\b|百万|(?:eur|euro|usd|cny|rmb|hkd|gbp|jpy|€|£|US\$|HK\$)\s*m(?:n)?\b|\(m\)", text, re.IGNORECASE):
             return currency + "m"
         return currency
     for unit in ("元/Wh", "GWh", "MWh", "Wh", "MW", "GW"):
@@ -442,7 +451,7 @@ def _context(status: str, method: str, sources: list[dict[str, str]], reason: st
 
 def _is_unit_header(text: str) -> bool:
     return bool(re.fullmatch(
-        r"(?:amounts?\s+in\s+|in\s+)?[\[(]?(?:EUR|EUROS?|USD|CNY|RMB|HKD|GBP|€|£)\s*(?:m|mn|million)?[\])]?",
+        r"(?:amounts?\s+in\s+|in\s+|单位[:：]?\s*)?[\[(]?(?:EUR|EUROS?|USD|CNY|RMB|HKD|GBP|JPY|€|£|US\$|HK\$|人民币|欧元|美元|港元|日元)\s*(?:m|mn|million|bn|billion|百万元?|十亿元?|亿元?)?[\])]?",
         normalize_text(text), re.IGNORECASE,
     ))
 
@@ -507,7 +516,7 @@ def _header_evidence(ws, cells: dict[tuple[int, int], Any], values: dict[tuple[i
             if not isinstance(value, str) or _is_formula(cells.get((row, col))):
                 continue
             unit = _unit_from_text(value)
-            if not re.fullmatch(r"(?:EUR|USD|CNY|RMB|HKD|GBP)m?", unit):
+            if not re.fullmatch(r"(?:EUR|USD|CNY|RMB|HKD|GBP|JPY)(?:m|bn|_100m)?", unit):
                 continue
             if not numeric_columns.get(row) or is_header_row:
                 unit_headers.append({"row": row, "col": col, "unit": unit,
@@ -553,8 +562,8 @@ def _cell_unit(row: int, col: int, display: str, row_label: str, row_label_ref: 
     )
     row_unit = _unit_from_text(row_label)
     format_unit = _unit_from_number_format(number_format)
-    row_currency = re.match(r"EUR|USD|CNY|RMB|HKD|GBP", row_unit)
-    format_currency = re.match(r"EUR|USD|CNY|RMB|HKD|GBP", format_unit)
+    row_currency = re.match(r"EUR|USD|CNY|RMB|HKD|GBP|JPY", row_unit)
+    format_currency = re.match(r"EUR|USD|CNY|RMB|HKD|GBP|JPY", format_unit)
     currency_conflict = bool(row_currency and format_currency and row_currency.group() != format_currency.group())
     if row_unit and format_unit and (
         (row_unit == "%") != (format_unit == "%") or currency_conflict
@@ -578,7 +587,7 @@ def _cell_unit(row: int, col: int, display: str, row_label: str, row_label_ref: 
                     {"cell_ref": cell_ref, "text": text}, {"cell_ref": _cell_ref(row, col), "text": number_format},
                 ])
             if unit == "per_share" and header:
-                currency = re.sub(r"m$", "", header["unit"])
+                currency = re.sub(r"(?:_100m|bn|m)$", "", header["unit"])
                 return currency + "/share", _context("inferred", "per_share_with_monetary_header", [
                     {"cell_ref": cell_ref, "text": text}, header["source"],
                 ])
@@ -1062,6 +1071,8 @@ def _parse_loaded_workbook(wb_formula, wb_values, *, dataset_id: str, doc_id: st
                     "metadata_json": dumps_json({"sheet_role": role}),
                 }
             )
+
+    infer_formula_units(cell_rows, formula_reference_rows, fact_rows)
 
     cell_rows_by_location = {
         (str(row["sheet_name"]).casefold(), str(row["cell_ref"]).replace("$", "").upper()): row

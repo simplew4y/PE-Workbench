@@ -39,7 +39,7 @@ export interface ExcelCellDetail {
 export interface ExcelSemanticContext {
 	status: "inferred" | "missing" | "ambiguous";
 	method: string;
-	sources: Array<{ cell_ref: string; text: string }>;
+	sources: Array<{ sheet_name?: string; cell_ref: string; text: string }>;
 	reason?: string;
 }
 

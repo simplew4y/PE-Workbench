@@ -260,6 +260,8 @@ describe("deterministic valuation reports", () => {
 		);
 		expect(result.status).toBe("ready");
 		expect(result.rendered_report).not.toContain("EUR");
+		expect(result.rendered_report).not.toContain("未确认");
+		expect(result.facts[0]?.cell.unit).toBe("per_share");
 		const incompatible = { ...request("eps", "B10", "Diluted EPS", "2026E", "per_share"), display_unit: "EUR/share" };
 		expect(buildPeValuationReport(fixture(), focused([incompatible])).status).toBe("blocked");
 	});
@@ -281,10 +283,11 @@ describe("deterministic valuation reports", () => {
 			"130.00",
 			"140.00",
 			"外部函数保存值",
-			"取价时间未确认",
 		])
 			expect(result.rendered_report).toContain(text);
 		expect(result.rendered_report).toContain("Implied TP");
+		expect(result.rendered_report).toContain("125.00 EUR/股");
+		expect(result.rendered_report).not.toMatch(/未确认|未标期间|日期参考|文件保存时间/u);
 	});
 
 	it("does not accept a numeric field when its formula cache is unavailable", () => {
@@ -331,7 +334,7 @@ describe("deterministic valuation reports", () => {
 		expect(buildPeValuationReport(fixture(), options).status).toBe("blocked");
 	});
 
-	it("discloses unconfirmed share-count scale without converting it to shares or millions", () => {
+	it("retains raw share counts without an unknown-scale notice or unsupported conversion", () => {
 		const root = fixture();
 		const database = new DatabaseSync(join(root, "meta", "collection.sqlite3"));
 		database.exec(
@@ -347,7 +350,20 @@ describe("deterministic valuation reports", () => {
 		);
 		const result = buildPeValuationReport(root, focused([fact]));
 		expect(result.status).toBe("ready");
-		expect(result.rendered_report).toContain("104.93 股数原表单位（股／百万股尺度未确认）");
+		expect(result.rendered_report).toContain("104.93（模型填写值）");
+		expect(result.rendered_report).not.toMatch(/未确认|百万股|股数原表单位/u);
+		expect(result.facts[0]?.cell.unit).toBe("share_count_unspecified_scale");
 		expect(buildPeValuationReport(root, focused([{ ...fact, display_unit: "shares_m" }])).status).toBe("blocked");
+	});
+
+	it("omits missing-information commentary while retaining supported qualitative business risks", () => {
+		const options = focused([request("revenue", "B1", "Revenue", "2023A", "EURm")]);
+		options.sections[0].analysis =
+			"估值日期尚未确认。模型未提供独立敏感性表。品牌定价能力影响盈利假设。竞争加剧可能影响利润。";
+		const result = buildPeValuationReport(fixture(), options);
+		expect(result.status, result.issues.join("\n")).toBe("ready");
+		expect(result.rendered_report).not.toMatch(/未确认|未提供|敏感性表/u);
+		expect(result.rendered_report).toContain("品牌定价能力影响盈利假设。");
+		expect(result.rendered_report).toContain("竞争加剧可能影响利润。");
 	});
 });

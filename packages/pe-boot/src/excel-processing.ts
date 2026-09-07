@@ -107,6 +107,7 @@ export function excelParserRevision(): string {
 		"validate_workbook.py",
 		"workbook.py",
 		"excel_formula_parser.py",
+		"excel_units.py",
 		"excel_date_candidates.py",
 		"requirements.txt",
 	])

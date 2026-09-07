@@ -23,7 +23,7 @@ const METHOD_NAMES: Record<Method, string> = {
 	sotp: "分部估值法（SOTP）",
 	weighted: "综合目标价",
 	multiples: "可比倍数法",
-	unspecified: "方法未确认",
+	unspecified: "",
 };
 
 export function reportText(value: string): string {
@@ -69,13 +69,13 @@ function formatValue(output: ValuationOutputCandidate): string {
 		? new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(
 				output.numeric_value,
 			)
-		: "缓存不可用";
+		: "—";
 }
 
 function unitLabel(unit: string | undefined): string {
-	if (unit === "per_share") return "每股金额，币种未确认";
+	if (unit === "per_share") return "每股金额";
 	if (unit?.endsWith("/share")) return `${unit.slice(0, -6)}/股`;
-	return unit ?? "单位未确认";
+	return unit ?? "";
 }
 
 /** Recognize only explicit, same-sheet averaging formulas; numeric coincidence cannot prove weights. */
@@ -119,7 +119,8 @@ function outputTable(views: OutputView[]): string[] {
 		buckets.set(key, bucket);
 	}
 	for (const bucket of buckets.values()) {
-		lines.push(`**${reportText(bucket[0].output.sheet_name)}** · ${reportText(unitLabel(bucket[0].unit))}`, "");
+		const unit = unitLabel(bucket[0].unit);
+		lines.push(`**${reportText(bucket[0].output.sheet_name)}**${unit ? ` · ${reportText(unit)}` : ""}`, "");
 		// Source columns distinguish repeated years/scenarios and missing periods instead of silently merging them.
 		const columns = [...new Set(bucket.map((view) => view.column))].sort((a, b) => a - b);
 		const rows = [...new Set(bucket.map((view) => view.row))].sort((a, b) => {
@@ -140,7 +141,7 @@ function outputTable(views: OutputView[]): string[] {
 						const label = labels[index];
 						return label
 							? `${label}${labels.filter((other) => other === label).length > 1 ? `（${columnName}列）` : ""}`
-							: `期间待核对（${columnName}列）`;
+							: `${columnName}列`;
 					})
 					.join(" | ")} |`,
 				`| --- | ${page.map(() => "---:").join(" | ")} |`,
@@ -150,13 +151,16 @@ function outputTable(views: OutputView[]): string[] {
 				if (!rowViews.length) continue;
 				const first = rowViews[0];
 				const method = METHOD_NAMES[first.method];
-				const name = first.method === "weighted" ? method : `${method} · ${reportMetricLabel(first.output.label)}`;
+				const name =
+					first.method === "weighted"
+						? method
+						: `${method ? `${method} · ` : ""}${reportMetricLabel(first.output.label)}`;
 				const citation = first.header?.markdown_citation;
 				const values = page.map((column, index) => {
 					const view = rowViews.find((item) => item.column === column);
 					if (!view) return "—";
 					const period = !labels[index] && view.period ? `${reportText(view.period)}：` : "";
-					return `${period}${formatValue(view.output)}${view.output.score < 0.62 ? "（待核对）" : ""} ${view.output.markdown_citations[0] ?? ""}`;
+					return `${period}${formatValue(view.output)} ${view.output.markdown_citations[0] ?? ""}`;
 				});
 				lines.push(`| ${reportText(name)}${citation ? ` ${citation}` : ""} | ${values.join(" | ")} |`);
 			}
@@ -277,7 +281,6 @@ export function valuationOverviewLayout(
 	}
 	lines.push(...outputTable(main));
 	if (firstForecast.size) lines.push("E/F 表示预测年度，属于盈利或现金流的预测口径。", "");
-	if (inventory.status !== "selected") lines.push("当前尚未确认应采用哪一年度、哪一项结果作为主目标价。", "");
 	const methods = new Set(views.map((view) => view.method));
 	const explanations: string[] = [];
 	if (methods.has("pe"))
@@ -300,7 +303,6 @@ export function valuationOverviewLayout(
 			explanations.push(
 				`例如 ${reportText(weighted.period ?? "")}：(${formatValue(inputs[0].output)} + ${formatValue(inputs[1].output)}) ÷ 2 = ${formatValue(weighted.output)}，公式中两项各占 50%（按原表取整）。${[...inputs, weighted].map((view) => view.output.markdown_citations[0]).join(" ")}`,
 			);
-		else explanations.push("权重需以各期源公式或明确的模型说明为准，不能仅凭结果数值推定。");
 	}
 	if (explanations.length) lines.push("### 如何理解这些结果", "", ...explanations.flatMap((text) => [text, ""]));
 	for (const group of inventory.output_groups) {

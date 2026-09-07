@@ -103,7 +103,7 @@ describe("readable valuation overview", () => {
 		expect(history).toContain("| 估值方法／结果 | 2018 | 2024 |");
 		expect(history).toContain("51.30");
 		expect(history).toContain("87.70");
-		expect(main.match(/币种未确认/gu)).toHaveLength(1);
+		expect(main).not.toMatch(/未确认|待核对|口径与限制/u);
 		const citations = [...text.matchAll(/\[来源\]\((#pe-source\?[^)]+)\)/gu)];
 		const cells = new Set(
 			citations.map((match) => {
@@ -122,7 +122,7 @@ describe("readable valuation overview", () => {
 			"UPDATE excel_cells SET period='2026E' WHERE col_index=12; UPDATE excel_cells SET period=NULL WHERE col_index=10",
 		);
 		const main = report(root).split("## 历史期间对照")[0];
-		expect(main).toContain("期间待核对（J列） | 2026E（K列） | 2026E（L列）");
+		expect(main).toContain("J列 | 2026E（K列） | 2026E（L列）");
 		expect(main).toContain("32.10");
 		expect(main).toContain("57.60");
 	});
@@ -135,14 +135,15 @@ describe("readable valuation overview", () => {
 		);
 		const text = report(root);
 		expect(text).not.toContain("各占 50%");
-		expect(text).toContain("不能仅凭结果数值推定");
+		expect(text).not.toContain("不能仅凭结果数值推定");
 	});
 
 	it("does not state a weighting calculation with missing input caches", () => {
 		const root = fixture();
 		update(root, "UPDATE excel_cells SET formula='=1',is_formula=1,formula_cache_status='missing' WHERE row_index=9");
 		const text = report(root);
-		expect(text).toContain("缓存不可用");
+		expect(text).not.toContain("缓存不可用");
+		expect(text).not.toContain("32.10");
 		expect(text).not.toContain("各占 50%");
 	});
 
@@ -153,9 +154,18 @@ describe("readable valuation overview", () => {
 			`UPDATE excel_cells SET metadata_json='{"period_context":{"status":"ambiguous","method":"conflicting_headers","sources":[]}}' WHERE col_index=10`,
 		);
 		const main = report(root).split("## 历史期间对照")[0];
-		expect(main).toContain("期间待核对（J列）");
+		expect(main).toContain("J列");
 		expect(main).not.toContain("EUR");
 		expect(main).not.toContain("2025E");
+	});
+
+	it("displays supported currencies and omits unknown metadata without changing values", () => {
+		const root = fixture();
+		update(root, "UPDATE excel_cells SET unit='EUR/share' WHERE numeric_value IS NOT NULL");
+		const text = report(root);
+		expect(text).toContain("EUR/股");
+		expect(text).toContain("34.05");
+		expect(text).not.toMatch(/币种未确认|日期尚未确认|当前尚未确认|日期参考|文件保存时间|方法未确认/u);
 	});
 
 	it("does not borrow a method header from an unrelated horizontal block", () => {
