@@ -47,7 +47,8 @@ function ExcelSourcePreview({ source }: { source: PeExcelSource }) {
     };
   })();
   const formulaText = selectedCell?.formula ?? selectedCell?.raw_value ?? selectedCell?.display_value ?? "";
-  const selectedValue = selectedCell?.display_value ?? selectedCell?.raw_value ?? "";
+  const selectedValue = selectedCell?.cached_value
+    ?? (selectedCell?.formula_cache_status === "missing" ? "无缓存" : selectedCell?.display_value ?? selectedCell?.raw_value ?? "");
 
   if (!window) {
     return <p className="m-0 p-5 text-sm text-[var(--text-muted)]">该引用范围没有可展示的单元格数据。</p>;
@@ -68,9 +69,9 @@ function ExcelSourcePreview({ source }: { source: PeExcelSource }) {
               "w-36 shrink-0 truncate rounded bg-[var(--bg-hover)] px-2 py-1 text-[var(--text-muted)]",
               selectedCell?.formula ? "visible" : "invisible",
             ].join(" ")}
-            title={selectedCell?.formula ? `计算值：${selectedValue}` : undefined}
+            title={selectedCell?.formula ? `文件缓存值：${selectedValue}（未重新计算）` : undefined}
           >
-            计算值：{selectedValue}
+            缓存值：{selectedValue}
           </span>
         </div>
       </div>
@@ -112,7 +113,7 @@ function ExcelSourcePreview({ source }: { source: PeExcelSource }) {
                     ].filter(Boolean).join(" ")}
                     key={column}
                     onClick={() => setSelectedCellRef(cell?.cell_ref ?? `${excelColumnLabel(column)}${row}`)}
-                    title={cell?.formula ?? cell?.raw_value ?? cell?.display_value}
+                    title={[cell?.formula ?? cell?.raw_value ?? cell?.display_value, cell?.number_format].filter(Boolean).join("\n")}
                   >
                     <span className="block max-w-44 truncate">
                       {cell?.display_value ?? cell?.raw_value ?? ""}{cell?.unit ?? ""}
@@ -132,7 +133,17 @@ function ExcelSourcePreview({ source }: { source: PeExcelSource }) {
         <div className="border-x border-t border-emerald-600 bg-[var(--bg)] px-5 py-1.5 text-xs font-medium">
           {source.sheet_name ?? "Sheet"}
         </div>
+        {selectedCell?.number_format && (
+          <span className="ml-auto truncate px-2 py-1.5 text-xs text-[var(--text-muted)]">
+            格式：{selectedCell.number_format}
+          </span>
+        )}
       </div>
+      {(source.truncated || (source.warnings?.length ?? 0) > 0) && (
+        <p className="m-0 border-t border-[var(--border)] px-4 py-2 text-xs text-[var(--text-muted)]">
+          {[source.truncated ? "当前展示引用范围的部分单元格。" : "", ...(source.warnings ?? [])].filter(Boolean).join(" ")}
+        </p>
+      )}
     </div>
   );
 }
@@ -224,7 +235,9 @@ export function PeSourceCitation({ cwd, evidenceId, children, className }: PeSou
               <div className="min-w-0 flex-1">
                 <h2 className="m-0 text-sm font-semibold">原始证据</h2>
                 <p className="mt-1 truncate text-xs text-[var(--text-muted)]">
-                  {state.status === "ready" ? state.source.citation : "正在读取引用来源…"}
+                  {state.status === "ready"
+                    ? `${state.source.citation}${state.source.version_no ? ` · v${state.source.version_no}` : ""}`
+                    : "正在读取引用来源…"}
                 </p>
               </div>
               <button
@@ -275,16 +288,22 @@ export function PeSourceCitation({ cwd, evidenceId, children, className }: PeSou
   return (
     <>
       <button
+        aria-expanded={open}
+        aria-haspopup="dialog"
         className={[
-          "mx-0.5 inline-flex cursor-pointer items-center rounded-full border border-emerald-600/25 bg-emerald-600/10 px-2 py-0.5 align-baseline text-[0.86em] font-medium leading-5 text-emerald-700 no-underline transition-colors hover:bg-emerald-600/20 dark:text-emerald-300",
+          "relative -top-[0.4em] mx-0.5 inline-flex h-3.5 w-3.5 cursor-pointer items-center justify-center rounded-sm align-baseline leading-none text-[var(--text-muted)] transition-colors hover:text-[var(--accent)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]",
           className,
         ].filter(Boolean).join(" ")}
         data-pe-source-citation="true"
         onClick={openDrawer}
-        title="点击查看原始证据"
+        title={typeof children === "string" ? `查看原始证据：${children}` : "查看原始证据"}
         type="button"
       >
-        {children}
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
+          <path d="M14 2v6h6M8 13h8M8 17h5" />
+        </svg>
+        <span className="sr-only">查看原始证据：{children}</span>
       </button>
       {dialog}
     </>

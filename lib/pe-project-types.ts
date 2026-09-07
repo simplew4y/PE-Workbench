@@ -16,6 +16,36 @@ export interface PeProjectCatalog {
   activeDatasetId: string | null;
 }
 
+export type PeProjectDocumentStatus =
+  | "queued"
+  | "running"
+  | "completed"
+  | "completed_with_warnings"
+  | "failed";
+
+export interface PeProjectDocumentSummary {
+  filename: string;
+  docId?: string;
+  fileType?: string;
+  versionNo?: number;
+  isCurrent?: boolean;
+  status: PeProjectDocumentStatus;
+  pageCount: number;
+  sizeBytes: number | null;
+  uploadedAt: string;
+  updatedAt: string;
+  warningCount: number;
+  warnings: string[];
+  needsOcrPageCount: number;
+  rawRelativePath: string | null;
+  markdownRelativePath: string | null;
+}
+
+export interface PeProjectDocumentCatalog {
+  documents: PeProjectDocumentSummary[];
+  currentCount?: number;
+}
+
 export interface CreatePeProjectInput {
   name: string;
   companyName?: string;

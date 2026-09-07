@@ -8,7 +8,9 @@ import { skillExpansionToCommand } from "@/lib/slash-display";
 import { getProjectActivity, sessionsForProject } from "@/lib/project-groups";
 import { workspaceKeyOf } from "@/lib/workspace-memory";
 import { useI18n } from "@/hooks/useI18n";
-import { PeAutoResearchUpload } from "./PeAutoResearchUpload";
+import { PeResearchUpload } from "./PeResearchUpload";
+import { PeProjectDocuments } from "./PeProjectDocuments";
+import { PeProjectCreateDialog } from "./PeProjectCreateDialog";
 import { PeProjectDeleteDialog } from "./PeProjectDeleteDialog";
 
 interface Props {
@@ -178,7 +180,7 @@ function buildSessionTree(sessions: SessionInfo[]): SessionTreeNode[] {
   return roots;
 }
 
-export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onBackgroundTaskDone, onRunningSessionIdsChange }: Props) {
+export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, onBackgroundTaskDone, onRunningSessionIdsChange }: Props) {
   const { t } = useI18n();
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -188,6 +190,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const [activeDatasetId, setActiveDatasetId] = useState<string | null>(null);
   const [projectsLoading, setProjectsLoading] = useState(true);
   const [projectsError, setProjectsError] = useState<string | null>(null);
+  const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [deletingDatasetId, setDeletingDatasetId] = useState<string | null>(null);
   const [projectPendingDelete, setProjectPendingDelete] = useState<PeProjectSummary | null>(null);
   const [deleteProjectError, setDeleteProjectError] = useState<string | null>(null);
@@ -195,6 +198,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const [projectFilter, setProjectFilter] = useState("");
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [researchUploadBusy, setResearchUploadBusy] = useState(false);
+  const [documentRefreshKey, setDocumentRefreshKey] = useState(0);
   const [sessionRefreshDone, setSessionRefreshDone] = useState(false);
   const [runningSessionIds, setRunningSessionIds] = useState<Set<string>>(() => new Set());
   const [unreadSessionIds, setUnreadSessionIds] = useState<Set<string>>(() => loadUnreadSessionIds());
@@ -582,6 +586,18 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+      <PeProjectCreateDialog
+        open={createProjectOpen}
+        onClose={() => setCreateProjectOpen(false)}
+        onCreated={(project) => {
+          setProjects((current) => [project, ...current.filter((item) => item.datasetId !== project.datasetId)]);
+          setActiveDatasetId(project.datasetId);
+          setSelectedCwd(project.root);
+          setProjectsError(null);
+          setProjectFilter("");
+          setDropdownOpen(false);
+        }}
+      />
       <PeProjectDeleteDialog
         project={projectPendingDelete}
         busy={projectPendingDelete !== null && deletingDatasetId === projectPendingDelete.datasetId}
@@ -889,19 +905,52 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                 </button>
               )}
 
+              <button
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setCreateProjectOpen(true);
+                  setDropdownOpen(false);
+                }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 7,
+                  width: "100%",
+                  padding: "9px 10px",
+                  background: "none",
+                  border: "none",
+                  borderTop: "1px solid var(--border)",
+                  color: "var(--text-muted)",
+                  cursor: "pointer",
+                  textAlign: "left",
+                  fontSize: 11,
+                  fontWeight: 600,
+                }}
+              >
+                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" aria-hidden="true" style={{ flexShrink: 0 }}>
+                  <line x1="5" y1="1" x2="5" y2="9" />
+                  <line x1="1" y1="5" x2="9" y2="5" />
+                </svg>
+                <span>{t("project.create")}</span>
+              </button>
+
           </AnimatedDropdown>
         </div>
 
-        <PeAutoResearchUpload
+        <PeResearchUpload
+          project={selectedRegisteredProject}
           onBusyChange={setResearchUploadBusy}
-          onProjectsChanged={(affectedProjects) => {
-            setProjects((current) => [
-              ...affectedProjects,
-              ...current.filter((item) => !affectedProjects.some((affected) => affected.datasetId === item.datasetId)),
-            ]);
-            setProjectsError(null);
+          onDocumentsChanged={() => setDocumentRefreshKey((value) => value + 1)}
+          onComplete={() => {
+            setDocumentRefreshKey((value) => value + 1);
+            void loadProjects();
           }}
-          onComplete={() => void loadProjects()}
+        />
+
+        <PeProjectDocuments
+          project={selectedRegisteredProject}
+          refreshKey={documentRefreshKey}
+          onOpenFile={onOpenFile}
         />
 
       </div>

@@ -4,18 +4,17 @@ import test from "node:test";
 
 const source = await readFile(new URL("./route.ts", import.meta.url), "utf8");
 
-test("identifies and groups global uploads before routing company projects", () => {
-  assert.match(source, /identifyPeUploads\(manifestPath\)/);
-  assert.match(source, /findCanonicalPeProject\(group\.identity, knownProjects\)/);
-  assert.match(source, /group\.identity\.company_confidence < PE_UPLOAD_AUTO_CREATE_THRESHOLD/);
-  assert.match(source, /createPeProject\(\{/);
-  assert.match(source, /needsReview\.push\(\{/);
-  assert.match(source, /const routed = new Map/);
+test("requires a registered project and never accepts a browser-supplied workspace path", () => {
+  assert.match(source, /const datasetId = textField\(form, "datasetId"\)\.trim\(\)/);
+  assert.match(source, /getPeProject\(datasetId\)/);
+  assert.match(source, /peProjectStorePaths\(\)\.registryPath/);
+  assert.doesNotMatch(source, /textField\(form, "cwd"\)/);
+  assert.doesNotMatch(source, /identifyPeUploads|findCanonicalPeProject|createPeProject/);
 });
 
-test("keeps upload identification staging outside the persistent PE workbench store", () => {
-  assert.match(source, /fs\.mkdtempSync\(path\.join\(os\.tmpdir\(\), "pe-upload-"\)\)/);
-  assert.match(source, /fs\.rmSync\(batchDirectory, \{ recursive: true, force: true \}\)/);
-  assert.doesNotMatch(source, /storeRoot/);
-  assert.doesNotMatch(source, /"_inbox"/);
+test("applies mixed-document limits and delegates content validation to the pipeline", () => {
+  assert.match(source, /PE_SUPPORTED_EXTENSIONS/);
+  assert.match(source, /queuePePdfIngest/);
+  assert.match(source, /Each document must be 100MB or smaller/);
+  assert.match(source, /Document uploads must total 300MB or less/);
 });
