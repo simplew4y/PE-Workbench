@@ -4,7 +4,7 @@ PDF 和 Excel 使用同一份文档目录，分别进入各自的处理链路：
 
 ```text
 PDF 上传 → 原件 → Node worker / PDF.js → 页面、图片、FTS
-         → pe_pdf_search / pe_pdf_read → page: 引用
+         → pe_pdf_list / pe_pdf_search / pe_pdf_read → page: 引用
 
 Excel 上传 → 不可变原件版本 → 后台准备 → Python openpyxl
            → Node 发布解析表与缓存 → 六个财务工具 → source: 引用
@@ -20,7 +20,7 @@ Excel 工具共享同一个准备服务；上传后台和 Agent 同时读取时�
 
 ## 工具
 
-- `pe_pdf_search`、`pe_pdf_read`：查找当前有效 PDF，使用 `doc_id` 精确读取当前或历史版本的页面证据。
+- `pe_pdf_list`、`pe_pdf_search`、`pe_pdf_read`：先列出项目内 PDF 及封面元数据，再按字面词做 grep 式定位（按文档和页序列出全部命中页，不排序，disclosure 页折叠），最后使用 `doc_id` 精确读取当前或历史版本的页面证据。
 - `pe_document_open`：取得 Excel、文本或 Office 文件的 `readable_path`，供原生 `read`、`grep` 或 `bash` 中的 `rg` 使用。
 - `pe_workbook_inspect`、`pe_excel_range`、`pe_formula_trace`：检查工作簿、精确取数、追踪公式。
 - `pe_valuation_output_locate`、`pe_valuation_date_resolve`、`pe_model_validate`：完整保留主分支估值规则及核验语义。

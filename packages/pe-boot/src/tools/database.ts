@@ -252,3 +252,59 @@ export function normalizeText(value: unknown): string {
 		.replace(/\s+/gu, " ")
 		.trim();
 }
+
+/**
+ * The upload pipeline folds file names with NFKC and then maps punctuation Windows forbids back to
+ * full-width forms. Tool lookups by file name must apply the same mapping, otherwise a name copied
+ * from search results ("Hermès： Stretching upwards") never matches the stored document.
+ */
+const PORTABLE_FILENAME_PUNCTUATION: Readonly<Record<string, string>> = {
+	":": "：",
+	"<": "＜",
+	">": "＞",
+	'"': "＂",
+	"|": "｜",
+	"?": "？",
+	"*": "＊",
+};
+
+/**
+ * Resolve a requested PDF name to stored file names. An exact match (with or without .pdf) wins;
+ * otherwise any current file whose name contains the requested text matches, so agents can pass
+ * a distinctive fragment instead of copying a long platform-generated file name.
+ */
+export function matchPdfDocumentNames(
+	database: DatabaseSync,
+	datasetId: string,
+	requested: string,
+	includeHistorical = false,
+): string[] {
+	const key = pdfFilenameKey(requested);
+	if (!key) return [];
+	const withExtension = key.endsWith(".pdf") ? key : `${key}.pdf`;
+	const selection = pdfDocumentSelection(database, includeHistorical);
+	const names = (
+		database
+			.prepare(
+				`SELECT DISTINCT d.original_filename FROM documents d WHERE d.dataset_id=? AND ${selection.predicate}`,
+			)
+			.all(datasetId) as SqlRow[]
+	)
+		.map((row) => textValue(row, "original_filename"))
+		.filter((name): name is string => name !== undefined);
+	const exact = names.filter((name) => {
+		const stored = pdfFilenameKey(name);
+		return stored === key || stored === withExtension;
+	});
+	if (exact.length > 0) return exact;
+	const fragment = key.endsWith(".pdf") ? key.slice(0, -4) : key;
+	return names.filter((name) => pdfFilenameKey(name).includes(fragment));
+}
+
+export function pdfFilenameKey(value: string): string {
+	return value
+		.normalize("NFKC")
+		.trim()
+		.replace(/[:<>"|?*]/gu, (character) => PORTABLE_FILENAME_PUNCTUATION[character] ?? character)
+		.toLocaleLowerCase("und");
+}

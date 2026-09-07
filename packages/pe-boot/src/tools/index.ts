@@ -1,6 +1,7 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { PE_CONSENSUS_CARDS_PROMPT_SNIPPET, peConsensusCardsTool } from "./consensus-cards.ts";
 import { peDatasetMemoTool } from "./dataset-memo.ts";
 import { peDatasetSearchTool } from "./dataset-search.ts";
 import { peDocumentOpenTool } from "./document-open.ts";
@@ -8,6 +9,7 @@ import { peExcelRangeTool } from "./excel-range.ts";
 import { peFormulaTraceTool } from "./formula-trace.ts";
 import { peHistoryCompareTool } from "./history-compare.ts";
 import { peModelValidateTool } from "./model-validate.ts";
+import { PE_PDF_LIST_PROMPT_SNIPPET, pePdfListTool } from "./pdf-list.ts";
 import { PE_PDF_READ_PROMPT_SNIPPET, pePdfReadTool } from "./pdf-read.ts";
 import { PE_PDF_SEARCH_PROMPT_SNIPPET, pePdfSearchTool } from "./pdf-search.ts";
 import { PE_RENDER_UI_PROMPT_SNIPPET, peRenderUiTool } from "./render-ui.ts";
@@ -28,6 +30,7 @@ export const PE_TOOL_PROMPT_SNIPPETS = [
 	// 旧版 Chunk 检索保留在源码中便于追溯，但不再写入系统提示词。
 	// { name: "pe_dataset_search", description: PE_DATASET_SEARCH_PROMPT_SNIPPET },
 	// { name: "pe_source_detail", description: PE_SOURCE_DETAIL_PROMPT_SNIPPET },
+	{ name: "pe_pdf_list", description: PE_PDF_LIST_PROMPT_SNIPPET },
 	{ name: "pe_pdf_search", description: PE_PDF_SEARCH_PROMPT_SNIPPET },
 	{ name: "pe_pdf_read", description: PE_PDF_READ_PROMPT_SNIPPET },
 	{ name: "pe_document_open", description: peDocumentOpenTool.promptSnippet },
@@ -39,6 +42,7 @@ export const PE_TOOL_PROMPT_SNIPPETS = [
 	{ name: "pe_valuation_date_resolve", description: peValuationDateTool.promptSnippet },
 	{ name: "pe_model_validate", description: peModelValidateTool.promptSnippet },
 	{ name: "pe_render_ui", description: PE_RENDER_UI_PROMPT_SNIPPET },
+	{ name: "pe_consensus_cards", description: PE_CONSENSUS_CARDS_PROMPT_SNIPPET },
 ] as const;
 
 //注册所有pe工具
@@ -46,6 +50,7 @@ export function registerPeTools(pi: ExtensionAPI): void {
 	// 旧版 Chunk 检索保留在源码中便于追溯，但不再注册给模型。
 	// pi.registerTool(peDatasetSearchTool);
 	// pi.registerTool(peSourceDetailTool);
+	pi.registerTool(pePdfListTool);
 	pi.registerTool(pePdfSearchTool);
 	pi.registerTool(pePdfReadTool);
 	pi.registerTool(peDocumentOpenTool);
@@ -60,12 +65,14 @@ export function registerPeTools(pi: ExtensionAPI): void {
 	pi.registerTool(peHistoryCompareTool);
 	pi.registerTool(peResearchNoteSaveTool);
 	pi.registerTool(peRenderUiTool);
+	pi.registerTool(peConsensusCardsTool);
 	pi.on("resources_discover", () => ({
 		skillPaths: [memoSkillPath, researchNoteSkillPath, valuationModelExplainerSkillPath, generativeUiSkillPath],
 	}));
 }
 
 export {
+	peConsensusCardsTool,
 	peDatasetMemoTool,
 	peDatasetSearchTool,
 	peDocumentOpenTool,
@@ -73,6 +80,7 @@ export {
 	peFormulaTraceTool,
 	peHistoryCompareTool,
 	peModelValidateTool,
+	pePdfListTool,
 	pePdfReadTool,
 	pePdfSearchTool,
 	peRenderUiTool,

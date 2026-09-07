@@ -18,6 +18,7 @@ export { getPeExcelRange, peExcelRangeTool } from "./tools/excel-range.ts";
 export { peFormulaTraceTool, tracePeFormula } from "./tools/formula-trace.ts";
 export { registerPeTools } from "./tools/index.ts";
 export { peModelValidateTool, validatePeModel } from "./tools/model-validate.ts";
+export { listPePdfDocuments, pePdfListTool } from "./tools/pdf-list.ts";
 export { pePdfReadTool, readPePdfPages } from "./tools/pdf-read.ts";
 export { pePdfSearchTool, searchPePdfPages } from "./tools/pdf-search.ts";
 export { peValuationDateTool, resolvePeValuationDate } from "./tools/valuation-date.ts";

@@ -11,6 +11,7 @@ import { sourceId } from "../src/source.ts";
 import { buildPeSystemPrompt } from "../src/system-prompt.ts";
 import { registerPeTools } from "../src/tools/index.ts";
 import { savePeMemo } from "../src/tools/memo-storage.ts";
+import { listPePdfDocuments, pePdfListTool } from "../src/tools/pdf-list.ts";
 import { pePdfReadTool, readPePdfPages } from "../src/tools/pdf-read.ts";
 import { pePdfSearchTool, searchPePdfPages } from "../src/tools/pdf-search.ts";
 import { savePeResearchNote } from "../src/tools/research-note-storage.ts";
@@ -231,9 +232,15 @@ describe("PE page-level PDF retrieval", () => {
 		addCatalogPdf(root, { docId: "deleted", filename: "Deleted.pdf", deletedAt: "2026-09-07" });
 		for (const query of ["AIDC", "AI"]) {
 			const result = searchPePdfPages(root, { queries: [query] });
-			expect(result.results.map((hit) => hit.doc_id)).toEqual(["doc-v2"]);
-			expect(result.results[0]).toMatchObject({ version_no: 2, evidence_id: "page:page-doc-v2" });
+			expect(result.documents.map((document) => document.doc_id)).toEqual(["doc-v2"]);
+			expect(result.documents[0]).toMatchObject({ version_no: 2 });
+			expect(result.documents[0].pages[0]).toMatchObject({ evidence_id: "page:page-doc-v2" });
 		}
+		const listing = listPePdfDocuments(root);
+		expect(listing.documents.map((document) => document.doc_id)).toEqual(["doc-v2"]);
+		expect(
+			listPePdfDocuments(root, { includeHistorical: true }).documents.map((document) => document.doc_id),
+		).toEqual(expect.arrayContaining(["doc-v2", "doc-sungrow", "archived"]));
 		expect(readPePdfPages(root, { documentName: "阳光电源调研", pageStart: 1 }).document).toMatchObject({
 			doc_id: "doc-v2",
 			version_no: 2,
@@ -254,6 +261,13 @@ describe("PE page-level PDF retrieval", () => {
 		expect(() => readPePdfPages(root, { docId: "doc-v2", documentName: "Other.pdf", pageStart: 1 })).toThrow(
 			"does not match",
 		);
+		// A doc_id plus a fragment that names a different document must still be rejected.
+		expect(() => readPePdfPages(root, { docId: "doc-v2", documentName: "Archived", pageStart: 1 })).toThrow(
+			"does not match",
+		);
+		expect(readPePdfPages(root, { docId: "doc-v2", documentName: "阳光电源", pageStart: 1 }).document.doc_id).toBe(
+			"doc-v2",
+		);
 	});
 
 	it("does not fall back to a superseded PDF when the current version is pending", () => {
@@ -261,7 +275,10 @@ describe("PE page-level PDF retrieval", () => {
 		const database = new DatabaseSync(join(root, "meta", "collection.sqlite3"));
 		database.exec("UPDATE documents SET status='queued' WHERE doc_id='doc-v2'");
 		database.close();
-		expect(searchPePdfPages(root, { queries: ["AIDC", "AI"] }).results).toEqual([]);
+		expect(searchPePdfPages(root, { queries: ["AIDC", "AI"] }).documents).toEqual([]);
+		expect(listPePdfDocuments(root).documents.map((document) => [document.doc_id, document.status])).toEqual([
+			["doc-v2", "queued"],
+		]);
 		expect(() => readPePdfPages(root, { documentName: "阳光电源调研.pdf", pageStart: 1 })).toThrow("not indexed");
 		expect(readPePdfPages(root, { docId: "doc-sungrow", pageStart: 1 }).document.doc_id).toBe("doc-sungrow");
 	});
@@ -282,8 +299,11 @@ describe("PE page-level PDF retrieval", () => {
 	it("keeps PDF retrieval registered alongside the complete Excel tool chain", () => {
 		expect(pePdfSearchTool.name).toBe("pe_pdf_search");
 		expect(pePdfReadTool.name).toBe("pe_pdf_read");
+		expect(pePdfListTool.name).toBe("pe_pdf_list");
 		const prompt = buildPeSystemPrompt("/workspace");
+		expect(prompt).toContain("- pe_pdf_list:");
 		expect(prompt).toContain("- pe_pdf_search:");
+		expect(prompt).toContain("call pe_pdf_list first");
 		expect(prompt).toContain("- pe_pdf_read:");
 		expect(prompt).not.toContain("- pe_dataset_search:");
 		expect(prompt).toContain("- pe_source_detail:");
@@ -295,6 +315,7 @@ describe("PE page-level PDF retrieval", () => {
 			on() {},
 		} as unknown as ExtensionAPI;
 		registerPeTools(extension);
+		expect(registered).toContain("pe_pdf_list");
 		expect(registered).toContain("pe_pdf_search");
 		expect(registered).toContain("pe_pdf_read");
 		expect(registered).not.toContain("pe_dataset_search");
@@ -315,24 +336,139 @@ describe("PE page-level PDF retrieval", () => {
 		expect(prompt).toContain("Historical citations".toLowerCase());
 	});
 
-	it("searches complete pages without hardcoded synonym expansion", () => {
+	it("lists documents with cover metadata and page-role counts", () => {
 		const root = createPageDatasetFixture();
-		const result = searchPePdfPages(root, { queries: ["储能单位盈利", "AIDC"], topK: 5 });
+		const result = listPePdfDocuments(root);
+		expect(result.document_count).toBe(1);
+		expect(result.documents[0]).toMatchObject({
+			doc_id: "doc-sungrow",
+			filename: "阳光电源调研.pdf",
+			title: "阳光电源调研",
+			document_date: "2026-06-15",
+			page_count: 3,
+			status: "completed",
+			needs_ocr_page_count: 1,
+			page_roles: { cover: 1, body: 2 },
+			document_markdown_path: "meta/text/阳光电源调研.md",
+		});
+		expect(result.documents[0]).not.toHaveProperty("brokerage");
+		expect(result.hint).toContain("cover-page rules");
+	});
+
+	it("returns every matched page in document order with matched lines and no ranking", () => {
+		const root = createPageDatasetFixture();
+		const result = searchPePdfPages(root, { queries: ["储能单位盈利", "AIDC"] });
 
 		expect(result.dataset_id).toBe("dataset-new");
-		expect(result.results).toEqual(
-			expect.arrayContaining([
-				expect.objectContaining({
-					evidence_id: "page:page-profit",
-					filename: "阳光电源调研.pdf",
-					page_number: 2,
-					citation: "阳光电源调研.pdf p.2",
-					markdown_citation: "[阳光电源调研.pdf p.2](#pe-source?evidence_id=page%3Apage-profit)",
-					excerpt: expect.stringContaining("每瓦时0.3至0.4元"),
-				}),
-			]),
-		);
+		expect(result).toMatchObject({
+			matched_document_count: 1,
+			matched_page_count: 2,
+			shown_page_count: 2,
+			truncated: false,
+		});
+		expect(result.documents[0]).toMatchObject({
+			doc_id: "doc-sungrow",
+			filename: "阳光电源调研.pdf",
+			matched_page_count: 2,
+		});
+		expect(result.documents[0].pages.map((page) => page.page_number)).toEqual([1, 2]);
+		expect(result.documents[0].pages[1]).toMatchObject({
+			evidence_id: "page:page-profit",
+			page_role: "body",
+			citation: "阳光电源调研.pdf p.2",
+			markdown_citation: "[阳光电源调研.pdf p.2](#pe-source?evidence_id=page%3Apage-profit)",
+			matched_queries: ["储能单位盈利"],
+			matched_line_count: 1,
+			lines: [{ line_number: 1, text: "储能单位盈利预计达到每瓦时0.3至0.4元。", matched_queries: ["储能单位盈利"] }],
+		});
+		expect(result.documents[0].pages[0]).not.toHaveProperty("score");
 		expect(result.hint).toContain("does not inject domain synonyms");
+		expect(result.hint).toContain("without ranking");
+	});
+
+	it("folds disclosure pages unless asked for them and honors role filters", () => {
+		const root = createPageDatasetFixture();
+		const database = new DatabaseSync(join(root, "meta", "collection.sqlite3"));
+		const disclosureText = `${"储能 AIDC 阳光电源 ".repeat(20)}免责声明：本报告仅供参考。`;
+		database
+			.prepare(
+				"INSERT INTO pdf_pages VALUES (?, 'doc-sungrow', 4, ?, ?, ?, '{}', 'passed', '{}', 595, 842, 0, '[]', 0, 0, 0)",
+			)
+			.run(
+				"page-disclosure",
+				disclosureText,
+				"阳光电源调研.pdf · p.4/4 · disclosure_boilerplate",
+				"disclosure_boilerplate",
+			);
+		database.prepare("INSERT INTO pdf_pages_fts VALUES ('page-disclosure', 'doc-sungrow', ?)").run(disclosureText);
+		database.exec("UPDATE documents SET page_count=4 WHERE doc_id='doc-sungrow'");
+		database.close();
+
+		const folded = searchPePdfPages(root, { queries: ["储能", "AIDC"] });
+		expect(folded.documents[0].pages.map((page) => page.page_number)).toEqual([1, 2]);
+		expect(folded.documents[0]).toMatchObject({
+			matched_page_count: 3,
+			shown_page_count: 2,
+			folded_disclosure_pages: [4],
+		});
+
+		const expanded = searchPePdfPages(root, { queries: ["储能", "AIDC"], includeDisclosure: true });
+		expect(expanded.documents[0].pages.map((page) => page.page_number)).toEqual([1, 2, 4]);
+		expect(expanded.documents[0].pages[2]).toMatchObject({
+			page_role: "disclosure_boilerplate",
+			matched_queries: ["储能", "AIDC"],
+		});
+
+		const onlyDisclosure = searchPePdfPages(root, { queries: ["储能"], roles: ["disclosure_boilerplate"] });
+		expect(onlyDisclosure.documents[0].pages.map((page) => page.page_number)).toEqual([4]);
+		expect(
+			searchPePdfPages(root, { queries: ["储能"], roles: ["cover"] }).documents[0].pages.map(
+				(page) => page.page_number,
+			),
+		).toEqual([1]);
+	});
+
+	it("truncates by page budget and limits lines per page while reporting full counts", () => {
+		const root = createPageDatasetFixture();
+		const database = new DatabaseSync(join(root, "meta", "collection.sqlite3"));
+		const longText = Array.from({ length: 6 }, (_, index) => `第${index + 1}行提到储能业务`).join("\n");
+		database
+			.prepare(
+				"INSERT INTO pdf_pages VALUES (?, 'doc-sungrow', 4, ?, 'p.4', 'body', '{}', 'passed', '{}', 595, 842, 0, '[]', 0, 0, 0)",
+			)
+			.run("page-long", longText);
+		database.prepare("INSERT INTO pdf_pages_fts VALUES ('page-long', 'doc-sungrow', ?)").run(longText);
+		database.exec("UPDATE documents SET page_count=4 WHERE doc_id='doc-sungrow'");
+		database.close();
+
+		const result = searchPePdfPages(root, { queries: ["储能"], maxPages: 1, maxLinesPerPage: 2 });
+		expect(result).toMatchObject({ matched_page_count: 3, shown_page_count: 1, truncated: true });
+		expect(result.documents[0].pages).toHaveLength(1);
+		const full = searchPePdfPages(root, { queries: ["储能"], maxLinesPerPage: 2 });
+		const longPage = full.documents[0].pages.find((page) => page.page_number === 4);
+		expect(longPage).toMatchObject({ matched_line_count: 6 });
+		expect(longPage?.lines.map((line) => line.line_number)).toEqual([1, 2]);
+	});
+
+	it("keeps the matched term inside a truncated excerpt of a very long line", () => {
+		const root = createPageDatasetFixture();
+		const database = new DatabaseSync(join(root, "meta", "collection.sqlite3"));
+		// Leading whitespace used to shift the excerpt window and cut the match out of it.
+		const longLine = `${" ".repeat(200)}储能单位盈利${"补充说明".repeat(200)}`;
+		database
+			.prepare(
+				"INSERT INTO pdf_pages VALUES ('page-long-line', 'doc-sungrow', 4, ?, 'p.4', 'body', '{}', 'passed', '{}', 595, 842, 0, '[]', 0, 0, 0)",
+			)
+			.run(longLine);
+		database.prepare("INSERT INTO pdf_pages_fts VALUES ('page-long-line', 'doc-sungrow', ?)").run(longLine);
+		database.exec("UPDATE documents SET page_count=4 WHERE doc_id='doc-sungrow'");
+		database.close();
+
+		const page = searchPePdfPages(root, { queries: ["储能单位盈利"] }).documents[0].pages.find(
+			(candidate) => candidate.page_number === 4,
+		);
+		expect(page?.lines[0].text).toContain("储能单位盈利");
+		expect(page?.lines[0].text.startsWith(" ")).toBe(false);
 	});
 
 	it("supports short literal terms and an exact human-readable document filter", () => {
@@ -342,12 +478,79 @@ describe("PE page-level PDF retrieval", () => {
 			documentName: "阳光电源调研",
 		});
 
-		expect(result.results).toHaveLength(1);
-		expect(result.results[0]).toMatchObject({
+		expect(result.documents).toHaveLength(1);
+		expect(result.documents[0].pages).toHaveLength(1);
+		expect(result.documents[0].pages[0]).toMatchObject({
 			evidence_id: "page:page-risk",
 			page_number: 3,
 			text_quality: "needs_ocr",
 		});
+	});
+
+	it("matches stored file names that keep full-width punctuation from the upload pipeline", () => {
+		const root = createVersionedPageFixture();
+		const stored = "Bernstein-Hermes International(RMS.FP)Hermès： Stretching upwards.pdf";
+		addCatalogPdf(root, { docId: "doc-fullwidth", filename: stored });
+		for (const requested of [stored, stored.replace("：", ":"), stored.replace("：", ":").replace(/\.pdf$/u, "")]) {
+			expect(readPePdfPages(root, { documentName: requested, pageStart: 1 }).document.doc_id).toBe("doc-fullwidth");
+			const search = searchPePdfPages(root, { queries: ["AIDC"], documentName: requested });
+			expect(search.documents.map((document) => document.doc_id)).toEqual(["doc-fullwidth"]);
+		}
+	});
+
+	it("resolves distinctive filename fragments and attaches images for chart, screenshot, and OCR pages", () => {
+		const root = createPageDatasetFixture();
+		mkdirSync(join(root, "meta", "documents", "阳光电源调研", "pages"), { recursive: true });
+		const png = Buffer.from("89504e470d0a1a0a", "hex");
+		for (const page of [1, 2, 3]) {
+			writeFileSync(join(root, "meta", "documents", "阳光电源调研", "pages", `page-000${page}@110.png`), png);
+		}
+		const database = new DatabaseSync(join(root, "meta", "collection.sqlite3"));
+		database.exec("UPDATE pdf_pages SET role='exhibit_chart' WHERE page_id='page-profit'");
+		database.close();
+
+		const byFragment = readPePdfPages(root, { documentName: "阳光电源", pageStart: 1, pageEnd: 3 });
+		expect(byFragment.document.doc_id).toBe("doc-sungrow");
+		expect(byFragment.attached_page_images.map((image) => [image.page_number, image.page_role])).toEqual([
+			[2, "exhibit_chart"],
+			[3, "body"],
+		]);
+		expect(
+			readPePdfPages(root, { documentName: "阳光电源", pageStart: 1, includeImages: "never" }).attached_page_images,
+		).toEqual([]);
+		expect(
+			readPePdfPages(root, { documentName: "阳光电源", pageStart: 1, includeImages: "always" }).attached_page_images,
+		).toHaveLength(1);
+		const fourth = new DatabaseSync(join(root, "meta", "collection.sqlite3"));
+		fourth
+			.prepare(
+				"INSERT INTO pdf_pages VALUES ('page-four', 'doc-sungrow', 4, '第四页储能内容', 'p.4', 'exhibit_chart', '{}', 'passed', '{}', 595, 842, 0, ?, 0, 0, 0)",
+			)
+			.run(JSON.stringify(["meta/documents/阳光电源调研/pages/page-0004@110.png"]));
+		fourth.exec("UPDATE documents SET page_count=4 WHERE doc_id='doc-sungrow'");
+		fourth.close();
+		writeFileSync(join(root, "meta", "documents", "阳光电源调研", "pages", "page-0004@110.png"), png);
+
+		const capped = readPePdfPages(root, {
+			documentName: "阳光电源",
+			pageStart: 1,
+			pageEnd: 4,
+			includeImages: "always",
+		});
+		expect(capped.attached_page_images.map((image) => image.page_number)).toEqual([1, 2, 3]);
+		expect(capped.omitted_page_images).toEqual([
+			{
+				page_number: 4,
+				page_role: "exhibit_chart",
+				path: "meta/documents/阳光电源调研/pages/page-0004@110.png",
+				reason: "attachment_limit",
+			},
+		]);
+		expect(() => readPePdfPages(root, { documentName: "不存在", pageStart: 1 })).toThrow("not indexed");
+		expect(searchPePdfPages(root, { queries: ["储能"], documentName: "阳光电源" }).documents[0]?.doc_id).toBe(
+			"doc-sungrow",
+		);
+		expect(searchPePdfPages(root, { queries: ["储能"], documentName: "不存在" }).documents).toEqual([]);
 	});
 
 	it("reads complete page ranges by source filename", () => {
@@ -386,7 +589,8 @@ describe("PE page-level PDF retrieval", () => {
 
 		const result = searchPePdfPages(root, { queries: ["储能"] });
 		expect(result.dataset_id).toBe("dataset-new");
-		expect(result.results).toEqual([]);
+		expect(result.documents).toEqual([]);
+		expect(listPePdfDocuments(root).documents).toEqual([]);
 	});
 
 	it("accepts page evidence in Research Notes and Memo Citation Gate", async () => {

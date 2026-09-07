@@ -5,60 +5,85 @@ import {
 	numberValue,
 	openPeDataset,
 	pdfDocumentSelection,
+	matchPdfDocumentNames,
 	type SqlRow,
 	sourceCitation,
 	sourceMarkdownCitation,
 	textValue,
 } from "./database.ts";
 
-const DEFAULT_TOP_K = 8;
-const MAX_TOP_K = 30;
+const DEFAULT_MAX_PAGES = 40;
+const MAX_MAX_PAGES = 200;
+const DEFAULT_MAX_LINES_PER_PAGE = 3;
+const MAX_MAX_LINES_PER_PAGE = 20;
 const MAX_QUERIES = 8;
-const MAX_CANDIDATES_PER_QUERY = 120;
-const MAX_EXCERPT_CHARS = 1_600;
+const MAX_LINE_CHARS = 240;
+const DISCLOSURE_ROLE = "disclosure_boilerplate";
 
 export const PE_PDF_SEARCH_PROMPT_SNIPPET =
-	"Search the current project's page-level PDF text by literal terms or phrases and return readable evidence with citations";
+	"Grep-style literal search over page text of the project's PDFs: every matched page in document order with its matched lines and citations, no ranking";
 
 export interface PePdfSearchOptions {
 	queries: string[];
 	documentName?: string;
+	roles?: string[];
+	includeDisclosure?: boolean;
+	maxPages?: number;
+	maxLinesPerPage?: number;
 	datasetId?: string;
-	topK?: number;
 }
 
-export interface PePdfSearchHit {
+export interface PePdfSearchLine {
+	line_number: number;
+	text: string;
+	matched_queries: string[];
+}
+
+export interface PePdfSearchPage {
 	evidence_id: string;
+	page_number: number;
+	page_role: string;
+	text_quality: string;
+	page_header: string;
+	matched_queries: string[];
+	matched_line_count: number;
+	lines: PePdfSearchLine[];
+	citation: string;
+	markdown_citation: string;
+	page_image_paths: string[];
+}
+
+export interface PePdfSearchDocument {
 	doc_id: string;
 	version_no: number;
 	filename: string;
 	title?: string;
-	page_number: number;
-	page_role: string;
-	text_quality: string;
-	citation: string;
-	markdown_citation: string;
-	excerpt: string;
-	matched_queries: string[];
+	page_count: number;
+	matched_page_count: number;
+	shown_page_count: number;
+	pages: PePdfSearchPage[];
+	folded_disclosure_pages: number[];
 	document_markdown_path: string;
-	page_image_paths: string[];
-	score: number;
 }
 
 export interface PePdfSearchResult {
 	dataset_id: string;
 	queries: string[];
 	document_name?: string;
-	results: PePdfSearchHit[];
-	result_count: number;
+	roles?: string[];
+	documents: PePdfSearchDocument[];
+	matched_document_count: number;
+	matched_page_count: number;
+	shown_page_count: number;
+	truncated: boolean;
 	answer_contract: string;
 	hint: string;
 }
 
-interface AccumulatedPage {
+interface CandidatePage {
 	row: SqlRow;
+	lines: PePdfSearchLine[];
 	matchedQueries: Set<string>;
-	score: number;
 }
 
 function normalizeText(value: unknown): string {
@@ -83,6 +108,12 @@ function normalizeQueries(values: readonly string[]): string[] {
 	return queries;
 }
 
+function normalizeRoles(values: readonly string[] | undefined): string[] | undefined {
+	if (!values) return undefined;
+	const roles = [...new Set(values.map((value) => normalizeText(value).toLocaleLowerCase("und")).filter(Boolean))];
+	return roles.length > 0 ? roles : undefined;
+}
+
 function assertPageRetrievalSchema(database: DatabaseSync): void {
 	for (const table of ["documents", "pdf_pages", "pdf_pages_fts"] as const) {
 		if (!database.prepare("SELECT 1 FROM sqlite_master WHERE type IN ('table', 'view') AND name=?").get(table)) {
@@ -94,144 +125,117 @@ function assertPageRetrievalSchema(database: DatabaseSync): void {
 		throw new Error("PE PDF retrieval requires the page-level Pipeline schema; rebuild this project");
 }
 
-function documentFilterName(value: string | undefined): { exact: string | null; withExtension: string | null } {
-	const normalized = normalizeText(value).toLocaleLowerCase("und");
-	if (!normalized) return { exact: null, withExtension: null };
-	return {
-		exact: normalized,
-		withExtension: normalized.endsWith(".pdf") ? normalized : `${normalized}.pdf`,
-	};
+/** JSON array of resolved file names for `IN (SELECT value FROM json_each(?))`, or null for no filter. */
+function documentFilter(database: DatabaseSync, datasetId: string, value: string | undefined): string | null {
+	const requested = normalizeText(value);
+	if (!requested) return null;
+	return JSON.stringify(matchPdfDocumentNames(database, datasetId, requested));
 }
 
 function literalFtsQuery(value: string): string {
 	return `"${value.replaceAll('"', '""')}"`;
 }
 
+const PAGE_COLUMNS = `p.page_id, p.page_number, p.page_text, p.page_header, p.role, p.text_quality, p.image_paths_json,
+	        d.doc_id, d.original_filename, d.title, d.page_count, d.document_markdown_path`;
+
+/** FTS5 trigram recall for phrases of three or more characters. */
 function ftsRows(
 	database: DatabaseSync,
 	datasetId: string,
 	query: string,
-	documentName: ReturnType<typeof documentFilterName>,
+	documentFilterJson: string | null,
 ): SqlRow[] {
 	if (Array.from(query).length < 3) return [];
 	const selection = pdfDocumentSelection(database);
 	return database
 		.prepare(
-			`SELECT p.page_id, p.page_number, p.page_text, p.page_header, p.role,
-			        p.text_quality, p.image_paths_json,
-			        d.doc_id, ${selection.versionNo} AS version_no, d.original_filename, d.title, d.page_count,
-			        d.document_markdown_path, d.layout_json_path,
-			        bm25(pdf_pages_fts) AS fts_rank
+			`SELECT ${PAGE_COLUMNS}, ${selection.versionNo} AS version_no
 			 FROM pdf_pages_fts
 			 JOIN pdf_pages p ON p.page_id=pdf_pages_fts.page_id
 			 JOIN documents d ON d.doc_id=p.doc_id AND d.doc_id=pdf_pages_fts.doc_id
 			 WHERE pdf_pages_fts MATCH ? AND d.dataset_id=?
 			   AND ${selection.predicate}
 			   AND d.status IN ('completed', 'completed_with_warnings')
-			   AND (? IS NULL OR lower(d.original_filename)=? OR lower(d.original_filename)=?)
-			 ORDER BY fts_rank, d.original_filename, p.page_number
-			 LIMIT ${MAX_CANDIDATES_PER_QUERY}`,
+			   AND (? IS NULL OR d.original_filename IN (SELECT value FROM json_each(?)))`,
 		)
-		.all(
-			literalFtsQuery(query),
-			datasetId,
-			documentName.exact,
-			documentName.exact,
-			documentName.withExtension,
-		) as SqlRow[];
+		.all(literalFtsQuery(query), datasetId, documentFilterJson, documentFilterJson ?? "[]") as SqlRow[];
 }
 
+/** Substring recall covers short terms and anything the trigram index cannot express. */
 function substringRows(
 	database: DatabaseSync,
 	datasetId: string,
 	query: string,
-	documentName: ReturnType<typeof documentFilterName>,
+	documentFilterJson: string | null,
 ): SqlRow[] {
 	const selection = pdfDocumentSelection(database);
 	return database
 		.prepare(
-			`SELECT p.page_id, p.page_number, p.page_text, p.page_header, p.role,
-			        p.text_quality, p.image_paths_json,
-			        d.doc_id, ${selection.versionNo} AS version_no, d.original_filename, d.title, d.page_count,
-			        d.document_markdown_path, d.layout_json_path,
-			        0 AS fts_rank
+			`SELECT ${PAGE_COLUMNS}, ${selection.versionNo} AS version_no
 			 FROM pdf_pages p
 			 JOIN documents d ON d.doc_id=p.doc_id
 			 WHERE d.dataset_id=?
 			   AND ${selection.predicate}
 			   AND d.status IN ('completed', 'completed_with_warnings')
-			   AND (? IS NULL OR lower(d.original_filename)=? OR lower(d.original_filename)=?)
-			   AND (
-			     instr(lower(p.page_text), lower(?)) > 0
-			     OR instr(lower(p.page_header), lower(?)) > 0
-			     OR instr(lower(d.original_filename), lower(?)) > 0
-			     OR instr(lower(d.title), lower(?)) > 0
-			   )
-			 ORDER BY d.original_filename, p.page_number
-			 LIMIT ${MAX_CANDIDATES_PER_QUERY}`,
+			   AND (? IS NULL OR d.original_filename IN (SELECT value FROM json_each(?)))
+			   AND instr(lower(p.page_text), lower(?)) > 0`,
 		)
-		.all(
-			datasetId,
-			documentName.exact,
-			documentName.exact,
-			documentName.withExtension,
-			query,
-			query,
-			query,
-			query,
-		) as SqlRow[];
+		.all(datasetId, documentFilterJson, documentFilterJson ?? "[]", query) as SqlRow[];
 }
 
-function occurrenceCount(text: string, query: string): number {
-	const normalizedText = text.normalize("NFKC").toLocaleLowerCase("und");
-	const normalizedQuery = query.normalize("NFKC").toLocaleLowerCase("und");
-	let count = 0;
-	let offset = 0;
-	while (count < 10) {
-		const index = normalizedText.indexOf(normalizedQuery, offset);
-		if (index < 0) break;
-		count += 1;
-		offset = index + Math.max(1, normalizedQuery.length);
-	}
-	return count;
+function comparable(value: string): string {
+	return value.normalize("NFKC").toLocaleLowerCase("und");
 }
 
-function rowScore(row: SqlRow, query: string): number {
-	const pageText = textValue(row, "page_text") ?? "";
-	const pageHeader = textValue(row, "page_header") ?? "";
-	const filename = textValue(row, "original_filename") ?? "";
-	const title = textValue(row, "title") ?? "";
-	const lengthWeight = Math.max(1, Math.min(Array.from(query).length, 16));
-	return (
-		occurrenceCount(pageText, query) * lengthWeight +
-		occurrenceCount(pageHeader, query) * lengthWeight * 2 +
-		occurrenceCount(filename, query) * lengthWeight * 3 +
-		occurrenceCount(title, query) * lengthWeight * 3
-	);
+/** `firstMatchIndex` must be an offset into `text` itself, not into a folded or untrimmed copy. */
+function trimLine(text: string, firstMatchIndex: number): string {
+	if (text.length <= MAX_LINE_CHARS) return text;
+	const start = Math.max(0, Math.min(firstMatchIndex - Math.floor(MAX_LINE_CHARS / 3), text.length - MAX_LINE_CHARS));
+	const end = Math.min(text.length, start + MAX_LINE_CHARS);
+	return `${start > 0 ? "…" : ""}${text.slice(start, end)}${end < text.length ? "…" : ""}`;
 }
 
-function pageExcerpt(value: string, queries: readonly string[]): string {
-	const text = value.replace(/\r\n?/gu, "\n").trim();
-	if (text.length <= MAX_EXCERPT_CHARS) return text;
-	const lower = text.toLocaleLowerCase("und");
-	const positions = queries
-		.map((query) => lower.indexOf(query.toLocaleLowerCase("und")))
-		.filter((position) => position >= 0);
-	const match = positions.length > 0 ? Math.min(...positions) : 0;
-	const preferredStart = Math.max(0, match - Math.floor(MAX_EXCERPT_CHARS / 3));
-	const previousBoundary = Math.max(
-		text.lastIndexOf("\n", preferredStart),
-		text.lastIndexOf("。", preferredStart),
-		text.lastIndexOf("！", preferredStart),
-		text.lastIndexOf("？", preferredStart),
-	);
-	const start = previousBoundary >= 0 ? previousBoundary + 1 : preferredStart;
-	const preferredEnd = Math.min(text.length, start + MAX_EXCERPT_CHARS);
-	const nextBoundaries = ["\n", "。", "！", "？"]
-		.map((separator) => text.indexOf(separator, preferredEnd - 200))
-		.filter((position) => position >= preferredEnd - 200 && position <= preferredEnd + 200);
-	const end = nextBoundaries.length > 0 ? Math.min(...nextBoundaries) + 1 : preferredEnd;
-	return `${start > 0 ? "…" : ""}${text.slice(start, end).trim()}${end < text.length ? "…" : ""}`;
+/** A query paired with its case-folded form, normalized once per search instead of once per line. */
+interface Needle {
+	query: string;
+	folded: string;
+}
+
+/** Every line containing at least one query, in page order, like grep output. */
+function matchedLines(pageText: string, needles: readonly Needle[]): PePdfSearchLine[] {
+	const lines: PePdfSearchLine[] = [];
+	pageText.split(/\r?\n/u).forEach((rawLine, index) => {
+		// Trim first so the match offsets below index the same string trimLine slices.
+		const line = rawLine.trim();
+		const haystack = comparable(line);
+		const matched: string[] = [];
+		let firstIndex = Number.POSITIVE_INFINITY;
+		for (const needle of needles) {
+			const position = haystack.indexOf(needle.folded);
+			if (position < 0) continue;
+			matched.push(needle.query);
+			firstIndex = Math.min(firstIndex, position);
+		}
+		if (matched.length > 0) {
+			lines.push({ line_number: index + 1, text: trimLine(line, firstIndex), matched_queries: matched });
+		}
+	});
+	return lines;
+}
+
+/** Keep the lines that cover the most queries, then restore page order. */
+function selectLines(lines: PePdfSearchLine[], limit: number): PePdfSearchLine[] {
+	if (lines.length <= limit) return lines;
+	return [...lines]
+		.map((line, index) => ({ line, index }))
+		.sort(
+			(left, right) =>
+				right.line.matched_queries.length - left.line.matched_queries.length || left.index - right.index,
+		)
+		.slice(0, limit)
+		.sort((left, right) => left.index - right.index)
+		.map(({ line }) => line);
 }
 
 function jsonStringArray(value: string | undefined): string[] {
@@ -244,51 +248,48 @@ function jsonStringArray(value: string | undefined): string[] {
 	}
 }
 
-function searchHit(item: AccumulatedPage): PePdfSearchHit {
-	const pageId = textValue(item.row, "page_id") ?? "";
+function searchPage(candidate: CandidatePage, filename: string, maxLinesPerPage: number): PePdfSearchPage {
+	const pageId = textValue(candidate.row, "page_id") ?? "";
 	const evidenceId = `page:${pageId}`;
-	const filename = textValue(item.row, "original_filename") ?? "unknown.pdf";
-	const pageNumber = numberValue(item.row, "page_number") ?? 0;
-	const citationRow: SqlRow = {
-		original_filename: filename,
-		page_start: pageNumber,
-		page_end: pageNumber,
-	};
-	const title = textValue(item.row, "title");
+	const pageNumber = numberValue(candidate.row, "page_number") ?? 0;
+	const citationRow: SqlRow = { original_filename: filename, page_start: pageNumber, page_end: pageNumber };
 	return {
 		evidence_id: evidenceId,
-		doc_id: textValue(item.row, "doc_id") ?? "",
-		version_no: numberValue(item.row, "version_no") ?? 1,
-		filename,
-		...(title ? { title } : {}),
 		page_number: pageNumber,
-		page_role: textValue(item.row, "role") ?? "body",
-		text_quality: textValue(item.row, "text_quality") ?? "passed",
+		page_role: textValue(candidate.row, "role") ?? "body",
+		text_quality: textValue(candidate.row, "text_quality") ?? "passed",
+		page_header: textValue(candidate.row, "page_header") ?? "",
+		matched_queries: [...candidate.matchedQueries],
+		matched_line_count: candidate.lines.length,
+		lines: selectLines(candidate.lines, maxLinesPerPage),
 		citation: sourceCitation(citationRow),
 		markdown_citation: sourceMarkdownCitation(citationRow, evidenceId),
-		excerpt: pageExcerpt(textValue(item.row, "page_text") ?? "", [...item.matchedQueries]),
-		matched_queries: [...item.matchedQueries],
-		document_markdown_path: textValue(item.row, "document_markdown_path") ?? "",
-		page_image_paths: jsonStringArray(textValue(item.row, "image_paths_json")),
-		score: Math.round(item.score * 1_000) / 1_000,
+		page_image_paths: jsonStringArray(textValue(candidate.row, "image_paths_json")),
 	};
 }
 
 export function searchPePdfPages(cwd: string, options: PePdfSearchOptions, signal?: AbortSignal): PePdfSearchResult {
 	const queries = normalizeQueries(options.queries);
-	const topK = Math.max(1, Math.min(MAX_TOP_K, Math.trunc(options.topK ?? DEFAULT_TOP_K)));
-	const documentName = documentFilterName(options.documentName);
+	const roles = normalizeRoles(options.roles);
+	const includeDisclosure = Boolean(options.includeDisclosure) || (roles?.includes(DISCLOSURE_ROLE) ?? false);
+	const maxPages = Math.max(1, Math.min(MAX_MAX_PAGES, Math.trunc(options.maxPages ?? DEFAULT_MAX_PAGES)));
+	const maxLinesPerPage = Math.max(
+		1,
+		Math.min(MAX_MAX_LINES_PER_PAGE, Math.trunc(options.maxLinesPerPage ?? DEFAULT_MAX_LINES_PER_PAGE)),
+	);
+	const needles: Needle[] = queries.map((query) => ({ query, folded: comparable(query) }));
 	const connection = openPeDataset(cwd, options.datasetId);
 	try {
 		assertPageRetrievalSchema(connection.database);
-		const accumulated = new Map<string, AccumulatedPage>();
+		const documentName = documentFilter(connection.database, connection.datasetId, options.documentName);
+		const candidates = new Map<string, CandidatePage>();
 		for (const query of queries) {
 			signal?.throwIfAborted();
 			let rows: SqlRow[] = [];
 			try {
 				rows = ftsRows(connection.database, connection.datasetId, query, documentName);
 			} catch {
-				// Literal substring search below remains available when FTS rejects an unusual query.
+				// Substring recall below remains available when FTS rejects an unusual query.
 			}
 			const knownPageIds = new Set(rows.map((row) => textValue(row, "page_id")));
 			for (const row of substringRows(connection.database, connection.datasetId, query, documentName)) {
@@ -296,37 +297,86 @@ export function searchPePdfPages(cwd: string, options: PePdfSearchOptions, signa
 			}
 			for (const row of rows) {
 				const pageId = textValue(row, "page_id");
-				if (!pageId) continue;
-				const existing = accumulated.get(pageId) ?? { row, matchedQueries: new Set<string>(), score: 0 };
-				existing.matchedQueries.add(query);
-				existing.score += rowScore(row, query);
-				accumulated.set(pageId, existing);
+				if (!pageId || candidates.has(pageId)) continue;
+				// Line matching in JS is the source of truth; SQL recall only narrows the candidate set.
+				const lines = matchedLines(textValue(row, "page_text") ?? "", needles);
+				if (lines.length === 0) continue;
+				const matchedQueries = new Set<string>();
+				for (const line of lines) for (const matched of line.matched_queries) matchedQueries.add(matched);
+				candidates.set(pageId, { row, lines, matchedQueries });
 			}
 		}
-		const results = [...accumulated.values()]
-			.sort((left, right) => {
-				const queryDifference = right.matchedQueries.size - left.matchedQueries.size;
-				if (queryDifference !== 0) return queryDifference;
-				if (right.score !== left.score) return right.score - left.score;
-				const filenameDifference = (textValue(left.row, "original_filename") ?? "").localeCompare(
-					textValue(right.row, "original_filename") ?? "",
-				);
-				return (
-					filenameDifference ||
-					(numberValue(left.row, "page_number") ?? 0) - (numberValue(right.row, "page_number") ?? 0)
-				);
-			})
-			.slice(0, topK)
-			.map(searchHit);
+
+		const byDocument = new Map<string, CandidatePage[]>();
+		for (const candidate of candidates.values()) {
+			const role = textValue(candidate.row, "role") ?? "body";
+			if (roles && !roles.includes(role)) continue;
+			const docId = textValue(candidate.row, "doc_id") ?? "";
+			const group = byDocument.get(docId) ?? [];
+			group.push(candidate);
+			byDocument.set(docId, group);
+		}
+
+		const documents: PePdfSearchDocument[] = [];
+		let matchedPageCount = 0;
+		let shownPageCount = 0;
+		let truncated = false;
+		const orderedGroups = [...byDocument.values()].sort((left, right) => {
+			const difference = right.length - left.length;
+			if (difference !== 0) return difference;
+			return (textValue(left[0].row, "original_filename") ?? "").localeCompare(
+				textValue(right[0].row, "original_filename") ?? "",
+			);
+		});
+		for (const group of orderedGroups) {
+			group.sort(
+				(left, right) => (numberValue(left.row, "page_number") ?? 0) - (numberValue(right.row, "page_number") ?? 0),
+			);
+			const first = group[0].row;
+			const filename = textValue(first, "original_filename") ?? "unknown.pdf";
+			const title = textValue(first, "title");
+			const pages: PePdfSearchPage[] = [];
+			const folded: number[] = [];
+			for (const candidate of group) {
+				matchedPageCount += 1;
+				if (!includeDisclosure && textValue(candidate.row, "role") === DISCLOSURE_ROLE) {
+					folded.push(numberValue(candidate.row, "page_number") ?? 0);
+					continue;
+				}
+				if (shownPageCount >= maxPages) {
+					truncated = true;
+					continue;
+				}
+				pages.push(searchPage(candidate, filename, maxLinesPerPage));
+				shownPageCount += 1;
+			}
+			documents.push({
+				doc_id: textValue(first, "doc_id") ?? "",
+				version_no: numberValue(first, "version_no") ?? 1,
+				filename,
+				...(title ? { title } : {}),
+				page_count: numberValue(first, "page_count") ?? 0,
+				matched_page_count: group.length,
+				shown_page_count: pages.length,
+				pages,
+				folded_disclosure_pages: folded,
+				document_markdown_path: textValue(first, "document_markdown_path") ?? "",
+			});
+		}
+
 		return {
 			dataset_id: connection.datasetId,
 			queries,
 			...(options.documentName ? { document_name: options.documentName } : {}),
-			results,
-			result_count: results.length,
+			...(roles ? { roles } : {}),
+			documents,
+			matched_document_count: documents.length,
+			matched_page_count: matchedPageCount,
+			shown_page_count: shownPageCount,
+			truncated,
 			answer_contract:
-				"Treat excerpts as discovery context. Read decisive pages with pe_pdf_read before answering. Put the exact markdown_citation immediately after each material sourced claim and never expose a bare evidence_id.",
-			hint: "Search is literal and does not inject domain synonyms. Retry with shorter terms, abbreviations, English/Chinese variants, or a document_name filter when needed.",
+				"Matched lines are locators, not evidence. Read decisive pages with pe_pdf_read before answering. Put the exact markdown_citation immediately after each material sourced claim and never expose a bare evidence_id.",
+			hint: "Search is literal and case-insensitive over page text only; it does not inject domain synonyms and does not match file names, titles, or page headers, so find documents with pe_pdf_list instead. Every matched page is listed in document and page order without ranking. Disclosure pages are folded into folded_disclosure_pages unless include_disclosure is true or roles names them. When truncated is true, narrow with document_name or roles, or raise max_pages.",
 		};
 	} finally {
 		connection.database.close();
@@ -337,7 +387,7 @@ export const pePdfSearchTool = defineTool({
 	name: "pe_pdf_search",
 	label: "PE PDF Search",
 	description:
-		"Search complete PDF pages from current, active documents in the project. Supply one or more literal terms or phrases; use multiple variants when terminology is uncertain. Results include immutable doc_id and version, readable excerpts, source filenames, page numbers, page images, and clickable citations. Pass doc_id to pe_pdf_read before relying on decisive evidence.",
+		"Grep-style search over the page text of current, active PDFs in the project. Supply one to eight literal terms or phrases; use variants when terminology is uncertain. Returns every matched page grouped by document in page order, with the matched lines, page header (role and exhibit captions), immutable doc_id, page images, and clickable citations. Nothing is ranked. Filter by document_name or roles; disclosure pages are folded unless requested. Pass doc_id to pe_pdf_read before relying on decisive evidence.",
 	promptSnippet: PE_PDF_SEARCH_PROMPT_SNIPPET,
 	parameters: Type.Object({
 		queries: Type.Array(Type.String({ minLength: 1, maxLength: 300 }), {
@@ -348,16 +398,37 @@ export const pePdfSearchTool = defineTool({
 		}),
 		document_name: Type.Optional(
 			Type.String({
-				description: "Optional exact PDF filename or filename without .pdf.",
+				description: "Optional exact PDF filename or filename without .pdf, as shown by pe_pdf_list.",
 				minLength: 1,
 				maxLength: 500,
 			}),
 		),
+		roles: Type.Optional(
+			Type.Array(Type.String({ minLength: 1, maxLength: 40 }), {
+				description:
+					"Optional page roles to keep: cover, body, exhibit_chart, exhibit_image, table_heavy, rating_history, valuation_method, disclosure_boilerplate.",
+				maxItems: 8,
+			}),
+		),
+		include_disclosure: Type.Optional(
+			Type.Boolean({ description: "Show disclosure_boilerplate pages instead of folding them. Defaults to false." }),
+		),
+		max_pages: Type.Optional(
+			Type.Integer({
+				description: `Maximum pages to show across all documents. Defaults to ${DEFAULT_MAX_PAGES}; maximum ${MAX_MAX_PAGES}.`,
+				minimum: 1,
+				maximum: MAX_MAX_PAGES,
+			}),
+		),
+		max_lines_per_page: Type.Optional(
+			Type.Integer({
+				description: `Matched lines to show per page. Defaults to ${DEFAULT_MAX_LINES_PER_PAGE}; maximum ${MAX_MAX_LINES_PER_PAGE}.`,
+				minimum: 1,
+				maximum: MAX_MAX_LINES_PER_PAGE,
+			}),
+		),
 		dataset_id: Type.Optional(
 			Type.String({ description: "Optional dataset ID. It must match the dataset bound to the current workspace." }),
-		),
-		top_k: Type.Optional(
-			Type.Integer({ description: "Maximum matching pages. Defaults to 8; maximum 30.", minimum: 1, maximum: 30 }),
 		),
 	}),
 	async execute(_toolCallId, params, signal, _onUpdate, ctx) {
@@ -366,8 +437,11 @@ export const pePdfSearchTool = defineTool({
 			{
 				queries: params.queries,
 				documentName: params.document_name,
+				roles: params.roles,
+				includeDisclosure: params.include_disclosure,
+				maxPages: params.max_pages,
+				maxLinesPerPage: params.max_lines_per_page,
 				datasetId: params.dataset_id,
-				topK: params.top_k,
 			},
 			signal,
 		);

@@ -95,7 +95,7 @@ ${PE_PRESENTATION}
 Available tools:
 ${toolsList}
 
-PDF uploads are processed by the background PDF pipeline. Use pe_pdf_search to find evidence pages and pe_pdf_read to inspect exact pages; use native read on returned page-image paths when visual inspection is needed. Preserve their page: citations.
+PDF uploads are processed by the background PDF pipeline. Work like grep over a corpus: call pe_pdf_list first to see which PDFs exist and their metadata, then pe_pdf_search with literal terms to locate pages (results are unranked, in document and page order; retry with other wordings, narrow with document_name or roles when truncated), then pe_pdf_read to inspect the decisive pages and their neighbors. Use native read on returned page-image paths when a page is a chart, screenshot, or table, or when text_quality is needs_ocr. Read document_markdown_path with native read to go through a whole document. Preserve their page: citations.
 Excel uploads register immutable original versions and are prepared by the background Excel pipeline. Use pe_workbook_inspect to select one active workbook. Excel tools wait for preparation or rebuild a missing cache. Call pe_document_open for its readable_path and use native read/grep (or bash with rg) for fallback inspection. Never modify originals or the managed file catalog/cache.
 Excel source: links bind a document version to its worksheet and cell range independently of parser caches. Legacy cell: links remain resolvable; legacy fact: links retain their original document version. Copy exact citations from tool output. pe_source_detail resolves the same location used by the right-hand source preview; historical citations must never silently resolve to the latest version.
 
