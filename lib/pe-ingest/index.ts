@@ -148,7 +148,7 @@ export function queuePeIngest(options: QueuePeIngestOptions): PeIngestJob {
     for (const upload of uploads) {
       const validationError = validatePeResearchUpload(upload);
       if (validationError) throw new Error(validationError);
-      const filenameKey = upload.filename.toLocaleLowerCase("und");
+      const filenameKey = peDocumentFilenameKey(upload.filename);
       if (names.has(filenameKey)) throw new Error(`Duplicate document filename in upload: ${upload.filename}`);
       names.add(filenameKey);
       // Excel registration owns immutable versions and same-content reuse.

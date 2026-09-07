@@ -51,7 +51,8 @@ function assertSafeSegment(segment: string): void {
 }
 
 export function normalizePeDocumentFilename(value: string): string {
-  const filename = value.normalize("NFKC").trim();
+  // Compatibility normalization turns valid punctuation such as ： into a forbidden ASCII colon.
+  const filename = value.normalize("NFC").trim();
   const parsed = path.parse(filename);
   if (
     !filename
@@ -63,7 +64,7 @@ export function normalizePeDocumentFilename(value: string): string {
     || !parsed.name
     || WINDOWS_RESERVED_NAME.test(filename)
   ) {
-    throw new Error(`Invalid portable PDF filename: ${value || "(empty)"}`);
+    throw new Error(`Invalid portable document filename: ${value || "(empty)"}`);
   }
   if (![".pdf", ".xlsx", ".xlsm"].includes(path.extname(filename).toLocaleLowerCase())) {
     throw new Error(`Unsupported research file: ${filename}`);
@@ -78,7 +79,7 @@ export function normalizePePdfFilename(value: string): string {
 }
 
 export function peDocumentFilenameKey(filename: string): string {
-  return normalizePeDocumentFilename(filename).toLocaleLowerCase("und");
+  return normalizePeDocumentFilename(filename).normalize("NFKC").toLocaleLowerCase("und");
 }
 
 export function pePdfFilenameKey(filename: string): string {

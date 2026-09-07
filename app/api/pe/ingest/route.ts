@@ -26,7 +26,7 @@ function requestErrorStatus(message: string): number {
   if (/already running|已有.+任务正在运行/iu.test(message)) return 409;
   if (/already exists|selected twice|duplicate document filename/iu.test(message)) return 409;
   if (/Legacy .*Pipeline|Legacy documents table|schema version/iu.test(message)) return 409;
-  if (/required|not found|unsupported|invalid pdf|MIME|file name/iu.test(message)) return 400;
+  if (/required|not found|unsupported|invalid pdf|invalid portable document filename|MIME|file name/iu.test(message)) return 400;
   return 500;
 }
 
