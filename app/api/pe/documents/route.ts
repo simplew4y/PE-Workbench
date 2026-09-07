@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { listPeProjectDocuments } from "@/lib/pe-project-documents";
+import { peStorageErrorResponse } from "@/lib/pe-storage-errors";
 
 export const runtime = "nodejs";
 
@@ -11,6 +12,8 @@ export async function GET(request: NextRequest) {
   try {
     return NextResponse.json(listPeProjectDocuments(datasetId));
   } catch (error) {
+    const storageError = peStorageErrorResponse(error);
+    if (storageError) return storageError;
     const message = error instanceof Error ? error.message : String(error);
     const notFound = /Project not found/iu.test(message);
     console.error("Unable to list PE project documents:", error);

@@ -9,11 +9,11 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { allowFileRoot } from "./file-access";
-import { initializePeCollectionDatabase } from "./pe-ingest/schema";
+import { initializePeCollectionDatabase, rollbackPeTransaction } from "./pe-ingest/schema";
 import { disallowFileRoot } from "./allowed-roots";
 import { projectIdentityKey } from "./project-identity";
 import type {
@@ -131,10 +131,10 @@ function openRegistry(options: PeProjectStoreOptions = {}): DatabaseSync {
   const { registryPath } = storePaths(options);
   mkdirSync(dirname(registryPath), { recursive: true });
   const database = new DatabaseSync(registryPath, { timeout: 10_000 });
-  database.exec("PRAGMA busy_timeout=10000");
-  database.exec("PRAGMA foreign_keys=ON");
-  database.exec("PRAGMA journal_mode=WAL");
   try {
+    database.exec("PRAGMA busy_timeout=10000");
+    database.exec("PRAGMA foreign_keys=ON");
+    database.exec("PRAGMA journal_mode=WAL");
     database.exec("BEGIN IMMEDIATE");
     database.exec(REGISTRY_SCHEMA);
     const columns = database.prepare("PRAGMA table_info(datasets)").all();
@@ -158,7 +158,7 @@ function openRegistry(options: PeProjectStoreOptions = {}): DatabaseSync {
     return database;
   } catch (error) {
     try {
-      database.exec("ROLLBACK");
+      rollbackPeTransaction(database);
     } finally {
       database.close();
     }
@@ -418,11 +418,18 @@ export function deletePeProject(
     database.close();
   }
   if (!row) throw new Error(`Project not found: ${normalizedDatasetId}`);
+  // A relocated store can retain its old path through a parent symlink.
+  // Resolve only the parent so a redirected individual project is still rejected below.
+  const registeredParent = dirname(resolve(row.dataset_root));
+  const registeredRoot = join(
+    existsSync(registeredParent) ? realpathSync(registeredParent) : registeredParent,
+    basename(row.dataset_root),
+  );
   const legacyProjectRoot = join(projectsRoot, normalizedDatasetId);
-  const expectedProjectRoot = resolve(row.dataset_root) === legacyProjectRoot
+  const expectedProjectRoot = registeredRoot === legacyProjectRoot
     ? legacyProjectRoot
     : join(projectsRoot, normalizeProjectName(row.name));
-  if (resolve(row.dataset_root) !== expectedProjectRoot || dirname(expectedProjectRoot) !== projectsRoot) {
+  if (registeredRoot !== expectedProjectRoot || dirname(expectedProjectRoot) !== projectsRoot) {
     throw new Error("Registered project root is outside the PE projects directory");
   }
 

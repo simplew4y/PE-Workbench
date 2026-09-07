@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { queuePeDocumentRetry, queuePeExcelRetry } from "@/lib/pe-ingest";
 import { getPeProject, peProjectStorePaths } from "@/lib/pe-project-store";
 import { isApiRequestAllowed } from "@/lib/request-security";
+import { peStorageErrorResponse } from "@/lib/pe-storage-errors";
 
 export const runtime = "nodejs";
 
@@ -24,6 +25,8 @@ export async function POST(request: NextRequest) {
       : queuePeExcelRetry(project, registryPath, filename);
     return NextResponse.json({ job, project }, { status: 202 });
   } catch (error) {
+    const storageError = peStorageErrorResponse(error);
+    if (storageError) return storageError;
     const message = error instanceof Error ? error.message : String(error);
     const status = /not found|required/iu.test(message) ? 400 : /正在运行|already/iu.test(message) ? 409 : 500;
     return NextResponse.json({ error: message }, { status });

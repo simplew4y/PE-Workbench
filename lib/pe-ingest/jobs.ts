@@ -13,7 +13,7 @@ import { spawn } from "node:child_process";
 import type { PeIngestJob, PeIngestStatus } from "./contracts.ts";
 import type { PeProjectPaths } from "./paths.ts";
 import { savePeIngestJobToDatabase } from "./repository.ts";
-import { assertPeCollectionDataset, openPeCollectionDatabase } from "./schema.ts";
+import { assertPeCollectionDataset, openPeCollectionDatabase, rollbackPeTransaction } from "./schema.ts";
 
 export const PE_INGEST_ACTIVE_STATUSES = new Set<PeIngestStatus>(["queued", "running"]);
 export const PE_INGEST_SUCCESS_STATUSES = new Set<PeIngestStatus>([
@@ -178,7 +178,7 @@ function recoverOrphanedRegisteredDocuments(paths: PeProjectPaths, active: PeIng
       }
       database.exec("COMMIT");
     } catch (error) {
-      database.exec("ROLLBACK");
+      rollbackPeTransaction(database);
       throw error;
     }
   } finally {

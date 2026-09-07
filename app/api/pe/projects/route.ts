@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { peStorageErrorResponse } from "@/lib/pe-storage-errors";
 import {
   activatePeProject,
   createPeProject,
@@ -9,6 +10,8 @@ import {
 export const runtime = "nodejs";
 
 function projectErrorResponse(error: unknown): NextResponse {
+  const storageError = peStorageErrorResponse(error);
+  if (storageError) return storageError;
   const message = error instanceof Error ? error.message : String(error);
   return NextResponse.json(
     { error: message },
@@ -21,7 +24,7 @@ export async function GET() {
     const catalog = listPeProjects();
     return NextResponse.json(catalog);
   } catch (error) {
-    return NextResponse.json({ error: String(error) }, { status: 500 });
+    return peStorageErrorResponse(error) ?? NextResponse.json({ error: String(error) }, { status: 500 });
   }
 }
 
@@ -67,9 +70,6 @@ export async function DELETE(request: Request) {
     const catalog = deletePeProject(datasetId);
     return NextResponse.json(catalog);
   } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : String(error) },
-      { status: 400 },
-    );
+    return projectErrorResponse(error);
   }
 }

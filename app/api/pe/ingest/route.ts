@@ -9,6 +9,7 @@ import {
 } from "@/lib/pe-ingest";
 import { getPeProject, peProjectStorePaths } from "@/lib/pe-project-store";
 import { isApiRequestAllowed } from "@/lib/request-security";
+import { peStorageErrorResponse } from "@/lib/pe-storage-errors";
 
 export const runtime = "nodejs";
 
@@ -73,6 +74,8 @@ export async function POST(request: NextRequest) {
     });
     return NextResponse.json({ job, project }, { status: job.status === "completed" ? 200 : 202 });
   } catch (error) {
+    const storageError = peStorageErrorResponse(error);
+    if (storageError) return storageError;
     if (error instanceof RequestBodyTooLargeError) {
       return NextResponse.json({ error: "Document upload request is too large" }, { status: 413 });
     }

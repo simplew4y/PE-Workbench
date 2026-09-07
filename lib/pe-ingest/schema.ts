@@ -4,4 +4,5 @@ export {
   assertPeCollectionDataset,
   initializePeCollectionDatabase,
   openPeCollectionDatabase,
+  rollbackPeTransaction,
 } from "@earendil-works/pe-boot";

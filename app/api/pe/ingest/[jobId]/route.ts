@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { readPeIngestJob, resolvePeProjectPaths } from "@/lib/pe-ingest";
 import { getPeProject, peProjectStorePaths } from "@/lib/pe-project-store";
+import { peStorageErrorResponse } from "@/lib/pe-storage-errors";
 
 export async function GET(
   request: NextRequest,
@@ -14,6 +15,8 @@ export async function GET(
     const paths = resolvePeProjectPaths(project, peProjectStorePaths().registryPath);
     return NextResponse.json({ job: readPeIngestJob(paths, jobId) });
   } catch (error) {
+    const storageError = peStorageErrorResponse(error);
+    if (storageError) return storageError;
     const code = (error as NodeJS.ErrnoException).code;
     return NextResponse.json(
       { error: code === "ENOENT" ? "Ingest job not found" : error instanceof Error ? error.message : String(error) },
