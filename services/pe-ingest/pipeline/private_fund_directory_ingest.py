@@ -67,43 +67,23 @@ except ImportError:
     )
 
 try:
-    from .analysis_checklist import (  # type: ignore
-        active_checklist,
-        ensure_checklist_schema,
-        seed_universal_checklist,
-    )
+    from .analysis_checklist import ensure_checklist_schema  # type: ignore
     from .atomic_claims import (  # type: ignore
         ClaimChatClient,
-        claim_counts,
         ensure_claims_schema,
-        extract_claims_for_document,
+        scan_documents,
     )
-    from .issuer_identification import (  # type: ignore
-        STATUS_RESOLVED as ISSUER_RESOLVED,
-        ensure_issuer_schema,
-        identify_issuer,
-        published_date_from,
-        store_issuer,
-    )
+    from .consensus_cards import build_consensus_cards, ensure_cards_schema  # type: ignore
+    from .issuer_identification import ensure_issuer_schema  # type: ignore
 except ImportError:
-    from analysis_checklist import (  # type: ignore
-        active_checklist,
-        ensure_checklist_schema,
-        seed_universal_checklist,
-    )
+    from analysis_checklist import ensure_checklist_schema  # type: ignore
     from atomic_claims import (  # type: ignore
         ClaimChatClient,
-        claim_counts,
         ensure_claims_schema,
-        extract_claims_for_document,
+        scan_documents,
     )
-    from issuer_identification import (  # type: ignore
-        STATUS_RESOLVED as ISSUER_RESOLVED,
-        ensure_issuer_schema,
-        identify_issuer,
-        published_date_from,
-        store_issuer,
-    )
+    from consensus_cards import build_consensus_cards, ensure_cards_schema  # type: ignore
+    from issuer_identification import ensure_issuer_schema  # type: ignore
 
 CORE_EXTENSIONS = {".pdf", ".xlsx", ".xlsm"}
 SUPPORTED_EXTENSIONS = CORE_EXTENSIONS | set(ADAPTER_EXTENSIONS)
@@ -594,6 +574,7 @@ def ensure_collection_schema(
     ensure_checklist_schema(conn)
     ensure_issuer_schema(conn)
     ensure_claims_schema(conn)
+    ensure_cards_schema(conn)
     if initialize_current_data_version:
         # Omnigent records its product-wide migration version here. PE-Workbench
         # vendors the core ingestion schema without the Omnigent application,
@@ -2719,30 +2700,6 @@ def _sync_index_registry(conn: sqlite3.Connection, dataset_id: str, source_doc_i
     )
 
 
-def _document_head_text(conn: sqlite3.Connection, doc_id: str, max_chars: int = 12_000) -> str:
-    """Reassemble the opening of a document from its stored chunks.
-
-    Issuer detection needs the header, footer and disclaimer text, all of which
-    are already normalized in ``chunks``. Re-opening the source file would parse
-    the same bytes a second time for no additional signal.
-    """
-
-    parts: list[str] = []
-    total = 0
-    for row in conn.execute(
-        "SELECT content FROM chunks WHERE doc_id = ? ORDER BY chunk_index LIMIT 60",
-        (doc_id,),
-    ):
-        text = str(row["content"] or "")
-        if not text:
-            continue
-        parts.append(text)
-        total += len(text)
-        if total >= max_chars:
-            break
-    return "\n".join(parts)[:max_chars]
-
-
 def _extract_atomic_claims(
     conn: sqlite3.Connection,
     *,
@@ -2750,74 +2707,33 @@ def _extract_atomic_claims(
     doc_ids: list[str],
     company_name: str,
     llm_client: ClaimChatClient | None,
+    ingested_at: str = "",
 ) -> dict[str, Any]:
-    """Attribute each document to an institution and mine it for atomic claims.
+    """Read every newly indexed document once for issuer, date and atomic claims.
 
-    Runs after every document is chunked so a question discovered in the last
-    file still reaches the first one. Without a model the checklist is still
-    seeded, which keeps a later backfill a pure re-run rather than a migration.
+    Runs after all documents are chunked. Documents that already have a
+    completed scan for the current extractor version are skipped, so a
+    re-ingest of an unchanged project makes no model calls. Without a model
+    the checklist is still seeded and retired documents still retire their
+    claims, which keeps a later backfill a pure re-run rather than a migration.
     """
 
-    seed_universal_checklist(conn, dataset_id)
-    checklist = active_checklist(conn, dataset_id)
-    summary: dict[str, Any] = {
-        "status": "completed",
-        "documents": 0,
-        "claims": 0,
-        "issuer_needs_review": 0,
-        "unattributed_skipped": 0,
-        "checklist_items": len(checklist),
-        "errors": [],
-    }
-    if llm_client is None:
-        summary["status"] = "skipped_no_model"
-        return summary
-    if not checklist:
-        summary["status"] = "skipped_no_checklist"
-        return summary
-
-    for doc_id in doc_ids:
-        row = conn.execute(
-            "SELECT original_filename FROM documents WHERE doc_id = ?", (doc_id,)
-        ).fetchone()
-        filename = str(row["original_filename"]) if row is not None else ""
-        text = _document_head_text(conn, doc_id)
-        if not text:
-            continue
-
-        identification = identify_issuer(text=text, filename=filename, llm_client=llm_client)
-        store_issuer(
-            conn,
-            dataset_id=dataset_id,
-            doc_id=doc_id,
-            identification=identification,
-            published_date=published_date_from(text, filename),
+    summary = scan_documents(
+        conn,
+        dataset_id=dataset_id,
+        doc_ids=doc_ids,
+        llm_client=llm_client,
+        company_name=company_name,
+        ingested_at=ingested_at,
+    )
+    # Cards are derived from whatever claims exist, so they are rebuilt even
+    # when this ingest scanned nothing: a removed document changes the sample.
+    try:
+        summary["cards"] = build_consensus_cards(
+            conn, dataset_id, llm_client=llm_client, company_name=company_name
         )
-        if identification.status != ISSUER_RESOLVED:
-            summary["issuer_needs_review"] += 1
-        if not identification.issuer_key:
-            # A claim that cannot be attributed to an institution cannot enter
-            # consensus, so reading the document would spend model calls on an
-            # unusable result. No run is recorded, so resolving the issuer later
-            # leaves the document pending and it is picked up on the next pass.
-            summary["unattributed_skipped"] += 1
-            continue
-
-        claim_result = extract_claims_for_document(
-            conn,
-            dataset_id=dataset_id,
-            doc_id=doc_id,
-            llm_client=llm_client,
-            items=checklist,
-            company_name=company_name,
-        )
-        summary["documents"] += 1
-        summary["claims"] += len(claim_result.claims)
-        summary["errors"].extend(claim_result.errors[:3])
-
-    summary["quality"] = claim_counts(conn, dataset_id)
-    summary["errors"] = summary["errors"][:20]
-    conn.commit()
+    except Exception as exc:  # noqa: BLE001 - cards never fail the ingest
+        summary["cards"] = {"status": "failed", "message": str(exc)[:300]}
     return summary
 
 
@@ -3267,6 +3183,7 @@ def ingest_directory(
                     doc_ids=active_doc_ids,
                     company_name=company_name,
                     llm_client=claim_llm,
+                    ingested_at=started,
                 )
             except Exception as claim_exc:  # noqa: BLE001
                 # Claim extraction is additive analysis over an already-indexed

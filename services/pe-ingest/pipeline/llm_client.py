@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from typing import Any
 
 DEFAULT_MODEL = "private-fund-default"
-DEFAULT_TIMEOUT_SECONDS = 90.0
+DEFAULT_TIMEOUT_SECONDS = 600.0
 DEFAULT_MAX_ATTEMPTS = 3
 RETRYABLE_STATUS = frozenset({408, 409, 425, 429, 500, 502, 503, 504})
 
@@ -37,6 +37,9 @@ class LlmSettings:
     model: str = DEFAULT_MODEL
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
     max_attempts: int = DEFAULT_MAX_ATTEMPTS
+    # Vendor-specific request fields merged into every chat payload, e.g.
+    # {"enable_thinking": false} to turn off reasoning on DashScope Qwen models.
+    extra_body: tuple[tuple[str, Any], ...] = ()
 
     def chat_completions_url(self) -> str:
         return f"{self.base_url.rstrip('/')}/chat/completions"
@@ -68,6 +71,7 @@ class OpenAICompatibleChatClient:
             "model": self._settings.model,
             "messages": messages,
         }
+        payload.update(dict(self._settings.extra_body))
         if max_tokens is not None:
             payload["max_tokens"] = max_tokens
         if temperature is not None:
@@ -145,6 +149,20 @@ def _int_env(name: str, fallback: int) -> int:
     return value if value > 0 else fallback
 
 
+def _extra_body_env(name: str) -> tuple[tuple[str, Any], ...]:
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return ()
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        return ()
+    if not isinstance(value, dict):
+        return ()
+    # Never let the extra body override what the pipeline controls.
+    return tuple((k, v) for k, v in value.items() if k not in {"model", "messages", "max_tokens", "temperature"})
+
+
 def settings_from_env() -> LlmSettings | None:
     """Read model settings, or return ``None`` when the worker is unconfigured.
 
@@ -165,6 +183,7 @@ def settings_from_env() -> LlmSettings | None:
         model=(os.environ.get("PE_INGEST_LLM_MODEL") or "").strip() or DEFAULT_MODEL,
         timeout_seconds=_float_env("PE_INGEST_LLM_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS),
         max_attempts=_int_env("PE_INGEST_LLM_MAX_ATTEMPTS", DEFAULT_MAX_ATTEMPTS),
+        extra_body=_extra_body_env("PE_INGEST_LLM_EXTRA_BODY"),
     )
 
 
@@ -193,11 +212,24 @@ def extract_json_object(text: str) -> dict[str, Any]:
     if start < 0:
         raise ValueError("model reply contains no JSON object")
 
+    candidate = _balanced_object(cleaned, start)
+    try:
+        value = json.loads(candidate)
+    except json.JSONDecodeError:
+        # Models copying prose verbatim leave inner double quotes unescaped
+        # (核心"增长公式"). Repair those and try once more.
+        value = json.loads(_escape_inner_quotes(candidate))
+    if not isinstance(value, dict):
+        raise ValueError("model reply is not a JSON object")
+    return value
+
+
+def _balanced_object(text: str, start: int) -> str:
     depth = 0
     in_string = False
     escaped = False
-    for index in range(start, len(cleaned)):
-        char = cleaned[index]
+    for index in range(start, len(text)):
+        char = text[index]
         if in_string:
             if escaped:
                 escaped = False
@@ -213,11 +245,52 @@ def extract_json_object(text: str) -> dict[str, Any]:
         elif char == "}":
             depth -= 1
             if depth == 0:
-                value = json.loads(cleaned[start : index + 1])
-                if not isinstance(value, dict):
-                    raise ValueError("model reply is not a JSON object")
-                return value
-    raise ValueError("model reply contains an unterminated JSON object")
+                return text[start : index + 1]
+    # Unterminated: the repair pass may still recover it, so hand back the rest.
+    return text[start:]
+
+
+_STRING_END_FOLLOWERS = frozenset(",}]:")
+
+
+def _escape_inner_quotes(text: str) -> str:
+    """Escape double quotes that sit inside JSON string values.
+
+    A quote closes a string only when the next non-space character is a
+    structural one (comma, bracket, colon); any other quote inside a string
+    is content the model forgot to escape.
+    """
+
+    out: list[str] = []
+    in_string = False
+    escaped = False
+    length = len(text)
+    for index, char in enumerate(text):
+        if in_string:
+            if escaped:
+                escaped = False
+                out.append(char)
+                continue
+            if char == "\\":
+                escaped = True
+                out.append(char)
+                continue
+            if char == '"':
+                follower = index + 1
+                while follower < length and text[follower] in " \t\r\n":
+                    follower += 1
+                if follower >= length or text[follower] in _STRING_END_FOLLOWERS:
+                    in_string = False
+                    out.append(char)
+                else:
+                    out.append('\\"')
+                continue
+            out.append(char)
+            continue
+        if char == '"':
+            in_string = True
+        out.append(char)
+    return "".join(out)
 
 
 __all__ = [
