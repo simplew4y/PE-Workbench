@@ -6,9 +6,15 @@ import type { ExcelCellDetail } from "./excel-cells.ts";
 import { getPeExcelRange } from "./excel-range.ts";
 import { resolvePeValuationDate } from "./valuation-date.ts";
 import { locatePeValuationOutputs } from "./valuation-output.ts";
+import {
+	compactReportCitations,
+	reportText as markdownText,
+	reportMetricLabel,
+	valuationOverviewLayout,
+} from "./valuation-report-layout.ts";
 
 export const PE_VALUATION_REPORT_PROMPT_SNIPPET =
-	"Validate source-cell labels, periods and units, calculate financial comparisons, and render a valuation report with every located method and version-bound citations; never supply invented numeric values";
+	"Validate source cells and render a readable valuation report with forecast-year/method comparison tables, formula explanations and compact source links; provide checked operating drivers and qualitative analysis, never invented numeric values";
 
 export interface ReportFactRequest {
 	id: string;
@@ -48,6 +54,7 @@ interface ReportFact {
 	quantity: Quantity;
 	base_value: number;
 	text: string;
+	table_value: string;
 }
 
 export interface PeValuationReportResult {
@@ -86,10 +93,6 @@ function quantity(unit: string): Quantity | undefined {
 
 function formatNumber(value: number): string {
 	return new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
-}
-
-function markdownText(value: string): string {
-	return value.replace(/[\\`*_[\]<>|#]/gu, "\\$&").replace(/\r?\n/gu, " ");
 }
 
 function periodOrder(period: string): { year: number; grain: string } | undefined {
@@ -186,8 +189,16 @@ export function buildPeValuationReport(cwd: string, options: PeValuationReportOp
 			(sourceQuantity.dimension === "ratio" && !percentIsFraction ? 100 : 1);
 		const displayValue = sourceQuantity.dimension === "ratio" ? baseValue * 100 : baseValue / displayQuantity.scale;
 		const origin = cell.is_formula ? "模型保存值" : "模型填写值";
-		const text = `${cell.period ? `${markdownText(cell.period)} · ` : ""}${markdownText(cell.row_label ?? location)}：${formatNumber(displayValue)} ${displayQuantity.label}（${origin}）。${cell.markdown_citation}`;
-		facts.set(request.id, { id: request.id, cell, quantity: sourceQuantity, base_value: baseValue, text });
+		const tableValue = `${formatNumber(displayValue)} ${displayQuantity.label}（${origin}）。${cell.markdown_citation}`;
+		const text = `${cell.period ? `${markdownText(cell.period)} · ` : ""}${markdownText(reportMetricLabel(cell.row_label ?? location))}：${tableValue}`;
+		facts.set(request.id, {
+			id: request.id,
+			cell,
+			quantity: sourceQuantity,
+			base_value: baseValue,
+			text,
+			table_value: tableValue,
+		});
 		statements.set(request.id, text);
 		result.facts.push({ id: request.id, cell, text });
 	}
@@ -301,50 +312,27 @@ export function buildPeValuationReport(cwd: string, options: PeValuationReportOp
 	}
 
 	const lines: string[] = [];
+	const notes: string[] = [];
+	const appendix: string[] = [];
 	if (options.scope === "overview") {
 		if (!inventory.output_inventory_complete)
 			issues.push(
 				"Valuation output inventory is truncated; inspect individual methods before producing an overview",
 			);
-		lines.push(
-			"## 模型估值结果",
-			"",
-			"以下为模型填写值或文件保存的公式结果，未刷新行情、未重算整个工作簿。年份、单位与输出角色包含规则推断；覆盖范围是本次定位到的候选结果，不代表整个模型已完成审计。",
-			"",
-		);
-		let outputCount = 0;
-		for (const group of inventory.output_groups) {
-			const outputs = group.outputs.filter((output) =>
-				["target_price", "per_share_value", "dcf_value", "sotp_value"].includes(output.semantic_role),
-			);
-			if (!outputs.length) continue;
-			lines.push(`### ${markdownText(group.sheet_name)}（${group.method}）`, "");
-			for (const output of outputs) {
-				outputCount++;
-				const value =
-					output.numeric_value !== undefined &&
-					Number.isFinite(output.numeric_value) &&
-					(!output.formula || output.formula_cache_status === "present")
-						? formatNumber(output.numeric_value)
-						: "无法读取可靠缓存";
-				lines.push(
-					`- ${markdownText(output.label)}：${value} ${markdownText(output.unit === "per_share" ? "每股金额（币种未确认）" : (output.unit ?? "单位尚未确认"))}。${output.score < 0.62 ? "该候选的角色证据较弱，需核对。" : ""}${output.markdown_citations.join(" ")}`,
-				);
-			}
-			if (group.relationships.some((relationship) => relationship.kind === "rounding_consistent"))
-				lines.push("- 本组包含取整一致的结果；原始值与取整值分别保留。");
-			lines.push("");
-		}
-		if (!outputCount) issues.push("No sufficiently supported valuation output is available for an overview");
-		lines.push("### 参考价格与用途", "");
-		for (const price of inventory.cross_check_nodes.filter((node) => node.role === "current_price")) {
+		const overview = valuationOverviewLayout(cwd, inventory);
+		lines.push(...overview.lines);
+		appendix.push(...overview.appendix);
+		if (!overview.outputCount) issues.push("No sufficiently supported valuation output is available for an overview");
+		const prices = inventory.cross_check_nodes.filter((node) => node.role === "current_price");
+		if (prices.length) lines.push("### 模型参考价格", "");
+		for (const price of prices) {
 			if (price.numeric_value === undefined || !Number.isFinite(price.numeric_value)) continue;
-			const uses = price.uses
-				.slice(0, 3)
-				.map((use) => `${use.sheet_name}!${use.cell_ref}`)
-				.join("、");
+			const value =
+				price.formula && price.formula_cache_status !== "present"
+					? "缓存不可用"
+					: formatNumber(price.numeric_value);
 			lines.push(
-				`- ${markdownText(price.sheet_name)}!${price.cell_ref}：${formatNumber(price.numeric_value)}（${price.price_kind === "cached_external" ? "外部函数保存值" : "模型参考值"}，币种按原表核对，取价时间未确认${uses ? `；被 ${markdownText(uses)} 引用` : "；用途未定位"}）。${price.markdown_citation}`,
+				`- ${markdownText(price.sheet_name)}!${price.cell_ref}：${value}（${price.price_kind === "cached_external" ? "外部函数保存值" : "模型参考值"}，币种以原表为准，取价时间未确认）。${price.markdown_citation}`,
 			);
 		}
 		const date = resolvePeValuationDate(cwd, {
@@ -357,18 +345,15 @@ export function buildPeValuationReport(cwd: string, options: PeValuationReportOp
 			.map((candidate) => candidate.markdown_citation)
 			.filter(Boolean)
 			.join(" ");
-		lines.push(
-			"",
-			inventory.status === "selected"
-				? "主输出由定位规则选出；各方法之间的权重及投资判断仍需模型依据。"
-				: "主输出尚有歧义，以上分别保留各方法结果。",
-			"",
-			"### 日期口径",
+		lines.push("");
+		notes.push(
+			"## 口径与限制",
 			"",
 			date.valuation_date
-				? `日期解析结果：${date.valuation_date}（状态：${date.status}；来源角色：${date.selected_role ?? "未确定"}）。${dateCitations}`
-				: `估值日期尚未确认（${date.status}）。`,
+				? `${date.status === "verified" ? "估值日期" : "日期参考（尚未确认为估值日）"}：${date.valuation_date}。${dateCitations}`
+				: "估值日期尚未确认。",
 			"文件保存时间、行情取价时间、预测年度和估值日期是不同口径，不能互相替代。",
+			"数值来自模型填写值或文件保存的公式结果，未刷新行情、未重算整个工作簿。期间、单位和方法按已读取的表头及标签识别；未确认的项目已在表中标出。",
 			"",
 		);
 	}
@@ -400,7 +385,21 @@ export function buildPeValuationReport(cwd: string, options: PeValuationReportOp
 			);
 			continue;
 		}
+		if (!section.fact_ids.length && !section.analysis?.trim()) continue;
 		lines.push(`## ${markdownText(section.title)}`, "");
+		const sectionFacts = section.fact_ids.filter((id) => facts.has(id) && !usedStatements.has(id));
+		if (sectionFacts.length > 1) {
+			lines.push("| 指标 | 期间 | 模型数值 |", "| --- | --- | ---: |");
+			for (const id of sectionFacts) {
+				const fact = facts.get(id);
+				if (!fact || usedStatements.has(id)) continue;
+				lines.push(
+					`| ${markdownText(reportMetricLabel(fact.cell.row_label ?? fact.cell.cell_ref))} | ${markdownText(fact.cell.period ?? "未标期间")} | ${fact.table_value} |`,
+				);
+				usedStatements.add(id);
+			}
+			lines.push("");
+		}
 		for (const id of section.fact_ids) {
 			const text = statements.get(id);
 			if (!text) {
@@ -418,7 +417,7 @@ export function buildPeValuationReport(cwd: string, options: PeValuationReportOp
 		issues.push("A focused report must include at least one checked fact or calculation");
 	if (!issues.length) {
 		result.status = "ready";
-		result.rendered_report = lines.join("\n").trim();
+		result.rendered_report = compactReportCitations([...lines, ...notes, ...appendix].join("\n").trim());
 	}
 	return result;
 }
@@ -428,7 +427,7 @@ export const peValuationReportTool = defineTool({
 	label: "PE Valuation Report",
 	promptSnippet: PE_VALUATION_REPORT_PROMPT_SNIPPET,
 	description:
-		"Build the final valuation report from exact source cells. Numeric statements, conversions and financial trends are rendered by code. An overview automatically covers located valuation methods and price inputs. Use neutral headings; qualitative analyst inference must reference checked facts and may not introduce numbers, financial trends or citations. Unspecified share-count scale is disclosed without conversion. A blocked result must be corrected before finalizing; return rendered_report verbatim.",
+		"Build the final valuation report from exact source cells. Numeric statements, conversions and financial trends are rendered by code. An overview groups results by source method and forecast period, explains supported formulas, and places historical periods in an appendix. Source links remain clickable with compact labels. Provide sections covering the key operating drivers and model assumptions with qualitative interpretation, not just a parameter list. Use neutral headings; qualitative analyst inference must reference checked facts and may not introduce numbers, financial trends or citations. Unspecified share-count scale is disclosed without conversion. A blocked result must be corrected before finalizing; return rendered_report verbatim.",
 	parameters: Type.Object({
 		doc_id: Type.String({ minLength: 1 }),
 		dataset_id: Type.Optional(Type.String()),
