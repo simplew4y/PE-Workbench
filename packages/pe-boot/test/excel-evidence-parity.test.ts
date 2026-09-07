@@ -18,7 +18,7 @@ import { savePeResearchNote } from "../src/tools/research-note-storage.ts";
 import { resolvePeValuationDate } from "../src/tools/valuation-date.ts";
 import { locatePeValuationOutputs } from "../src/tools/valuation-output.ts";
 import { inspectPeWorkbooks } from "../src/tools/workbook-inspect.ts";
-import { financialParitySnapshot } from "./financial-parity-support.ts";
+import { financialParitySnapshot, withoutInferredFinancialContext } from "./financial-parity-support.ts";
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
 const directories: string[] = [];
@@ -67,7 +67,38 @@ afterEach(() => {
 });
 
 describe("Excel parity and immutable evidence on the shared PDF schema", () => {
-	it("matches every parser field and six main tool outputs on a real OOXML workbook", async () => {
+	it("excludes only inferred context while detecting changes to original evidence", () => {
+		const cell = {
+			cell_ref: "B7",
+			raw_value: "=B5/10",
+			formula: "=B5/10",
+			cached_value: "120",
+			numeric_value: 120,
+			number_format: '"CNY/share" 0.00',
+			evidence_id: "source:original",
+			row_label: "Target Price",
+			period: "2026",
+			unit: "per_share",
+		};
+		const corrected = { ...cell, period: "", unit: "CNY/share", unit_context: { status: "inferred" } };
+		expect(withoutInferredFinancialContext(corrected)).toEqual(withoutInferredFinancialContext(cell));
+		for (const [field, value] of Object.entries({
+			cell_ref: "B8",
+			raw_value: "=B5/100",
+			formula: "=B5/100",
+			cached_value: "12",
+			numeric_value: 12,
+			number_format: "0.0%",
+			evidence_id: "source:different",
+			row_label: "Current Price",
+		})) {
+			expect(withoutInferredFinancialContext({ ...corrected, [field]: value }), field).not.toEqual(
+				withoutInferredFinancialContext(cell),
+			);
+		}
+	});
+
+	it("preserves original values, formulas and evidence while inferred annotations evolve", async () => {
 		const root = project();
 		const docId = register(root);
 		const prepared = await preparePeDocument(root, { docId });
@@ -108,8 +139,79 @@ describe("Excel parity and immutable evidence on the shared PDF schema", () => {
 		}
 		const actual = financialParitySnapshot(root, docId, tools, prepared.readablePath, expectedWarnings);
 		// Generated with original parser AND original tools at a2870ae2902e1cc52343b9e94e227601839f7fa6.
-		const expected: unknown = JSON.parse(readFileSync(join(fixtures, "excel-parity-main.json"), "utf8"));
-		expect(JSON.parse(JSON.stringify(actual))).toEqual(expected);
+		const expected = JSON.parse(readFileSync(join(fixtures, "excel-parity-main.json"), "utf8")) as {
+			readable_sha256: string;
+			tables: Record<string, { count: number; sha256: string }>;
+			inspect: unknown;
+			ranges: unknown[];
+			outputs: { candidates: Record<string, unknown>[]; cross_check_nodes: Record<string, unknown>[] };
+			traces: { root: { sheet_name: string; cell_ref: string } }[];
+			dates: { output_context: { sheet_name: string; cell_ref: string; valuation_output_candidate_id: string } }[];
+		};
+		// This digest covers every original cell's raw value, cache, formula,
+		// location and citation. Never regenerate it for a semantic parser change.
+		expect(actual.readable_sha256).toBe(expected.readable_sha256);
+		const tables = actual.tables as Record<string, { count: number; sha256: string }>;
+		for (const table of [
+			"excel_sheets",
+			"excel_regions",
+			"excel_defined_names",
+			"excel_formula_references",
+			"valuation_date_candidates",
+		]) {
+			expect(tables[table], table).toEqual(expected.tables[table]);
+		}
+		expect(tables.excel_workbooks.count).toBe(expected.tables.excel_workbooks.count);
+		expect(tables.excel_cells.count).toBe(expected.tables.excel_cells.count);
+		// The old excel_cells/metric_facts hashes embed the incorrect inferred
+		// periods and units. Compare all source fields rather than blessing those
+		// errors or replacing the large historical snapshot.
+		expect(withoutInferredFinancialContext(actual.ranges)).toEqual(withoutInferredFinancialContext(expected.ranges));
+		expect(withoutInferredFinancialContext(actual.inspect)).toEqual(
+			withoutInferredFinancialContext(expected.inspect),
+		);
+		const outputs = locatePeValuationOutputs(root, { docId });
+		for (const candidate of expected.outputs.candidates) {
+			const current = outputs.candidates.find(
+				(item) => item.sheet_name === candidate.sheet_name && item.cell_ref === candidate.cell_ref,
+			);
+			expect(current, `${candidate.sheet_name}!${candidate.cell_ref}`).toBeDefined();
+			if (!current) throw new Error("Missing original output candidate");
+			for (const field of [
+				"candidate_id",
+				"sheet_name",
+				"cell_ref",
+				"display_value",
+				"numeric_value",
+				"formula",
+				"cached_value",
+				"formula_cache_status",
+				"number_format",
+				"evidence_ids",
+				"citations",
+				"markdown_citations",
+			]) {
+				expect(current[field as keyof typeof current], field).toEqual(candidate[field]);
+			}
+		}
+		for (const node of expected.outputs.cross_check_nodes) {
+			expect(outputs.cross_check_nodes).toEqual(expect.arrayContaining([expect.objectContaining(node)]));
+		}
+		// Trace and date evidence are checked against explicit historical roots;
+		// a broader output inventory is allowed to change which root ranks first.
+		const traces = expected.traces.map(({ root: node }) =>
+			tools.tracePeFormula(root, { docId, sheetName: node.sheet_name, cellRef: node.cell_ref }),
+		);
+		expect(withoutInferredFinancialContext(traces)).toEqual(withoutInferredFinancialContext(expected.traces));
+		const dates = expected.dates.map(({ output_context: context }) =>
+			tools.resolvePeValuationDate(root, {
+				docId,
+				outputSheet: context.sheet_name,
+				outputCellRef: context.cell_ref,
+				outputCandidateId: context.valuation_output_candidate_id,
+			}),
+		);
+		expect(withoutInferredFinancialContext(dates)).toEqual(withoutInferredFinancialContext(expected.dates));
 	}, 30_000);
 
 	it("resolves blank ranges, old versions and legacy cells after every disposable cache is removed", async () => {

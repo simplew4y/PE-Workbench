@@ -18,6 +18,32 @@ export interface FinancialTools {
 	inspectPeWorkbooks: typeof inspectPeWorkbooks;
 }
 
+/**
+ * These are inferred annotations, not OOXML evidence. Their meaning changed in
+ * the context-parser fix and is covered by synthetic context/locator regressions.
+ * Keep every other field, including values, formulas, formats and source IDs.
+ */
+export function withoutInferredFinancialContext(value: unknown): unknown {
+	if (Array.isArray(value)) return value.map(withoutInferredFinancialContext);
+	if (typeof value !== "object" || value === null) return value;
+	const inferred = new Set([
+		"period",
+		"unit",
+		"col_label",
+		"period_context",
+		"unit_context",
+		"verification_status",
+		"fact_quality_status_counts",
+		"metric_quality_status_counts",
+		"answer_contract",
+	]);
+	return Object.fromEntries(
+		Object.entries(value)
+			.filter(([key]) => !inferred.has(key))
+			.map(([key, child]) => [key, withoutInferredFinancialContext(child)]),
+	);
+}
+
 /** Compare observable tool contracts and every persisted parser field, not only counts. */
 export function financialParitySnapshot(
 	cwd: string,

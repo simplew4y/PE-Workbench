@@ -1,6 +1,7 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { registerValuationReportGuard } from "../valuation-report-guard.ts";
 import { peDatasetMemoTool } from "./dataset-memo.ts";
 import { peDatasetSearchTool } from "./dataset-search.ts";
 import { peDocumentOpenTool } from "./document-open.ts";
@@ -16,6 +17,7 @@ import { peResearchNoteSaveTool } from "./research-note-save.ts";
 import { PE_SOURCE_DETAIL_PROMPT_SNIPPET, peSourceDetailTool } from "./source-detail.ts";
 import { PE_VALUATION_DATE_PROMPT_SNIPPET, peValuationDateTool } from "./valuation-date.ts";
 import { PE_VALUATION_OUTPUT_PROMPT_SNIPPET, peValuationOutputTool } from "./valuation-output.ts";
+import { PE_VALUATION_REPORT_PROMPT_SNIPPET, peValuationReportTool } from "./valuation-report.ts";
 import { PE_WORKBOOK_INSPECT_PROMPT_SNIPPET, peWorkbookInspectTool } from "./workbook-inspect.ts";
 
 const toolsDirectory = dirname(fileURLToPath(import.meta.url));
@@ -39,6 +41,7 @@ export const PE_TOOL_PROMPT_SNIPPETS = [
 	{ name: "pe_valuation_output_locate", description: PE_VALUATION_OUTPUT_PROMPT_SNIPPET },
 	{ name: "pe_valuation_date_resolve", description: PE_VALUATION_DATE_PROMPT_SNIPPET },
 	{ name: "pe_model_validate", description: PE_MODEL_VALIDATE_PROMPT_SNIPPET },
+	{ name: "pe_valuation_report", description: PE_VALUATION_REPORT_PROMPT_SNIPPET },
 	{ name: "pe_render_ui", description: PE_RENDER_UI_PROMPT_SNIPPET },
 ] as const;
 
@@ -57,6 +60,8 @@ export function registerPeTools(pi: ExtensionAPI): void {
 	pi.registerTool(peValuationOutputTool);
 	pi.registerTool(peValuationDateTool);
 	pi.registerTool(peModelValidateTool);
+	pi.registerTool(peValuationReportTool);
+	registerValuationReportGuard(pi);
 	pi.registerTool(peDatasetMemoTool);
 	pi.registerTool(peHistoryCompareTool);
 	pi.registerTool(peResearchNoteSaveTool);
@@ -82,5 +87,6 @@ export {
 	peModelValidateTool,
 	peValuationDateTool,
 	peValuationOutputTool,
+	peValuationReportTool,
 	peWorkbookInspectTool,
 };

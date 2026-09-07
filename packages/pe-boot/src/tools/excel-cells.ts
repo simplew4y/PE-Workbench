@@ -31,7 +31,16 @@ export interface ExcelCellDetail {
 	unit?: string;
 	formula_type?: string;
 	formula_cache_status?: string;
+	period_context?: ExcelSemanticContext;
+	unit_context?: ExcelSemanticContext;
 	is_formula: boolean;
+}
+
+export interface ExcelSemanticContext {
+	status: "inferred" | "missing" | "ambiguous";
+	method: string;
+	sources: Array<{ cell_ref: string; text: string }>;
+	reason?: string;
 }
 
 export type ExcelRangeBounds = ExcelBounds;
@@ -69,6 +78,38 @@ export function excelCellDetail(row: SqlRow): ExcelCellDetail {
 	}
 	const numericValue = numberValue(row, "numeric_value");
 	if (numericValue !== undefined) cell.numeric_value = numericValue;
+	const metadataText = textValue(row, "metadata_json");
+	if (metadataText) {
+		try {
+			const metadata = JSON.parse(metadataText) as Record<string, unknown>;
+			for (const key of ["period_context", "unit_context"] as const) {
+				const value = metadata[key];
+				if (!value || typeof value !== "object") continue;
+				const context = value as Record<string, unknown>;
+				if (
+					!["inferred", "missing", "ambiguous"].includes(String(context.status)) ||
+					typeof context.method !== "string" ||
+					!Array.isArray(context.sources)
+				)
+					continue;
+				const sources = context.sources.filter(
+					(source): source is { cell_ref: string; text: string } =>
+						!!source &&
+						typeof source === "object" &&
+						typeof source.cell_ref === "string" &&
+						typeof source.text === "string",
+				);
+				cell[key] = {
+					status: context.status as ExcelSemanticContext["status"],
+					method: context.method,
+					sources,
+					...(typeof context.reason === "string" ? { reason: context.reason } : {}),
+				};
+			}
+		} catch {
+			// A malformed legacy context must not turn a heuristic into verified evidence.
+		}
+	}
 	return cell;
 }
 

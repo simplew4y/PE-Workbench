@@ -166,69 +166,88 @@ def _period_from_label(label: str) -> str:
     # substring after the decimal point.  Treat only standalone period tokens
     # as years; otherwise long statement rows inherit fictitious periods.
     patterns = [
-        r"(?<![\d.])([1-4]Q\s*20\d{2})(?![\d.])",
-        r"(?<![\d.])(20\d{2}\s*[1-4]Q)(?![\d.])",
-        r"(?<![\d.])(Q[1-4]\s*[-/. ]?\s*20\d{2})(?![\d.])",
+        r"(?<![\d.])([1-4]Q\s*(?:19|20)\d{2})(?![\d.])",
+        r"(?<![\d.])((?:19|20)\d{2}\s*[1-4]Q)(?![\d.])",
+        r"(?<![\d.])(Q[1-4]\s*[-/. ]?\s*(?:19|20)\d{2})(?![\d.])",
         r"(?<![\d.])(Q[1-4]\s*[-/. ]?\s*\d{2})(?![\d.])",
-        r"(?<![\d.])(FY\s*20\d{2})(?![\d.])",
+        r"(?<![\d.])(FY\s*(?:19|20)\d{2}\s*[EAF]?)(?![\d.])",
         r"(?<![\d.])([1-4]Q\s*\d{2})(?![\d.])",
-        r"(?<![\d.])(FY\s*\d{2})(?![\d.])",
-        r"(?<![\d.])(20\d{2}\s*[EQAF]?)(?![\d.])",
+        r"(?<![\d.])(FY\s*\d{2}\s*[EAF]?)(?![\d.])",
+        r"(?<![\d.])((?:19|20)\d{2}\s*[EQAF]?)(?![\d.])",
     ]
     for pattern in patterns:
         match = re.search(pattern, label, flags=re.IGNORECASE)
         if match:
             period = normalize_text(match.group(1))
-            year_match = re.search(r"(?<!\d)(20\d{2}|\d{2})(?!\d)", period)
+            year_match = re.search(r"(?<!\d)((?:19|20)\d{2}|\d{2})(?!\d)", period)
             if year_match:
                 year = int(year_match.group(1))
                 if year < 100:
                     year = 1900 + year if year >= 70 else 2000 + year
-                if not 1990 <= year <= 2050:
+                if not 1900 <= year <= 2099:
                     continue
             return period
     return ""
 
 
 def _looks_like_period_label(label: str) -> bool:
-    return bool(_period_from_label(label))
+    period = _period_from_label(label)
+    return bool(period and normalize_text(label).casefold() == period.casefold())
 
 
 def _unit_from_text(text: str) -> str:
     text = normalize_text(text)
     if "%" in text:
         return "%"
-    for unit in (
-        "CNYm",
-        "RMBm",
-        "USDm",
-        "GWh",
-        "MWh",
-        "Wh",
-        "MW",
-        "GW",
-        "元/Wh",
-    ):
-        if unit.lower() in text.lower():
-            return unit
     compact = re.sub(r"\s+", "", text).lower()
-    share_units = (
-        (("港元/股", "hkd/share"), "HKD/share"),
-        (("美元/股", "usd/share"), "USD/share"),
-        (("人民币/股", "cny/share"), "CNY/share"),
-        (("元/股",), "CNY/share"),
-        (("rmb/share",), "RMB/share"),
+    currencies = (
+        (r"€|欧元|(?<![a-z])eur(?:o(?:s)?)?(?=$|[^a-z]|m(?:n|illion)?\b)", "EUR"),
+        (r"港元|港币|(?<![a-z])hkd(?=$|[^a-z]|m(?:n|illion)?\b)", "HKD"),
+        (r"美元|(?<![a-z])usd(?=$|[^a-z]|m(?:n|illion)?\b)", "USD"),
+        (r"人民币|(?<![a-z])cny(?=$|[^a-z]|m(?:n|illion)?\b)", "CNY"),
+        (r"(?<![a-z])rmb(?=$|[^a-z]|m(?:n|illion)?\b)", "RMB"),
+        (r"英镑|£|(?<![a-z])gbp(?=$|[^a-z]|m(?:n|illion)?\b)", "GBP"),
     )
-    for markers, unit in share_units:
-        if any(marker in compact for marker in markers):
+    currency = next((code for pattern, code in currencies if re.search(pattern, text, re.IGNORECASE)), "")
+    per_share = bool(
+        re.search(r"(?:/|per)shares?\b", compact) or "/股" in compact or "每股" in compact
+        or re.search(r"\bEPS\b|\b(?:target|share|current)\s+price\b|\bimplied\s+TP\b|目标价|股价", text, re.IGNORECASE)
+    )
+    if per_share:
+        if not currency and "元/股" in compact:
+            currency = "CNY"
+        return f"{currency}/share" if currency else "per_share"
+    share_count = bool(re.search(r"\bshares?\b|股数|股份数", text, re.IGNORECASE)) and not bool(
+        re.search(r"\bshare\s+(?:capital|premium|payment|buyback)\b|\bvalue\s+of\s+shares\b", text, re.IGNORECASE)
+    )
+    if share_count:
+        if re.search(r"\b(?:million|mn)\b|\(m\)|百万|(?<![a-z])m\s*shares", text, re.IGNORECASE):
+            return "shares_m"
+        if re.search(r"\b(?:individual|actual)\s+shares?\b|\bin\s+shares\b|\((?:shares?|units?)\)|[（(]股[）)]", text, re.IGNORECASE):
+            return "shares"
+        return "share_count_unspecified_scale"
+    if currency:
+        if re.search(r"\b(?:million|mn)\b|百万|(?:eur|euro|usd|cny|rmb|hkd|gbp|€|£)\s*m(?:n)?\b|\(m\)", text, re.IGNORECASE):
+            return currency + "m"
+        return currency
+    for unit in ("元/Wh", "GWh", "MWh", "Wh", "MW", "GW"):
+        if re.search(r"(?<![a-z])" + re.escape(unit) + r"(?![a-z])", text, re.IGNORECASE):
             return unit
-    if re.search(r"(?:/|per)share\b", compact) or "/股" in compact or "每股" in compact:
-        return "per_share"
+    if re.search(r"\bmultiple\b|\b[pe]/[eb]\b|\b[ep]v/\w+|倍数|^x$|\(x\)", text, re.IGNORECASE):
+        return "x"
     return ""
 
 
 def _unit_from_number_format(number_format: str) -> str:
-    return "%" if "%" in str(number_format or "") else ""
+    text = str(number_format or "")
+    if "%" in text and r"\%" not in text:
+        return "%"
+    # Currency symbols and quoted ISO codes are unit evidence; display-only
+    # comma scaling is intentionally not used to change the stored value.
+    unit = _unit_from_text(text)
+    if unit == "share_count_unspecified_scale" and re.search(r'"shares?"', text, re.IGNORECASE):
+        return "shares"
+    return unit
 
 
 def _sheet_role(sheet_name: str, sample_text: str) -> str:
@@ -414,6 +433,163 @@ def _sample_labels(cells: dict[tuple[int, int], Any], max_items: int = DEFAULT_M
     return labels
 
 
+def _context(status: str, method: str, sources: list[dict[str, str]], reason: str = "") -> dict[str, Any]:
+    result: dict[str, Any] = {"status": status, "method": method, "sources": sources}
+    if reason:
+        result["reason"] = reason
+    return result
+
+
+def _is_unit_header(text: str) -> bool:
+    return bool(re.fullmatch(
+        r"(?:amounts?\s+in\s+|in\s+)?[\[(]?(?:EUR|EUROS?|USD|CNY|RMB|HKD|GBP|€|£)\s*(?:m|mn|million)?[\])]?",
+        normalize_text(text), re.IGNORECASE,
+    ))
+
+
+def _header_evidence(ws, cells: dict[tuple[int, int], Any], values: dict[tuple[int, int], Any]) -> tuple[
+    dict[int, list[dict[str, Any]]], dict[int, set[int]], list[dict[str, Any]], set[tuple[int, int]]
+]:
+    """Find candidate table headers, retaining their positions and column spans.
+
+    A year-shaped amount in a data row is not a header by itself. Multi-year
+    rows provide stronger evidence; a single year needs an otherwise empty or
+    explicitly labelled header row. These remain heuristic observations.
+    """
+    row_values: dict[int, list[tuple[int, Any]]] = {}
+    numeric_columns: dict[int, set[int]] = {}
+    for (row, col), value in values.items():
+        row_values.setdefault(row, []).append((col, value))
+        if _numeric_value(value) is not None:
+            numeric_columns.setdefault(row, set()).add(col)
+    period_headers: dict[int, list[dict[str, Any]]] = {}
+    header_cells: set[tuple[int, int]] = set()
+    unit_headers: list[dict[str, Any]] = []
+    for row, entries in sorted(row_values.items()):
+        candidates = [(col, cell_display(value, 120)) for col, value in entries if _looks_like_period_label(cell_display(value, 120))]
+        text_entries = [(col, cell_display(value, 120)) for col, value in entries if _numeric_value(value) is None and not _looks_like_period_label(cell_display(value, 120))]
+        is_header_row = False
+        for first_col, last_col in _group_sorted([col for col, _ in candidates], gap=1):
+            group = [(col, text) for col, text in candidates if first_col <= col <= last_col]
+            # A separate input panel on the same row must not invalidate a
+            # financial table's header. Text labels bound horizontal blocks.
+            left_col = max((col for col, _ in text_entries if col < first_col), default=1)
+            right_col = min((col for col, _ in text_entries if col > last_col), default=max(col for col, _ in entries) + 1)
+            local_entries = [(col, value) for col, value in entries if left_col <= col < right_col]
+            other_numbers = [value for _, value in local_entries if _numeric_value(value) is not None and not _looks_like_period_label(cell_display(value, 120))]
+            other_text = [text for col, text in text_entries if left_col <= col < right_col]
+            explicit_header = not other_text or all(
+                _is_unit_header(text) or re.fullmatch(r"(?:fiscal\s+)?year|period|metric|forecast|actuals?|estimates?|historical|FY", text, re.IGNORECASE)
+                for text in other_text
+            )
+            prior_header = any(period_headers.get(col) for col, _ in group)
+            metric_label = any(re.search(r"\b(?:sales|revenue|income|profit|cash|debt|shares?|EPS|price|margin|cost|EBITDA?)\b|收入|利润|股数|股价", text, re.IGNORECASE) for text in other_text)
+            if other_numbers or (len(group) == 1 and not explicit_header) or (prior_header and metric_label and not explicit_header):
+                continue
+            is_header_row = True
+            group_columns = {col for col, _ in group}
+            for col, text in group:
+                expanded_columns = {col}
+                for merged in ws.merged_cells.ranges:
+                    if merged.min_row == row and merged.min_col == col:
+                        expanded_columns.update(range(merged.min_col, merged.max_col + 1))
+                group_columns.update(expanded_columns)
+                source = {"cell_ref": _cell_ref(row, col), "text": text}
+                for target_col in expanded_columns:
+                    period_headers.setdefault(target_col, []).append({
+                        "row": row, "text": text, "source": source,
+                        "columns": group_columns,
+                    })
+                header_cells.add((row, col))
+        # Only monetary declarations can supply surrounding monetary units.
+        # Percentages, per-share values and share counts never become sheet units.
+        for col, value in entries:
+            if not isinstance(value, str) or _is_formula(cells.get((row, col))):
+                continue
+            unit = _unit_from_text(value)
+            if not re.fullmatch(r"(?:EUR|USD|CNY|RMB|HKD|GBP)m?", unit):
+                continue
+            if not numeric_columns.get(row) or is_header_row:
+                unit_headers.append({"row": row, "col": col, "unit": unit,
+                    "source": {"cell_ref": _cell_ref(row, col), "text": cell_display(value, 200)}})
+    for headers in period_headers.values():
+        headers.sort(key=lambda item: item["row"])
+    return period_headers, numeric_columns, unit_headers, header_cells
+
+
+def _cell_period(row: int, col: int, row_label: str, row_label_ref: str,
+                 headers: dict[int, list[dict[str, Any]]], numeric_columns: dict[int, set[int]],
+                 header_cells: set[tuple[int, int]]) -> tuple[str, dict[str, Any]]:
+    if row_label and not re.search(r"\d{4}[-/]\d", row_label):
+        explicit = _period_from_label(row_label)
+        if explicit:
+            return explicit, _context("inferred", "row_label", [{"cell_ref": row_label_ref, "text": row_label}])
+    preceding = [header for header in headers.get(col, []) if header["row"] < row]
+    if not preceding:
+        return "", _context("missing", "none", [], "no_supported_period_header")
+    header = preceding[-1]
+    group_columns = header["columns"]
+    occupied = numeric_columns.get(row, set()) & group_columns
+    # A valuation summary beneath a wide annual forecast must not inherit an
+    # arbitrary forecast year merely because its output shares that column.
+    required = max(2, (len(group_columns) + 1) // 2) if len(group_columns) > 1 else 1
+    if len(occupied) < required or (row, col) in header_cells:
+        return "", _context("missing", "column_header", [header["source"]], "outside_header_data_layout")
+    return _period_from_label(header["text"]), _context("inferred", "column_header", [header["source"]])
+
+
+def _cell_unit(row: int, col: int, display: str, row_label: str, row_label_ref: str,
+               number_format: str, unit_headers: list[dict[str, Any]], min_col: int) -> tuple[str, dict[str, Any]]:
+    preceding = [header for header in unit_headers if header["row"] <= row and min_col <= header["col"] <= col]
+    header = None
+    if preceding:
+        nearest_row = max(item["row"] for item in preceding)
+        same_row = [item for item in preceding if item["row"] == nearest_row]
+        header = max(same_row, key=lambda item: item["col"])
+    local_sources = (
+        ("row_label", row_label, row_label_ref),
+        ("number_format", number_format, _cell_ref(row, col)),
+        ("cell_text", display, _cell_ref(row, col)),
+    )
+    row_unit = _unit_from_text(row_label)
+    format_unit = _unit_from_number_format(number_format)
+    row_currency = re.match(r"EUR|USD|CNY|RMB|HKD|GBP", row_unit)
+    format_currency = re.match(r"EUR|USD|CNY|RMB|HKD|GBP", format_unit)
+    currency_conflict = bool(row_currency and format_currency and row_currency.group() != format_currency.group())
+    if row_unit and format_unit and (
+        (row_unit == "%") != (format_unit == "%") or currency_conflict
+        or (row_unit.startswith("shares") and format_currency)
+    ):
+        return "", _context("ambiguous", "conflicting_local_units", [
+            {"cell_ref": row_label_ref, "text": row_label},
+            {"cell_ref": _cell_ref(row, col), "text": number_format},
+        ], "row_label_and_number_format_disagree")
+    for method, text, cell_ref in local_sources:
+        unit = _unit_from_number_format(text) if method == "number_format" else _unit_from_text(text)
+        if unit:
+            if unit == "share_count_unspecified_scale":
+                if format_unit in {"shares", "shares_m"}:
+                    return format_unit, _context("inferred", "share_count_with_number_format", [
+                        {"cell_ref": cell_ref, "text": text}, {"cell_ref": _cell_ref(row, col), "text": number_format},
+                    ])
+                return unit, _context("missing", method, [{"cell_ref": cell_ref, "text": text}], "share_count_scale_not_explicit")
+            if unit == "per_share" and format_currency:
+                return format_currency.group() + "/share", _context("inferred", "per_share_with_number_format", [
+                    {"cell_ref": cell_ref, "text": text}, {"cell_ref": _cell_ref(row, col), "text": number_format},
+                ])
+            if unit == "per_share" and header:
+                currency = re.sub(r"m$", "", header["unit"])
+                return currency + "/share", _context("inferred", "per_share_with_monetary_header", [
+                    {"cell_ref": cell_ref, "text": text}, header["source"],
+                ])
+            return unit, _context("inferred", method, [{"cell_ref": cell_ref, "text": text}])
+    if re.search(r"\b(?:rate|margin|WACC|yield|growth|ratio)\b|增长率|利润率|税率|折现率", row_label, re.IGNORECASE):
+        return "", _context("missing", "none", [], "ratio_requires_local_unit_evidence")
+    if header:
+        return header["unit"], _context("inferred", "monetary_header", [header["source"]])
+    return "", _context("missing", "none", [], "no_supported_unit_evidence")
+
+
 def _parse_loaded_workbook(wb_formula, wb_values, *, dataset_id: str, doc_id: str, path: Path, source_modified_at: Optional[str] = None) -> dict[str, Any]:
 
     parser_name = "openpyxl"
@@ -578,11 +754,6 @@ def _parse_loaded_workbook(wb_formula, wb_values, *, dataset_id: str, doc_id: st
             row_count = col_count = 0
         labels = _sample_labels(cells)
         role = _sheet_role(ws.title, " ".join(labels))
-        sheet_unit = ""
-        for label in labels[:10]:
-            sheet_unit = _unit_from_text(label)
-            if sheet_unit:
-                break
         formula_density = formula_count / max(1, non_empty)
         sheet_summary = (
             f"Excel sheet: {ws.title}\n"
@@ -625,28 +796,26 @@ def _parse_loaded_workbook(wb_formula, wb_values, *, dataset_id: str, doc_id: st
 
         row_text_cols: dict[int, list[tuple[int, str]]] = {}
         col_text_rows: dict[int, list[tuple[int, str]]] = {}
-        col_period_rows: dict[int, list[tuple[int, str]]] = {}
+        label_values: dict[tuple[int, int], Any] = {}
         for (row, col), value in cells.items():
             is_formula, _, _, _ = _formula_details(value)
             cached_for_label = values_ws.cell(row, col).value if is_formula and values_ws is not None else None
             cache_status = _formula_cache_status(is_formula, cached_for_label)
             label_value = cached_for_label if cache_status in {"present", "error"} else None
+            label_values[(row, col)] = label_value if is_formula else value
             text = cell_display(label_value if is_formula else value, 120)
             raw_text = cell_display(value, 120)
             if text and not is_formula and _numeric_value(value) is None:
                 row_text_cols.setdefault(row, []).append((col, text))
-            if text and _looks_like_period_label(text):
-                col_period_rows.setdefault(col, []).append((row, text))
-            if text and (_numeric_value(text) is None or _looks_like_period_label(text) or row <= max(5, min_row + 4)):
+            if text and _numeric_value(text) is None and not _looks_like_period_label(text):
                 col_text_rows.setdefault(col, []).append((row, text))
-            elif raw_text and not is_formula and _numeric_value(raw_text) is None:
+            elif raw_text and not is_formula and _numeric_value(raw_text) is None and not _looks_like_period_label(raw_text):
                 col_text_rows.setdefault(col, []).append((row, raw_text))
         for items in row_text_cols.values():
             items.sort(key=lambda x: x[0])
         for items in col_text_rows.values():
             items.sort(key=lambda x: x[0])
-        for items in col_period_rows.values():
-            items.sort(key=lambda x: x[0])
+        period_headers, numeric_columns, unit_headers, header_cells = _header_evidence(ws, cells, label_values)
 
         for (row, col), value in sorted(cells.items(), key=lambda item: item[0]):
             cached = values_ws.cell(row, col).value if values_ws is not None else None
@@ -655,21 +824,17 @@ def _parse_loaded_workbook(wb_formula, wb_values, *, dataset_id: str, doc_id: st
             display_source = cached if is_formula and cache_status in {"present", "error"} else value
             display = cell_display(display_source, 200)
             row_label = _nearest_left_label(row_text_cols, row, col)
-            col_label = _nearest_top_label(col_text_rows, row, col)
-            period_label = _nearest_top_label(col_period_rows, row, col)
-            period = (
-                _period_from_label(period_label)
-                or _period_from_label(col_label)
-                or _period_from_label(display)
-            )
+            left_labels = [item for item in row_text_cols.get(row, []) if item[0] < col]
+            row_label_ref = _cell_ref(row, left_labels[-1][0]) if left_labels else ""
+            unit_min_col = left_labels[-2][0] + 1 if len(left_labels) > 1 else 1
+            period, period_context = _cell_period(row, col, row_label, row_label_ref, period_headers, numeric_columns, header_cells)
+            if period and period_context["method"] == "column_header":
+                col_label = period_context["sources"][0]["text"]
+            else:
+                nearby_text = [(r, text) for r, text in col_text_rows.get(col, []) if 0 < row - r <= 4]
+                col_label = nearby_text[-1][1] if nearby_text else ""
             number_format = str(ws.cell(row, col).number_format or "")
-            unit = (
-                _unit_from_text(row_label)
-                or _unit_from_text(col_label)
-                or _unit_from_text(display)
-                or _unit_from_number_format(number_format)
-                or sheet_unit
-            )
+            unit, unit_context = _cell_unit(row, col, display, row_label, row_label_ref, number_format, unit_headers, unit_min_col)
             numeric = _numeric_value(cached if is_formula else value)
             cell_ref = _cell_ref(row, col)
             value_type = f"formula_{formula_type}" if is_formula else type(value).__name__
@@ -794,22 +959,29 @@ def _parse_loaded_workbook(wb_formula, wb_values, *, dataset_id: str, doc_id: st
                             "formula_type": formula_type,
                             "formula_cache_status": cache_status,
                             "formula_metadata": formula_metadata,
+                            "period_context": period_context,
+                            "unit_context": unit_context,
+                            "verification_status": "unverified",
                         }
                     ),
                 }
             )
-            if numeric is not None and row_label:
+            if numeric is not None and row_label and (row, col) not in header_cells:
                 fact_id = sha256_text(f"{doc_id}\0{ws.title}\0{cell_ref}\0{row_label}\0{period}")[:40]
                 quality_issues = ["metric_name_inferred_from_nearest_left_label"]
                 if not period:
                     quality_issues.append("period_missing")
                 if not unit:
                     quality_issues.append("unit_missing")
+                if unit == "share_count_unspecified_scale":
+                    quality_issues.append("share_count_scale_not_explicit")
+                if unit_context["status"] == "ambiguous":
+                    quality_issues.append("unit_ambiguous")
                 if is_formula and cache_status != "present":
                     quality_issues.append(f"formula_cache_{cache_status}")
                 quality_status = (
                     "candidate_complete"
-                    if period and unit and (not is_formula or cache_status == "present")
+                    if period and unit and period_context["status"] == "inferred" and unit_context["status"] == "inferred" and (not is_formula or cache_status == "present")
                     else "review_required"
                 )
                 confidence = 0.75 if quality_status == "candidate_complete" else (0.65 if period else 0.55)
@@ -842,6 +1014,10 @@ def _parse_loaded_workbook(wb_formula, wb_values, *, dataset_id: str, doc_id: st
                                 "quality_issues": quality_issues,
                                 "formula_type": formula_type,
                                 "formula_cache_status": cache_status,
+                                "period_context": period_context,
+                                "unit_context": unit_context,
+                                "verification_status": "unverified",
+                                "quality_status_scope": "extraction_completeness_only",
                             }
                         ),
                     }

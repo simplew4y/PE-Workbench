@@ -31,4 +31,5 @@ export { pePdfReadTool, readPePdfPages } from "./tools/pdf-read.ts";
 export { pePdfSearchTool, searchPePdfPages } from "./tools/pdf-search.ts";
 export { peValuationDateTool, resolvePeValuationDate } from "./tools/valuation-date.ts";
 export { locatePeValuationOutputs, peValuationOutputTool } from "./tools/valuation-output.ts";
+export { buildPeValuationReport, peValuationReportTool } from "./tools/valuation-report.ts";
 export { inspectPeWorkbooks, peWorkbookInspectTool } from "./tools/workbook-inspect.ts";

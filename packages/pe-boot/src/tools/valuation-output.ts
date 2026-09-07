@@ -30,6 +30,9 @@ const MATCH_QUERY_TERMS = [
 	"price objective",
 	"implied share",
 	"implied price",
+	"implied tp",
+	"px_last",
+	"fg_price",
 	"per share value",
 	"value per share",
 	"fair value",
@@ -98,7 +101,7 @@ export type PeValuationOutputRole =
 	| "sotp_value"
 	| "relative_valuation_output";
 
-type CrossCheckRole = "current_price" | "upside";
+type CrossCheckRole = "current_price" | "historical_price" | "upside";
 type RecognizedRole = PeValuationOutputRole | CrossCheckRole;
 
 interface LabelRule {
@@ -129,6 +132,7 @@ const LABEL_RULES: readonly LabelRule[] = [
 			"implied stock price",
 			"implied price",
 			"implied price per share",
+			"implied tp",
 			"fair value per share",
 			"intrinsic value per share",
 			"equity value per share",
@@ -268,6 +272,7 @@ type LabelSource =
 	| "left_of_label"
 	| "below_label"
 	| "defined_name"
+	| "external_price_formula"
 	| "upside_formula_counterpart";
 
 interface SeedMatch extends LabelMatch {
@@ -409,6 +414,19 @@ export interface PeValuationOutputResult {
 	candidate_count: number;
 	evaluated_candidate_count: number;
 	returned_candidate_count: number;
+	output_groups: Array<{
+		group_id: string;
+		method: "dcf" | "sotp" | "multiples" | "unspecified";
+		sheet_name: string;
+		outputs: ValuationOutputCandidate[];
+		relationships: Array<{
+			kind: "direct_alias" | "rounding_consistent";
+			from_candidate_id: string;
+			to_candidate_id: string;
+			basis: string;
+		}>;
+	}>;
+	output_inventory_complete: boolean;
 	cross_check_nodes: Array<{
 		role: CrossCheckRole;
 		sheet_name: string;
@@ -417,6 +435,13 @@ export interface PeValuationOutputResult {
 		display_value?: string;
 		numeric_value?: number;
 		formula?: string;
+		price_kind?: "model_input" | "cached_external" | "historical_average" | "formula_derived";
+		formula_cache_status?: string;
+		price_date_status?: "unknown";
+		uses: Array<{ sheet_name: string; cell_ref: string; formula: string; markdown_citation: string }>;
+		uses_truncated: boolean;
+		label_evidence_ids: string[];
+		label_markdown_citations: string[];
 		evidence_id: string;
 		markdown_citation: string;
 	}>;
@@ -460,8 +485,13 @@ function classifyLabel(value: unknown): LabelMatch | undefined {
 			const normalizedPhrase = normalizedLabel(phrase);
 			if (!normalized.includes(normalizedPhrase)) continue;
 			const exact = normalized === normalizedPhrase;
+			if (rule.role === "current_price" && /(?:discount|range|sensitivity|变化|区间|敏感)/u.test(normalized))
+				continue;
 			const candidate: LabelMatch = {
-				role: rule.role,
+				role:
+					rule.role === "current_price" && /(?:\bave\b|\bavg\b|average|historical|平均|历史)/u.test(normalized)
+						? "historical_price"
+						: rule.role,
 				label,
 				normalizedLabel: normalized,
 				matchedPhrase: phrase,
@@ -510,13 +540,43 @@ function directCellMatches(cell: ExcelCellDetail): SeedMatch[] {
 	const matches: SeedMatch[] = [];
 	for (const value of values) {
 		const match = classifyLabel(value.value);
-		if (match) matches.push({ ...match, labelSource: value.labelSource, sourceWeight: value.sourceWeight });
+		// Column headings can span unrelated valuation and sensitivity rows. Price
+		// discovery uses an actual nearby label or a quote formula instead.
+		if (match && !(value.labelSource === "column_label" && match.role === "current_price"))
+			matches.push({ ...match, labelSource: value.labelSource, sourceWeight: value.sourceWeight });
+	}
+	if (isExternalPriceFormula(cell.formula)) {
+		const match = classifyLabel("Current price");
+		if (match) matches.push({ ...match, labelSource: "external_price_formula", sourceWeight: 0.14 });
 	}
 	return matches;
 }
 
+function isExternalPriceFormula(formula: string | undefined): boolean {
+	return /^=\+?(?:_xll\.)?(?:BDP\([^)]*,\s*"PX_LAST"\s*\)|FDS\([^)]*,\s*"FG_PRICE\([^"\r\n]*\)"\s*\))\s*$/iu.test(
+		formula?.trim() ?? "",
+	);
+}
+
+function hasPercentageDimension(cell: ExcelCellDetail): boolean {
+	return cell.unit === "%" || (cell.number_format ?? "").includes("%");
+}
+
 function addSeed(map: Map<string, CandidateSeed>, cell: ExcelCellDetail, sheet: SheetContext, match: SeedMatch): void {
 	if (!hasOutputValue(cell)) return;
+	if (match.role !== "upside" && hasPercentageDimension(cell)) return;
+	if (match.role === "current_price") {
+		if (cell.numeric_value !== undefined && cell.numeric_value <= 0) return;
+		const ownRole = classifyLabel(cell.row_label)?.role;
+		if (ownRole && ownRole !== "current_price") return;
+		if (
+			!isExternalPriceFormula(cell.formula) &&
+			/(?:\bwacc\b|discount|\bgrowth\b|\brate\b|\byield\b|\bequity\b|\bev\b|\bshares\b|资本|折现|增长|股数)/iu.test(
+				cell.row_label ?? "",
+			)
+		)
+			return;
+	}
 	const existing = map.get(cell.cell_id);
 	if (existing) {
 		const key = [match.role, match.labelSource, match.labelCellRef, match.definedName].join("\0");
@@ -550,7 +610,7 @@ function readMatchingCells(
 	const searchText = `lower(
 		COALESCE(c.display_value, '') || ' ' ||
 		CASE WHEN c.is_formula = 0 THEN COALESCE(c.raw_value, '') ELSE '' END || ' ' ||
-		COALESCE(c.row_label, '') || ' ' || COALESCE(c.col_label, '')
+		COALESCE(c.row_label, '') || ' ' || COALESCE(c.col_label, '') || ' ' || COALESCE(c.formula, '')
 	)`;
 	const sheetFilter = sheetName ? "AND lower(c.sheet_name) = lower(?)" : "";
 	const markerFilter = MATCH_QUERY_TERMS.map(() => "instr(search_text, ?) > 0").join(" OR ");
@@ -645,6 +705,33 @@ function collectSeeds(
 				if (nearbyCell.cell_id === cell.cell_id) continue;
 				const adjacentMatch = adjacentLabelMatch(anchorMatch, cell, nearbyCell);
 				if (!adjacentMatch) continue;
+				// A label belongs to the nearest occupied value along its row/column.
+				// Crossing another numeric value or text label causes semantic leakage.
+				if (
+					nearbyCells.some(
+						(between) =>
+							between.cell_id !== cell.cell_id &&
+							between.cell_id !== nearbyCell.cell_id &&
+							((nearbyCell.row_index === cell.row_index &&
+								between.row_index === cell.row_index &&
+								between.col_index > Math.min(cell.col_index, nearbyCell.col_index) &&
+								between.col_index < Math.max(cell.col_index, nearbyCell.col_index)) ||
+								(nearbyCell.col_index === cell.col_index &&
+									between.col_index === cell.col_index &&
+									between.row_index > cell.row_index &&
+									between.row_index < nearbyCell.row_index)),
+					)
+				)
+					continue;
+				if (
+					anchorMatch.role === "current_price" &&
+					adjacentMatch.labelSource === "below_label" &&
+					nearbyCells.some(
+						(right) =>
+							right.row_index === cell.row_index && right.col_index > cell.col_index && hasOutputValue(right),
+					)
+				)
+					continue;
 				addSeed(isPrimaryRole(adjacentMatch.role) ? primary : crossChecks, nearbyCell, sheet, adjacentMatch);
 			}
 		}
@@ -735,6 +822,7 @@ function formulaTargetCells(
 }
 
 function primaryDirectMatch(cell: ExcelCellDetail): SeedMatch | undefined {
+	if (hasPercentageDimension(cell)) return undefined;
 	return directCellMatches(cell)
 		.filter((match) => isPrimaryRole(match.role))
 		.sort(
@@ -745,6 +833,7 @@ function primaryDirectMatch(cell: ExcelCellDetail): SeedMatch | undefined {
 }
 
 function currentPriceDirectMatch(cell: ExcelCellDetail): SeedMatch | undefined {
+	if (hasPercentageDimension(cell) || (cell.numeric_value !== undefined && cell.numeric_value <= 0)) return undefined;
 	return directCellMatches(cell)
 		.filter((match) => match.role === "current_price")
 		.sort((left, right) => right.baseWeight + right.sourceWeight - (left.baseWeight + left.sourceWeight))[0];
@@ -762,6 +851,7 @@ function addUpsideFormulaRelationships(
 	const linksByTargetCellId = new Map<string, UpsideLink[]>();
 	for (const upsideSeed of crossChecks.values()) {
 		if (bestMatch(upsideSeed).role !== "upside" || !upsideSeed.cell.formula) continue;
+		if (!/\/.*-\s*1\s*\)?\s*$/u.test(upsideSeed.cell.formula)) continue;
 		const targets = formulaTargetCells(database, datasetId, docId, upsideSeed.cell, sheets).filter(
 			(cell) =>
 				!requestedSheetName || cell.sheet_name.toLocaleLowerCase() === requestedSheetName.toLocaleLowerCase(),
@@ -1150,13 +1240,18 @@ function preliminaryScore(seed: CandidateSeed): number {
 }
 
 function createCrossCheckNodes(
+	database: DatabaseSync,
+	datasetId: string,
+	docId: string,
 	crossChecks: ReadonlyMap<string, CandidateSeed>,
 ): PeValuationOutputResult["cross_check_nodes"] {
 	return [...crossChecks.values()]
 		.map((seed) => ({ seed, match: bestMatch(seed) }))
 		.filter(
 			(item): item is { seed: CandidateSeed; match: SeedMatch & { role: CrossCheckRole } } =>
-				item.match.role === "current_price" || item.match.role === "upside",
+				item.match.role === "current_price" ||
+				item.match.role === "historical_price" ||
+				item.match.role === "upside",
 		)
 		.sort(
 			(left, right) =>
@@ -1164,18 +1259,151 @@ function createCrossCheckNodes(
 				left.seed.cell.row_index - right.seed.cell.row_index ||
 				left.seed.cell.col_index - right.seed.cell.col_index,
 		)
-		.slice(0, 50)
-		.map(({ seed, match }) => ({
-			role: match.role,
-			sheet_name: seed.cell.sheet_name,
-			cell_ref: seed.cell.cell_ref,
-			label: match.label,
-			...(seed.cell.display_value ? { display_value: seed.cell.display_value } : {}),
-			...(seed.cell.numeric_value !== undefined ? { numeric_value: seed.cell.numeric_value } : {}),
-			...(seed.cell.formula ? { formula: seed.cell.formula } : {}),
-			evidence_id: seed.cell.evidence_id,
-			markdown_citation: seed.cell.markdown_citation,
-		}));
+		.map(({ seed, match }) => {
+			const uses = tableExists(database, "excel_formula_references")
+				? (
+						database
+							.prepare(
+								`SELECT DISTINCT c.*, c.cell_ref AS cell_range, d.original_filename, d.source_relpath, d.version_no
+					 FROM excel_formula_references r
+					 JOIN excel_cells c ON c.cell_id=r.source_cell_id AND c.doc_id=r.doc_id
+					 JOIN documents d ON d.doc_id=c.doc_id
+					 WHERE r.dataset_id=? AND r.doc_id=? AND lower(r.target_sheet)=lower(?)
+					 AND replace(r.target_range, '$', '')=? AND r.parse_status='resolved'
+					 ORDER BY c.sheet_name,c.row_index,c.col_index LIMIT 21`,
+							)
+							.all(datasetId, docId, seed.cell.sheet_name, seed.cell.cell_ref) as SqlRow[]
+					)
+						.map(excelCellDetail)
+						.map((cell) => ({
+							sheet_name: cell.sheet_name,
+							cell_ref: cell.cell_ref,
+							formula: cell.formula ?? "",
+							markdown_citation: cell.markdown_citation,
+						}))
+				: [];
+			return {
+				role: match.role,
+				sheet_name: seed.cell.sheet_name,
+				cell_ref: seed.cell.cell_ref,
+				label: match.label,
+				...(seed.cell.display_value ? { display_value: seed.cell.display_value } : {}),
+				...(seed.cell.numeric_value !== undefined ? { numeric_value: seed.cell.numeric_value } : {}),
+				...(seed.cell.formula ? { formula: seed.cell.formula } : {}),
+				...(seed.cell.formula_cache_status ? { formula_cache_status: seed.cell.formula_cache_status } : {}),
+				...(match.role !== "upside"
+					? {
+							price_kind:
+								match.role === "historical_price"
+									? ("historical_average" as const)
+									: isExternalPriceFormula(seed.cell.formula)
+										? ("cached_external" as const)
+										: seed.cell.formula
+											? ("formula_derived" as const)
+											: ("model_input" as const),
+							price_date_status: "unknown" as const,
+						}
+					: {}),
+				uses: uses.slice(0, 20),
+				uses_truncated: uses.length > 20,
+				label_evidence_ids: uniqueValues(seed.matches.map((item) => item.labelEvidenceId)),
+				label_markdown_citations: uniqueValues(seed.matches.map((item) => item.labelMarkdownCitation)),
+				evidence_id: seed.cell.evidence_id,
+				markdown_citation: seed.cell.markdown_citation,
+			};
+		});
+}
+
+function createOutputGroups(
+	database: DatabaseSync,
+	datasetId: string,
+	docId: string,
+	candidates: readonly ValuationOutputCandidate[],
+): PeValuationOutputResult["output_groups"] {
+	const groups: PeValuationOutputResult["output_groups"] = [];
+	for (const candidate of candidates) {
+		const context = normalizedLabel(candidate.sheet_name);
+		const method = /\bdcf\b|discounted cash flow|现金流折现/u.test(context)
+			? "dcf"
+			: /\bsotp\b|sum of.*parts|分部估值/u.test(context)
+				? "sotp"
+				: /multiples?|relative|可比|倍数/u.test(context) ||
+						candidate.features.some((feature) => feature.code === "eps_times_pe_signature")
+					? "multiples"
+					: "unspecified";
+		let group = groups.find((item) => item.sheet_name === candidate.sheet_name && item.method === method);
+		if (!group) {
+			group = {
+				group_id: createHash("sha256")
+					.update(`${docId}\0${candidate.sheet_name}\0${method}`)
+					.digest("hex")
+					.slice(0, 40),
+				method,
+				sheet_name: candidate.sheet_name,
+				outputs: [],
+				relationships: [],
+			};
+			groups.push(group);
+		}
+		group.outputs.push(candidate);
+	}
+	for (const group of groups) {
+		for (const candidate of group.outputs) {
+			const formula = candidate.formula?.replaceAll("$", "").replaceAll(" ", "") ?? "";
+			const alias = /^=\+?([A-Z]{1,3}\d+)$/iu.exec(formula);
+			if (alias) {
+				const source = group.outputs.find((item) => item.cell_ref === alias[1].toUpperCase());
+				if (source)
+					group.relationships.push({
+						kind: "direct_alias",
+						from_candidate_id: candidate.candidate_id,
+						to_candidate_id: source.candidate_id,
+						basis: `${candidate.sheet_name}!${candidate.cell_ref} directly references ${source.cell_ref}`,
+					});
+			}
+			// Explicit ROUND(A/B[/scale], digits)[*scale] formulas allow a
+			// conservative cached-value reconciliation without executing Excel.
+			const round = /^=\+?ROUND\(([A-Z]{1,3}\d+)\/([A-Z]{1,3}\d+)(?:\/([\d.]+))?,(-?\d+)\)(?:\*([\d.]+))?$/iu.exec(
+				formula,
+			);
+			if (!round || candidate.numeric_value === undefined) continue;
+			const numerator = readExcelCellsInRange(database, datasetId, docId, candidate.sheet_name, round[1], 1)[0]
+				?.numeric_value;
+			const denominator = readExcelCellsInRange(database, datasetId, docId, candidate.sheet_name, round[2], 1)[0]
+				?.numeric_value;
+			const divisor = Number(round[3] ?? 1);
+			const multiplier = Number(round[5] ?? 1);
+			if (
+				numerator === undefined ||
+				denominator === undefined ||
+				denominator === 0 ||
+				divisor <= 0 ||
+				multiplier !== divisor
+			)
+				continue;
+			const unrounded = numerator / denominator;
+			const precision = 10 ** Number(round[4]);
+			const rounded =
+				((Math.sign(unrounded) * Math.round(Math.abs(unrounded / divisor) * precision)) / precision) * multiplier;
+			if (Math.abs(rounded - candidate.numeric_value) > Math.max(1, Math.abs(rounded)) * 1e-9) continue;
+			for (const source of group.outputs) {
+				if (
+					source.candidate_id === candidate.candidate_id ||
+					source.numeric_value === undefined ||
+					!(["target_price", "per_share_value"] as PeValuationOutputRole[]).includes(source.semantic_role) ||
+					Math.abs(source.numeric_value - unrounded) > Math.max(1, Math.abs(unrounded)) * 1e-9
+				)
+					continue;
+				group.relationships.push({
+					kind: "rounding_consistent",
+					from_candidate_id: candidate.candidate_id,
+					to_candidate_id: source.candidate_id,
+					basis: "Explicit ROUND formula reconciles to the other output using stored input values; cached-value consistency does not prove full formula equivalence or recalculation.",
+				});
+			}
+		}
+	}
+	return groups;
 }
 
 function stableLocatorRunId(value: Record<string, unknown>): string {
@@ -1212,6 +1440,8 @@ export function confirmPeValuationOutput(
 	if (!hasOutputValue(cell)) {
 		return { confirmed: false, candidate_id: candidateId, rejection_reason: "cell_has_no_numeric_or_formula_output" };
 	}
+	if (hasPercentageDimension(cell))
+		return { confirmed: false, candidate_id: candidateId, rejection_reason: "percentage_is_not_a_valuation_amount" };
 	const directMatch = primaryDirectMatch(cell);
 	let selectedMatch = directMatch;
 	if (!selectedMatch) {
@@ -1500,11 +1730,14 @@ export function locatePeValuationOutputs(
 			candidate_count: allSeeds.length,
 			evaluated_candidate_count: sortedCandidates.length,
 			returned_candidate_count: returnedCandidates.length,
-			cross_check_nodes: createCrossCheckNodes(seeds.crossChecks),
+			output_groups: createOutputGroups(connection.database, connection.datasetId, docId, sortedCandidates),
+			output_inventory_complete:
+				!matching.truncated && allSeeds.length <= MAX_RAW_CANDIDATES && retainedSeeds.length <= traceLimit,
+			cross_check_nodes: createCrossCheckNodes(connection.database, connection.datasetId, docId, seeds.crossChecks),
 			warnings: uniqueValues(warnings),
 			candidates: returnedCandidates,
 			answer_contract:
-				"status=selected means one deterministic top-ranked output candidate, not that its cached value or valuation logic was recalculated or verified. For ambiguous, preserve every conflicting candidate and trace them separately. Pass the selected candidate ID, sheet, and cell to pe_valuation_date_resolve; never promote current price, upside, or a sensitivity-grid cell to the primary output.",
+				"status=selected means one deterministic top-ranked output candidate, not that its cached value or valuation logic was recalculated or verified. Enumerate independent valuation methods from output_groups; top_k only limits the ranked preview. Check output_inventory_complete before claiming full coverage. Rounding relationships only reconcile stored values. For ambiguous, preserve every conflicting candidate and trace them separately. Pass the selected candidate ID, sheet, and cell to pe_valuation_date_resolve. Price kinds and formula uses are distinct; external formula caches are never live quotes, and price dates remain unknown until verified.",
 		};
 	} finally {
 		connection.database.close();
