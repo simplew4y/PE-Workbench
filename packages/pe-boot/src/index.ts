@@ -12,9 +12,10 @@ export {
 	sourceLocationRow,
 } from "./evidence.ts";
 export * from "./source.ts";
-export { buildPeSystemPrompt, toolsList } from "./system-prompt.ts";
+export { buildPeSystemPrompt, buildToolsList } from "./system-prompt.ts";
 export { peDocumentOpenTool } from "./tools/document-open.ts";
 export { getPeExcelRange, peExcelRangeTool } from "./tools/excel-range.ts";
+export { isPeConsensusEnabled } from "./tools/feature-flags.ts";
 export { peFormulaTraceTool, tracePeFormula } from "./tools/formula-trace.ts";
 export { registerPeTools } from "./tools/index.ts";
 export { peModelValidateTool, validatePeModel } from "./tools/model-validate.ts";

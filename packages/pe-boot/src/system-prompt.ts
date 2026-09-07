@@ -1,5 +1,5 @@
 import { PE_PRESENTATION_SELECTION } from "./presentation-policy.ts";
-import { PE_TOOL_PROMPT_SNIPPETS } from "./tools/index.ts";
+import { pePromptSnippets } from "./tools/index.ts";
 
 //【提示词】角色提示词
 const PE_ROLE =
@@ -70,10 +70,13 @@ const PE_BASE_TOOLS = [
 	{ name: "write", description: "Create or overwrite files" },
 ] as const;
 
-//【提示词】工具列表,PE_BASE_TOOLS + PE_TOOL_PROMPT_SNIPPETS
-export const toolsList = [...PE_BASE_TOOLS, ...PE_TOOL_PROMPT_SNIPPETS]
-	.map(({ name, description }) => `- ${name}: ${description}`)
-	.join("\n");
+//【提示词】工具列表,PE_BASE_TOOLS + 启用的 PE 工具提示词
+// 计算放在函数里，这样按开关关闭的工具不会出现在提示词中。
+export function buildToolsList(): string {
+	return [...PE_BASE_TOOLS, ...pePromptSnippets()]
+		.map(({ name, description }) => `- ${name}: ${description}`)
+		.join("\n");
+}
 
 export function buildPeSystemPrompt(cwd: string): string {
 	const promptCwd = cwd.replaceAll("\\", "/");
@@ -93,7 +96,7 @@ Presentation rules:
 ${PE_PRESENTATION}
 
 Available tools:
-${toolsList}
+${buildToolsList()}
 
 PDF uploads are processed by the background PDF pipeline. Work like grep over a corpus: call pe_pdf_list first to see which PDFs exist and their metadata, then pe_pdf_search with literal terms to locate pages (results are unranked, in document and page order; retry with other wordings, narrow with document_name or roles when truncated), then pe_pdf_read to inspect the decisive pages and their neighbors. Use native read on returned page-image paths when a page is a chart, screenshot, or table, or when text_quality is needs_ocr. Read document_markdown_path with native read to go through a whole document. Preserve their page: citations.
 Excel uploads register immutable original versions and are prepared by the background Excel pipeline. Use pe_workbook_inspect to select one active workbook. Excel tools wait for preparation or rebuild a missing cache. Call pe_document_open for its readable_path and use native read/grep (or bash with rg) for fallback inspection. Never modify originals or the managed file catalog/cache.

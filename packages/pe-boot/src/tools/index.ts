@@ -6,6 +6,7 @@ import { peDatasetMemoTool } from "./dataset-memo.ts";
 import { peDatasetSearchTool } from "./dataset-search.ts";
 import { peDocumentOpenTool } from "./document-open.ts";
 import { peExcelRangeTool } from "./excel-range.ts";
+import { isPeConsensusEnabled } from "./feature-flags.ts";
 import { peFormulaTraceTool } from "./formula-trace.ts";
 import { peHistoryCompareTool } from "./history-compare.ts";
 import { peModelValidateTool } from "./model-validate.ts";
@@ -42,8 +43,18 @@ export const PE_TOOL_PROMPT_SNIPPETS = [
 	{ name: "pe_valuation_date_resolve", description: peValuationDateTool.promptSnippet },
 	{ name: "pe_model_validate", description: peModelValidateTool.promptSnippet },
 	{ name: "pe_render_ui", description: PE_RENDER_UI_PROMPT_SNIPPET },
-	{ name: "pe_consensus_cards", description: PE_CONSENSUS_CARDS_PROMPT_SNIPPET },
 ] as const;
+
+/** Snippets for tools that ship behind a flag, appended only when that flag is on. */
+const PE_FLAGGED_TOOL_PROMPT_SNIPPETS = [
+	{ name: "pe_consensus_cards", description: PE_CONSENSUS_CARDS_PROMPT_SNIPPET, enabled: isPeConsensusEnabled },
+] as const;
+
+export function pePromptSnippets(): Array<{ name: string; description: string | undefined }> {
+	return [...PE_TOOL_PROMPT_SNIPPETS, ...PE_FLAGGED_TOOL_PROMPT_SNIPPETS.filter((snippet) => snippet.enabled())].map(
+		({ name, description }) => ({ name, description }),
+	);
+}
 
 //注册所有pe工具
 export function registerPeTools(pi: ExtensionAPI): void {
@@ -65,7 +76,7 @@ export function registerPeTools(pi: ExtensionAPI): void {
 	pi.registerTool(peHistoryCompareTool);
 	pi.registerTool(peResearchNoteSaveTool);
 	pi.registerTool(peRenderUiTool);
-	pi.registerTool(peConsensusCardsTool);
+	if (isPeConsensusEnabled()) pi.registerTool(peConsensusCardsTool);
 	pi.on("resources_discover", () => ({
 		skillPaths: [memoSkillPath, researchNoteSkillPath, valuationModelExplainerSkillPath, generativeUiSkillPath],
 	}));

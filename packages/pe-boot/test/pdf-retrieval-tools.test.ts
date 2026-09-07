@@ -315,6 +315,21 @@ describe("PE page-level PDF retrieval", () => {
 			on() {},
 		} as unknown as ExtensionAPI;
 		registerPeTools(extension);
+		// Consensus is unreleased: absent from the tool set and the prompt until a deployment opts in.
+		expect(registered).not.toContain("pe_consensus_cards");
+		expect(prompt).not.toContain("- pe_consensus_cards:");
+		process.env.PE_CONSENSUS_ENABLED = "1";
+		try {
+			const flagged: string[] = [];
+			registerPeTools({
+				registerTool: (tool: { name: string }) => flagged.push(tool.name),
+				on() {},
+			} as unknown as ExtensionAPI);
+			expect(flagged).toContain("pe_consensus_cards");
+			expect(buildPeSystemPrompt("/workspace")).toContain("- pe_consensus_cards:");
+		} finally {
+			delete process.env.PE_CONSENSUS_ENABLED;
+		}
 		expect(registered).toContain("pe_pdf_list");
 		expect(registered).toContain("pe_pdf_search");
 		expect(registered).toContain("pe_pdf_read");
