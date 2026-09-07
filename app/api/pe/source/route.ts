@@ -18,7 +18,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    return NextResponse.json(resolvePeEvidenceSource(cwd, evidenceId).payload);
+    return NextResponse.json((await resolvePeEvidenceSource(cwd, evidenceId)).payload);
   } catch (error) {
     if (error instanceof PeSourceError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

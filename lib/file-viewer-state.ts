@@ -5,6 +5,7 @@ export interface FileViewerState {
   wrapLines: boolean;
   scrollTop: number;
   scrollLeft: number;
+  textPage?: number;
 }
 
 export function resolveInitialFileDisplayMode(

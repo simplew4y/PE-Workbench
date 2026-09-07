@@ -1,4 +1,4 @@
-export const PE_PIPELINE_SCHEMA_VERSION = 2;
+export const PE_PIPELINE_SCHEMA_VERSION = 3;
 export const PE_PDF_PARSER_NAME = "pdfjs-dist";
 export const PE_PDF_PARSER_VERSION = "6.3.289";
 export const PE_MAX_PDF_PAGES = 300;
@@ -28,6 +28,8 @@ export interface PeIngestInputFile {
   originalFilename: string;
   rawPath: string;
   sha256: string;
+  fileType: "pdf" | "xlsx" | "xlsm";
+  docId?: string;
 }
 
 export interface PeIngestFileResult {
@@ -54,6 +56,8 @@ export interface PeIngestJob {
   createdAt: string;
   startedAt?: string;
   finishedAt?: string;
+  workerPid?: number;
+  heartbeatAt?: string;
   result: PeIngestJobResult;
   warnings: string[];
 }

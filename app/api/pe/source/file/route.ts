@@ -24,7 +24,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    const source = resolvePeEvidenceSource(cwd, evidenceId);
+    const source = await resolvePeEvidenceSource(cwd, evidenceId);
     if (source.payload.kind !== "pdf" || !source.filePath) {
       return NextResponse.json({ error: "This evidence is not a PDF source" }, { status: 400 });
     }

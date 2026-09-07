@@ -1,7 +1,7 @@
 import { statSync } from "node:fs";
 import type { PeIngestFileResult, PeIngestInputFile, PeIngestJobResult, PeIngestStatus } from "./pe-ingest/contracts";
 import { resolvePeProjectPaths, resolveProjectFile } from "./pe-ingest/paths";
-import { openPeCollectionDatabase } from "./pe-ingest/schema";
+import { assertPeCollectionDataset, openPeCollectionDatabase } from "./pe-ingest/schema";
 import { getPeProject, peProjectStorePaths } from "./pe-project-store";
 import type {
   PeProjectDocumentCatalog,
@@ -15,15 +15,20 @@ interface PeProjectDocumentOptions {
 }
 
 interface DocumentRow {
+  doc_id: string;
   original_filename: string;
+  file_type: "pdf" | "xlsx" | "xlsm";
   raw_path: string;
   status: string;
   page_count: number;
   document_markdown_path: string;
+  readable_text_path: string;
   warnings_json: string;
   created_at: string;
   updated_at: string;
   needs_ocr_page_count: number;
+  sheet_count: number;
+  formula_count: number;
 }
 
 interface IngestJobRow {
@@ -86,6 +91,7 @@ function ingestResults(raw: string): PeIngestJobResult {
 }
 
 function documentStatus(value: string): PeProjectDocumentStatus {
+  if (value === "processing") return "running";
   if (
     value === "queued"
     || value === "running"
@@ -136,21 +142,28 @@ export function listPeProjectDocuments(
 ): PeProjectDocumentCatalog {
   const project = getPeProject(datasetId, options);
   const paths = resolvePeProjectPaths(project, peProjectStorePaths(options).registryPath);
+  assertPeCollectionDataset(paths.collectionPath, datasetId);
   const database = openPeCollectionDatabase(paths.collectionPath);
   try {
     const documentRows = database.prepare(`
       SELECT
+        d.doc_id,
         d.original_filename,
+        d.file_type,
         d.raw_path,
         d.status,
         d.page_count,
         d.document_markdown_path,
+        d.readable_text_path,
         d.warnings_json,
         d.created_at,
         d.updated_at,
-        SUM(CASE WHEN p.text_quality = 'needs_ocr' THEN 1 ELSE 0 END) AS needs_ocr_page_count
+        SUM(CASE WHEN p.text_quality = 'needs_ocr' THEN 1 ELSE 0 END) AS needs_ocr_page_count,
+        COALESCE(w.sheet_count, 0) AS sheet_count,
+        COALESCE(w.formula_count, 0) AS formula_count
       FROM documents d
       LEFT JOIN pdf_pages p ON p.doc_id = d.doc_id
+      LEFT JOIN excel_workbooks w ON w.doc_id = d.doc_id
       WHERE d.dataset_id = ?
       GROUP BY d.doc_id
       ORDER BY d.created_at DESC
@@ -160,11 +173,12 @@ export function listPeProjectDocuments(
     const knownFilenames = new Set<string>();
     for (const row of documentRows) {
       const rawFile = safeProjectFile(paths, row.raw_path);
-      const markdownFile = safeProjectFile(paths, row.document_markdown_path);
+      const readableFile = safeProjectFile(paths, row.readable_text_path || row.document_markdown_path);
       const warnings = stringArray(row.warnings_json).map(publicMessage);
       const needsOcrPageCount = Number(row.needs_ocr_page_count) || 0;
       documents.push({
         filename: row.original_filename,
+        fileType: row.file_type,
         status: documentStatus(row.status),
         pageCount: Number(row.page_count) || 0,
         sizeBytes: rawFile?.sizeBytes ?? null,
@@ -173,8 +187,11 @@ export function listPeProjectDocuments(
         warningCount: warnings.length,
         warnings,
         needsOcrPageCount,
+        sheetCount: Number(row.sheet_count) || 0,
+        formulaCount: Number(row.formula_count) || 0,
+        retryable: (row.file_type === "xlsx" || row.file_type === "xlsm") && row.status === "failed",
         rawRelativePath: rawFile?.relativePath ?? null,
-        markdownRelativePath: markdownFile?.relativePath ?? null,
+        markdownRelativePath: readableFile?.relativePath ?? null,
       });
       knownFilenames.add(row.original_filename.normalize("NFKC").toLocaleLowerCase("und"));
     }
@@ -204,6 +221,7 @@ export function listPeProjectDocuments(
         if (status === "failed" && warnings.length === 0 && row.message) warnings.push(publicMessage(row.message));
         documents.push({
           filename: input.originalFilename,
+          fileType: input.fileType ?? "pdf",
           status: status === "queued" || status === "running" ? status : "failed",
           pageCount: 0,
           sizeBytes: rawFile?.sizeBytes ?? null,
@@ -212,6 +230,9 @@ export function listPeProjectDocuments(
           warningCount: warnings.length,
           warnings,
           needsOcrPageCount: 0,
+          sheetCount: 0,
+          formulaCount: 0,
+          retryable: (input.fileType === "xlsx" || input.fileType === "xlsm") && status === "failed",
           rawRelativePath: rawFile?.relativePath ?? null,
           markdownRelativePath: null,
         });

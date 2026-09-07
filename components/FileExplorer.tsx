@@ -83,7 +83,7 @@ interface ResearchIngestJob {
   message: string;
 }
 
-const RESEARCH_UPLOAD_SUFFIXES = new Set(["pdf"]);
+const RESEARCH_UPLOAD_SUFFIXES = new Set(["pdf", "xlsx", "xlsm"]);
 
 function uploadResearchFiles(
   datasetId: string,
@@ -837,7 +837,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
         type="file"
         multiple
         hidden
-        accept="application/pdf,.pdf"
+        accept="application/pdf,.pdf,.xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroenabled.12"
         onChange={handleResearchUploadInput}
       />
       {researchStage !== "idle" && (

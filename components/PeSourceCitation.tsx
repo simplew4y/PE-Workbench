@@ -47,7 +47,7 @@ function ExcelSourcePreview({ source }: { source: PeExcelSource }) {
     };
   })();
   const formulaText = selectedCell?.formula ?? selectedCell?.raw_value ?? selectedCell?.display_value ?? "";
-  const selectedValue = selectedCell?.display_value ?? selectedCell?.raw_value ?? "";
+  const selectedValue = selectedCell?.cached_value ?? selectedCell?.display_value ?? selectedCell?.raw_value ?? "";
 
   if (!window) {
     return <p className="m-0 p-5 text-sm text-[var(--text-muted)]">该引用范围没有可展示的单元格数据。</p>;
@@ -68,9 +68,12 @@ function ExcelSourcePreview({ source }: { source: PeExcelSource }) {
               "w-36 shrink-0 truncate rounded bg-[var(--bg-hover)] px-2 py-1 text-[var(--text-muted)]",
               selectedCell?.formula ? "visible" : "invisible",
             ].join(" ")}
-            title={selectedCell?.formula ? `计算值：${selectedValue}` : undefined}
+            title={selectedCell?.formula ? `缓存值：${selectedValue}` : undefined}
           >
-            计算值：{selectedValue}
+            缓存值：{selectedValue}
+          </span>
+          <span className="w-28 shrink-0 truncate text-[var(--text-muted)]" title={selectedCell?.number_format}>
+            {selectedCell?.number_format ?? ""}
           </span>
         </div>
       </div>
@@ -261,9 +264,6 @@ export function PeSourceCitation({ cwd, evidenceId, children, className }: PeSou
               )}
               {state.status === "ready" && state.source.kind === "excel" && (
                 <ExcelSourcePreview source={state.source} />
-              )}
-              {state.status === "ready" && state.source.kind === "text" && (
-                <pre className="m-0 whitespace-pre-wrap p-5 text-sm leading-7">{state.source.content}</pre>
               )}
             </div>
           </section>

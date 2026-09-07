@@ -37,6 +37,7 @@ export function PeProjectDocuments({ project, refreshKey = 0, onOpenFile }: Prop
   const [documents, setDocuments] = useState<PeProjectDocumentSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [retryingFilename, setRetryingFilename] = useState<string | null>(null);
 
   useEffect(() => {
     if (!project) {
@@ -89,6 +90,26 @@ export function PeProjectDocuments({ project, refreshKey = 0, onOpenFile }: Prop
   const openProjectFile = (relativePath: string, fileName: string) => {
     if (!project || !onOpenFile) return;
     onOpenFile(joinFilePath(project.root, relativePath), fileName);
+  };
+  const retryExcel = async (document: PeProjectDocumentSummary) => {
+    if (!project || retryingFilename) return;
+    setRetryingFilename(document.filename);
+    setError(null);
+    try {
+      const response = await fetch("/api/pe/ingest/retry", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ datasetId: project.datasetId, filename: document.filename }),
+      });
+      const body = await response.json().catch(() => ({})) as { error?: string };
+      if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
+      setReloadKey((value) => value + 1);
+      window.setTimeout(() => setReloadKey((value) => value + 1), 1200);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setRetryingFilename(null);
+    }
   };
 
   return (
@@ -170,8 +191,11 @@ export function PeProjectDocuments({ project, refreshKey = 0, onOpenFile }: Prop
             const size = formatFileSize(document.sizeBytes);
             const uploadedAt = new Date(document.uploadedAt);
             const metadata = [
+              document.fileType.toUpperCase(),
               size,
               document.pageCount > 0 ? t("projectDocuments.pages", { count: document.pageCount }) : null,
+              document.sheetCount > 0 ? t("projectDocuments.sheets", { count: document.sheetCount }) : null,
+              document.formulaCount > 0 ? t("projectDocuments.formulas", { count: document.formulaCount }) : null,
               Number.isNaN(uploadedAt.getTime())
                 ? null
                 : new Intl.DateTimeFormat(locale, { month: "short", day: "numeric" }).format(uploadedAt),
@@ -228,6 +252,18 @@ export function PeProjectDocuments({ project, refreshKey = 0, onOpenFile }: Prop
                         style={{ padding: 0, border: 0, background: "transparent", color: "var(--accent)", cursor: project && onOpenFile ? "pointer" : "default", fontSize: 9.5 }}
                       >
                         {t("projectDocuments.previewText")}
+                      </button>
+                    )}
+                    {document.retryable && (
+                      <button
+                        type="button"
+                        onClick={() => void retryExcel(document)}
+                        disabled={retryingFilename !== null}
+                        style={{ padding: 0, border: 0, background: "transparent", color: "var(--accent)", cursor: retryingFilename ? "wait" : "pointer", fontSize: 9.5 }}
+                      >
+                        {retryingFilename === document.filename
+                          ? t("projectDocuments.retrying")
+                          : t("projectDocuments.retry")}
                       </button>
                     )}
                   </div>

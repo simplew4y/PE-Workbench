@@ -50,7 +50,7 @@ function assertSafeSegment(segment: string): void {
   }
 }
 
-export function normalizePePdfFilename(value: string): string {
+export function normalizePeDocumentFilename(value: string): string {
   const filename = value.normalize("NFKC").trim();
   const parsed = path.parse(filename);
   if (
@@ -65,14 +65,24 @@ export function normalizePePdfFilename(value: string): string {
   ) {
     throw new Error(`Invalid portable PDF filename: ${value || "(empty)"}`);
   }
-  if (path.extname(filename).toLocaleLowerCase() !== ".pdf") {
+  if (![".pdf", ".xlsx", ".xlsm"].includes(path.extname(filename).toLocaleLowerCase())) {
     throw new Error(`Unsupported research file: ${filename}`);
   }
   return filename;
 }
 
+export function normalizePePdfFilename(value: string): string {
+  const filename = normalizePeDocumentFilename(value);
+  if (path.extname(filename).toLocaleLowerCase() !== ".pdf") throw new Error(`Unsupported PDF file: ${filename}`);
+  return filename;
+}
+
+export function peDocumentFilenameKey(filename: string): string {
+  return normalizePeDocumentFilename(filename).toLocaleLowerCase("und");
+}
+
 export function pePdfFilenameKey(filename: string): string {
-  return normalizePePdfFilename(filename).toLocaleLowerCase("und");
+  return peDocumentFilenameKey(normalizePePdfFilename(filename));
 }
 
 export function pePdfDocumentName(filename: string): string {
@@ -80,10 +90,10 @@ export function pePdfDocumentName(filename: string): string {
 }
 
 export function hasPeRawFilename(paths: PeProjectPaths, filename: string): boolean {
-  const filenameKey = pePdfFilenameKey(filename);
+  const filenameKey = peDocumentFilenameKey(filename);
   return readdirSync(paths.rawPath).some((entry) => {
     try {
-      return pePdfFilenameKey(entry) === filenameKey;
+      return peDocumentFilenameKey(entry) === filenameKey;
     } catch {
       return false;
     }
@@ -217,13 +227,13 @@ export function resolveProjectFile(paths: PeProjectPaths, relativePath: string):
 export function writePeRawFile(paths: PeProjectPaths, filename: string, content: Buffer): PeRawFile {
   const rawPath = ensureDirectoryWithin(paths.projectPath, "raw");
   const digest = sha256(content);
-  const normalizedFilename = normalizePePdfFilename(filename);
+  const normalizedFilename = normalizePeDocumentFilename(filename);
   const candidate = path.join(rawPath, normalizedFilename);
   if (!isPathInside(rawPath, path.resolve(candidate))) {
     throw new Error("Raw file path escapes the PE workspace");
   }
   if (hasPeRawFilename(paths, normalizedFilename)) {
-    throw new Error(`PDF filename already exists in this project: ${normalizedFilename}`);
+    throw new Error(`Document filename already exists in this project: ${normalizedFilename}`);
   }
   const temporary = path.join(rawPath, `.${normalizedFilename}.${randomUUID()}.tmp`);
   writeFileSync(temporary, content, { flag: "wx" });

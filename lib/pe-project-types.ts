@@ -25,6 +25,7 @@ export type PeProjectDocumentStatus =
 
 export interface PeProjectDocumentSummary {
   filename: string;
+  fileType: "pdf" | "xlsx" | "xlsm";
   status: PeProjectDocumentStatus;
   pageCount: number;
   sizeBytes: number | null;
@@ -33,6 +34,9 @@ export interface PeProjectDocumentSummary {
   warningCount: number;
   warnings: string[];
   needsOcrPageCount: number;
+  sheetCount: number;
+  formulaCount: number;
+  retryable: boolean;
   rawRelativePath: string | null;
   markdownRelativePath: string | null;
 }

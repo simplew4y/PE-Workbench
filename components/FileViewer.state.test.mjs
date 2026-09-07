@@ -71,3 +71,16 @@ test("markdown table tokens stay inline despite Tailwind's table utility", () =>
   assert.match(html, /class="token table[ "]/);
   assert.match(cssSource, /span\.token\.table\s*\{[^}]*display:\s*inline;/);
 });
+
+test("large text previews page through the file without parsing partial Markdown or syntax", () => {
+  const block = functionBlock("TextFileViewer", null);
+  assert.match(block, /getFileApiUrl\(filePath, "read", sourceSessionId, \{ page: textPageRef\.current \}\)/);
+  assert.match(block, /textPage: initialState\?\.textPage \?\? 0/);
+  assert.match(block, /viewerStateRef\.current\.textPage = textPageRef\.current/);
+  assert.match(block, /!isPagedText && data\?\.language === "markdown"/);
+  assert.match(block, /const hasPreview = !isPagedText &&/);
+  assert.match(block, /\) : isPagedText \? \(\s*<pre/);
+  assert.match(block, /files\.textPreviewPage/);
+  assert.match(block, /files\.previousPage/);
+  assert.match(block, /files\.nextPage/);
+});

@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, realpathSync, renameSync, rmSync } from "node:fs";
+import { existsSync, lstatSync, realpathSync, renameSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type {
@@ -8,8 +8,9 @@ import type {
 import {
   isPathInside,
   pePdfDocumentName,
-  pePdfFilenameKey,
+  peDocumentFilenameKey,
   type PeProjectPaths,
+  resolveProjectFile,
 } from "./paths.ts";
 import { assertPeCollectionDataset, openPeCollectionDatabase } from "./schema.ts";
 
@@ -66,7 +67,7 @@ export function findPeDocumentByFilename(
       FROM documents
       WHERE dataset_id = ? AND filename_key = ?
       LIMIT 1
-    `).get(datasetId, pePdfFilenameKey(filename)) as unknown as ExistingDocumentRow | undefined;
+    `).get(datasetId, peDocumentFilenameKey(filename)) as unknown as ExistingDocumentRow | undefined;
     return row ? {
       docId: row.doc_id,
       originalFilename: row.original_filename,
@@ -82,8 +83,8 @@ function writeJobRow(database: DatabaseSync, job: PeIngestJob): void {
   database.prepare(`
     INSERT INTO ingest_jobs (
       job_id, dataset_id, status, message, input_files_json, result_json,
-      warnings_json, created_at, started_at, finished_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      warnings_json, created_at, started_at, finished_at, updated_at, worker_pid, heartbeat_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(job_id) DO UPDATE SET
       status = excluded.status,
       message = excluded.message,
@@ -92,7 +93,9 @@ function writeJobRow(database: DatabaseSync, job: PeIngestJob): void {
       warnings_json = excluded.warnings_json,
       started_at = excluded.started_at,
       finished_at = excluded.finished_at,
-      updated_at = excluded.updated_at
+      updated_at = excluded.updated_at,
+      worker_pid = excluded.worker_pid,
+      heartbeat_at = excluded.heartbeat_at
   `).run(
     job.jobId,
     job.datasetId,
@@ -105,6 +108,8 @@ function writeJobRow(database: DatabaseSync, job: PeIngestJob): void {
     job.startedAt ?? null,
     job.finishedAt ?? null,
     updatedAt,
+    job.workerPid ?? null,
+    job.heartbeatAt ?? null,
   );
 }
 
@@ -136,7 +141,7 @@ export function saveParsedPeDocument(
       ).get(
         paths.datasetId,
         document.sha256,
-        pePdfFilenameKey(document.originalFilename),
+        peDocumentFilenameKey(document.originalFilename),
       ) as { doc_id: string } | undefined;
       if (existing) throw new Error(`Document name or content already indexed as ${existing.doc_id}`);
 
@@ -146,15 +151,16 @@ export function saveParsedPeDocument(
           status, page_count, parser_name, parser_version,
           title, brokerage, document_date, rating, target_price, exhibits_json,
           pdf_metadata_json, artifact_directory, document_markdown_path,
-          layout_json_path, warnings_json, created_at, updated_at
+          layout_json_path, warnings_json, created_at, updated_at,
+          file_type, source_relpath, file_size, readable_text_path
         ) VALUES (
-          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
         )
       `).run(
         document.docId,
         document.datasetId,
         document.originalFilename,
-        pePdfFilenameKey(document.originalFilename),
+        peDocumentFilenameKey(document.originalFilename),
         document.rawPath,
         document.sha256,
         document.warnings.length > 0 ? "completed_with_warnings" : "completed",
@@ -174,6 +180,10 @@ export function saveParsedPeDocument(
         JSON.stringify(document.warnings),
         now,
         now,
+        "pdf",
+        document.originalFilename,
+        statSync(resolveProjectFile(paths, document.rawPath)).size,
+        document.documentMarkdownPath,
       );
 
       const insertPage = database.prepare(`

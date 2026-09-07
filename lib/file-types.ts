@@ -2,6 +2,13 @@ export const TEXT_PREVIEW_MAX_BYTES = 256 * 1024;
 export const IMAGE_PREVIEW_MAX_BYTES = 10 * 1024 * 1024;
 export const DOCX_PREVIEW_MAX_BYTES = 10 * 1024 * 1024;
 
+export interface TextPreviewPage {
+  page: number;
+  pageCount: number;
+  byteStart: number;
+  byteEnd: number;
+}
+
 export type DocumentPreviewKind = "pdf" | "docx";
 
 export const IMAGE_EXT_TO_MIME: Record<string, string> = {
