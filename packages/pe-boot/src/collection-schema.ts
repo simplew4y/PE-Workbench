@@ -353,8 +353,22 @@ ${WORKBOOK_SCHEMA}`;
 
 export function openPeCollectionDatabase(collectionPath: string): DatabaseSync {
 	const database = new DatabaseSync(collectionPath, { timeout: 10_000 });
-	database.exec("PRAGMA busy_timeout=10000; PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL");
-	return database;
+	try {
+		database.exec("PRAGMA busy_timeout=10000; PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL");
+		return database;
+	} catch (error) {
+		database.close();
+		throw error;
+	}
+}
+
+/** Preserve the original failure, including when SQLite already rolled back on disk exhaustion. */
+export function rollbackPeTransaction(database: DatabaseSync): void {
+	try {
+		if (database.isTransaction) database.exec("ROLLBACK");
+	} catch {
+		// The caller closes the connection; a cleanup error must not replace the original error.
+	}
 }
 
 function schemaVersion(database: DatabaseSync): number | undefined {
@@ -561,7 +575,7 @@ export function initializePeCollectionDatabase(collectionPath: string, identity?
 			if (foreignKeyErrors.length) throw new Error("PE collection migration failed foreign key validation");
 			database.exec(`PRAGMA user_version=${PE_PIPELINE_SCHEMA_VERSION}; COMMIT`);
 		} catch (error) {
-			database.exec("ROLLBACK");
+			rollbackPeTransaction(database);
 			throw error;
 		} finally {
 			database.exec("PRAGMA foreign_keys=ON");

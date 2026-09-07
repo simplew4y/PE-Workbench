@@ -4,6 +4,7 @@ export {
 	openPeCollectionDatabase,
 	PE_COLLECTION_SCHEMA,
 	PE_PIPELINE_SCHEMA_VERSION,
+	rollbackPeTransaction,
 } from "./collection-schema.ts";
 export {
 	type PeDocumentOptions,

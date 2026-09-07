@@ -16,7 +16,7 @@ import {
 import { dirname, join, relative, resolve } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
-import { openPeCollectionDatabase } from "./collection-schema.ts";
+import { openPeCollectionDatabase, rollbackPeTransaction } from "./collection-schema.ts";
 import { type SqlRow, sourceEvidenceId, sourceMarkdownCitation, textValue } from "./tools/database.ts";
 
 export const EXCEL_TABLES = [
@@ -253,7 +253,7 @@ function cachedWorkbook(
 	} catch {
 		return undefined;
 	} finally {
-		database.exec("COMMIT");
+		if (database.isTransaction) database.exec("COMMIT");
 	}
 }
 
@@ -298,7 +298,7 @@ function claim(
 		database.exec("COMMIT");
 		return true;
 	} catch (error) {
-		database.exec("ROLLBACK");
+		rollbackPeTransaction(database);
 		throw error;
 	}
 }
@@ -443,7 +443,7 @@ function publish(
 			.run(now, `${document.doc_id}:${revision}`, ownerId);
 		database.exec("COMMIT");
 	} catch (error) {
-		database.exec("ROLLBACK");
+		rollbackPeTransaction(database);
 		throw error;
 	}
 }
@@ -593,8 +593,8 @@ export async function prepareWorkbook(
 		if (claimed) {
 			const message = error instanceof Error ? error.message : String(error);
 			const now = new Date().toISOString();
-			database.exec("BEGIN IMMEDIATE");
 			try {
+				database.exec("BEGIN IMMEDIATE");
 				const updated = database
 					.prepare(
 						"UPDATE processing_jobs SET status='failed',lease_expires_at=0,error=?,updated_at=? WHERE job_key=? AND owner_id=? AND status='processing'",
@@ -617,7 +617,7 @@ export async function prepareWorkbook(
 						);
 				database.exec("COMMIT");
 			} catch {
-				database.exec("ROLLBACK");
+				rollbackPeTransaction(database);
 			}
 		}
 		throw error;

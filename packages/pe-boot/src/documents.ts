@@ -1,7 +1,21 @@
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+	closeSync,
+	existsSync,
+	lstatSync,
+	mkdirSync,
+	openSync,
+	readFileSync,
+	realpathSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { basename, extname, isAbsolute, join, relative, resolve } from "node:path";
-import { initializePeCollectionDatabase, openPeCollectionDatabase } from "./collection-schema.ts";
+import {
+	initializePeCollectionDatabase,
+	openPeCollectionDatabase,
+	rollbackPeTransaction,
+} from "./collection-schema.ts";
 import { type PreparedWorkbook, prepareWorkbook, validatePeExcelUpload, verifyPeOriginal } from "./excel-processing.ts";
 import { DOCUMENT_EXTENSIONS } from "./source.ts";
 import {
@@ -130,8 +144,13 @@ export function registerPeDocuments(
 				? `${name.slice(0, -extension.length)}--${docId}${extension}`
 				: name;
 			const target = join(root, "raw", storedName);
-			writeFileSync(target, bytes, { flag: "wx", mode: 0o600 });
+			const descriptor = openSync(target, "wx", 0o600);
 			created.push(target);
+			try {
+				writeFileSync(descriptor, bytes);
+			} finally {
+				closeSync(descriptor);
+			}
 			const now = new Date().toISOString();
 			database
 				.prepare("UPDATE documents SET is_current=0 WHERE dataset_id=? AND logical_doc_id=?")
@@ -170,7 +189,7 @@ export function registerPeDocuments(
 		database.exec("COMMIT");
 		return { documents, fileCount: Number(count.count) };
 	} catch (error) {
-		database.exec("ROLLBACK");
+		rollbackPeTransaction(database);
 		for (const path of created) rmSync(path, { force: true });
 		throw error;
 	} finally {
