@@ -65,6 +65,30 @@ function upload(root: string, filename: string, text?: string): string {
 }
 
 describe("on-demand documents and file citations", () => {
+	it.each(["model.xlsx", "report.pdf"])("preserves Unicode punctuation when registering %s", (asset) => {
+		const root = project();
+		const extension = asset.split(".").at(-1);
+		const name = `研究报告（LULU.US）：Product issue or brand.${extension}`;
+		const bytes = readFileSync(join(assets, asset));
+		const first = registerPeDocuments(root, "dataset-1", [{ name, bytes }]).documents[0];
+		expect(first.original_filename).toBe(name);
+		expect(first.raw_path).toBe(`raw/${name}`);
+		expect(readFileSync(join(root, "raw", name))).toEqual(bytes);
+		expect(registerPeDocuments(root, "dataset-1", [{ name, bytes }]).documents[0].doc_id).toBe(first.doc_id);
+	});
+
+	it("keeps version identity when a previously normalized filename uses full-width parentheses", () => {
+		const root = project();
+		const bytes = readFileSync(join(assets, "model.xlsx"));
+		const first = registerPeDocuments(root, "dataset-1", [{ name: "Model(1).xlsx", bytes }]).documents[0];
+		const name = "Model（1）.xlsx";
+		expect(registerPeDocuments(root, "dataset-1", [{ name, bytes }]).documents[0].doc_id).toBe(first.doc_id);
+		const changed = Buffer.concat([bytes, Buffer.from("next version")]);
+		const next = registerPeDocuments(root, "dataset-1", [{ name, bytes: changed }]).documents[0];
+		expect(next).toMatchObject({ logical_doc_id: first.logical_doc_id, version_no: 2, original_filename: name });
+		expect(readFileSync(join(root, "raw", "Model(1).xlsx"))).toEqual(bytes);
+	});
+
 	it("extends an existing research workbook with immutable versions and opens its old object/cell/fact links", async () => {
 		const root = mkdtempSync(join(tmpdir(), "pe-research-document-"));
 		roots.push(root);

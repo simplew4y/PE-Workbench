@@ -77,7 +77,8 @@ export function registerPeDocuments(
 ): { documents: SqlRow[]; fileCount: number } {
 	const root = projectRoot(cwd);
 	const inputs = files.map(({ name, bytes }) => {
-		name = name.normalize("NFKC").trim();
+		// Preserve legal full-width punctuation in names stored on disk and shown to users.
+		name = name.normalize("NFC").trim();
 		const extension = extname(name).toLowerCase();
 		if (basename(name) !== name || /[\\/\x00-\x1f<>:"|?*]/u.test(name) || !DOCUMENT_EXTENSIONS.has(extension))
 			throw new PeSourceError(400, `Unsupported document filename: ${name}`);
@@ -105,7 +106,11 @@ export function registerPeDocuments(
 		database.exec("BEGIN IMMEDIATE");
 		const documents: SqlRow[] = [];
 		for (const { name, bytes, extension, checksum } of inputs) {
-			const generatedLogicalId = createHash("sha256").update(`${datasetId}\0${name}`).digest("hex").slice(0, 40);
+			const identityName = name.normalize("NFKC");
+			const generatedLogicalId = createHash("sha256")
+				.update(`${datasetId}\0${identityName}`)
+				.digest("hex")
+				.slice(0, 40);
 			const current = database
 				.prepare(`SELECT * FROM documents WHERE dataset_id=?
 				AND (logical_doc_id=? OR source_relpath=? OR source_relpath=?
@@ -116,7 +121,7 @@ export function registerPeDocuments(
 					generatedLogicalId,
 					name,
 					`raw/${name}`,
-					name.toLocaleLowerCase("und"),
+					identityName.toLocaleLowerCase("und"),
 					extension.slice(1),
 				) as SqlRow | undefined;
 			const logicalId = textValue(current ?? {}, "logical_doc_id") ?? generatedLogicalId;
@@ -168,7 +173,7 @@ export function registerPeDocuments(
 					current?.doc_id ?? null,
 					name,
 					name,
-					name.normalize("NFKC").toLocaleLowerCase("und"),
+					identityName.toLocaleLowerCase("und"),
 					name,
 					`raw/${storedName}`,
 					`raw/${storedName}`,
