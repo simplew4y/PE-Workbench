@@ -22,4 +22,33 @@ describe("PE system prompt", () => {
 		expect(prompt).not.toContain("Presentation decision policy");
 		expect(prompt).not.toContain("Component capabilities");
 	});
+
+	it("keeps valuation verification and version-bound evidence rules always available", () => {
+		const prompt = buildPeSystemPrompt("/workspace");
+		expect(prompt).toContain("prepared by the background Excel pipeline");
+		expect(prompt).toContain("same doc_id throughout analysis");
+		expect(prompt).toContain("historical citations must never silently resolve to the latest version");
+		expect(prompt).toContain("call pe_valuation_output_locate before choosing an output cell");
+		expect(prompt).toContain("ranked candidate, not recalculation proof");
+		expect(prompt).toContain("Only status=verified");
+		expect(prompt).toContain("distinguish structural_status from calculation_validation.status");
+		expect(prompt).toContain("When only a screenshot, excerpt, or another analysis is available");
+		expect(prompt).toContain("do not invent doc_id, cells, citations, or tool results");
+	});
+
+	it("keeps complete but natural valuation answers without forcing visual components", () => {
+		const prompt = buildPeSystemPrompt("/workspace");
+		for (const section of ["模型逻辑框架", "核心驱动因素", "盈利预测与敏感性分析", "模型核心风险点"]) {
+			expect(prompt).toContain(section);
+		}
+		expect(prompt).toContain("Default to prose, even for complex research questions");
+		expect(prompt).toContain("there is no component quota");
+		expect(prompt).toContain("never hide essential conclusions behind clicks");
+		expect(prompt).toContain("not limited to 3-5 lines or 250 Chinese characters");
+		expect(prompt).toContain("answer narrow questions directly");
+		expect(prompt).toContain("verified inputs, the applicable formula, consistent units");
+		expect(prompt).toContain("not a live quote");
+		expect(prompt).toContain("compact superscript citation markers with accessible source labels");
+		expect(prompt).not.toMatch(/green (?:citation|source|evidence)/i);
+	});
 });

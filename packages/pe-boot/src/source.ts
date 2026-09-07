@@ -1,8 +1,25 @@
-/** Stable Excel evidence IDs. PDF evidence continues to use page:<page_id>. */
+/** File locations are independent of parser caches and search results. */
+export const DOCUMENT_EXTENSIONS = new Set([
+	".pdf",
+	".xlsx",
+	".xlsm",
+	".docx",
+	".pptx",
+	".csv",
+	".md",
+	".markdown",
+	".txt",
+]);
+
+export type PeSourceLocation =
+	| { kind: "pdf"; pageStart: number; pageEnd: number }
+	| { kind: "excel"; sheet: string; range: string }
+	| { kind: "text"; lineStart: number; lineEnd: number }
+	| { kind: "block"; blockIndex: number };
+
 export interface PeSourceReference {
 	docId: string;
-	sheet: string;
-	range: string;
+	location: PeSourceLocation;
 }
 
 export interface ExcelBounds {
@@ -41,6 +58,7 @@ export interface PeExcelGridWindow {
 interface PeSourceBase {
 	dataset_id: string;
 	doc_id: string;
+	version_no: number;
 	evidence_id: string;
 	citation: string;
 	markdown_citation: string;
@@ -65,7 +83,12 @@ export interface PeExcelSource extends PeSourceBase {
 	cells: PeSourceCell[];
 }
 
-export type PeSourcePayload = PePdfSource | PeExcelSource;
+export interface PeTextSource extends PeSourceBase {
+	kind: "text";
+	content: string;
+}
+
+export type PeSourcePayload = PePdfSource | PeExcelSource | PeTextSource;
 
 export function excelColumnLabel(column: number): string {
 	if (!Number.isInteger(column) || column < 1 || column > 16_384) return "";
@@ -97,21 +120,33 @@ export function parseExcelCellRange(value: string | undefined): ExcelBounds | un
 	};
 }
 
-export function sourceId(reference: PeSourceReference): string {
-	if (
-		!/^[A-Za-z0-9_-]{1,128}$/u.test(reference.docId) ||
-		!reference.sheet ||
-		reference.sheet.length > 255 ||
-		!parseExcelCellRange(reference.range)
-	) {
-		throw new Error("Invalid Excel source location");
+export function sourceId(reference: PeSourceReference | { docId: string; sheet: string; range: string }): string {
+	const { docId } = reference;
+	const location =
+		"location" in reference
+			? reference.location
+			: { kind: "excel" as const, sheet: reference.sheet, range: reference.range };
+	const fields: (string | number)[] = [docId, location.kind];
+	switch (location.kind) {
+		case "pdf":
+			fields.push(location.pageStart, location.pageEnd);
+			break;
+		case "excel":
+			fields.push(location.sheet, location.range);
+			break;
+		case "text":
+			fields.push(location.lineStart, location.lineEnd);
+			break;
+		case "block":
+			fields.push(location.blockIndex);
 	}
-	const payload = JSON.stringify({ v: 1, doc_id: reference.docId, sheet: reference.sheet, range: reference.range });
-	const bytes = new TextEncoder().encode(payload);
-	return `source:${btoa(String.fromCharCode(...bytes))
+	const bytes = new TextEncoder().encode(JSON.stringify(fields));
+	const id = `source:${btoa(String.fromCharCode(...bytes))
 		.replaceAll("+", "-")
 		.replaceAll("/", "_")
 		.replace(/=+$/u, "")}`;
+	if (!parseSourceId(id)) throw new Error("Invalid source location");
+	return id;
 }
 
 export function parseSourceId(id: string): PeSourceReference | undefined {
@@ -119,22 +154,28 @@ export function parseSourceId(id: string): PeSourceReference | undefined {
 	try {
 		const encoded = id.slice(7).replaceAll("-", "+").replaceAll("_", "/");
 		const bytes = Uint8Array.from(atob(encoded), (character) => character.charCodeAt(0));
-		const value: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
-		if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
-		const payload = value as Record<string, unknown>;
-		if (
-			payload.v !== 1 ||
-			typeof payload.doc_id !== "string" ||
-			!/^[A-Za-z0-9_-]{1,128}$/u.test(payload.doc_id) ||
-			typeof payload.sheet !== "string" ||
-			!payload.sheet ||
-			payload.sheet.length > 255 ||
-			typeof payload.range !== "string" ||
-			!parseExcelCellRange(payload.range)
-		) {
-			return undefined;
+		let fields: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+		// Existing research conversations encode the same immutable Excel location
+		// as an object. New links use the shared array format for every file type.
+		if (fields && typeof fields === "object" && !Array.isArray(fields)) {
+			const legacy = fields as Record<string, unknown>;
+			if (legacy.v !== 1) return undefined;
+			fields = [legacy.doc_id, "excel", legacy.sheet, legacy.range];
 		}
-		return { docId: payload.doc_id, sheet: payload.sheet, range: payload.range };
+		if (!Array.isArray(fields)) return undefined;
+		const [docId, kind, start, end] = fields as unknown[];
+		if (typeof docId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/u.test(docId)) return undefined;
+		if (kind === "excel" && fields.length === 4) {
+			if (typeof start !== "string" || !start || start.length > 255 || typeof end !== "string") return undefined;
+			if (!parseExcelCellRange(end)) return undefined;
+			return { docId, location: { kind, sheet: start, range: end } };
+		}
+		if (typeof start !== "number" || !Number.isSafeInteger(start) || start < 1) return undefined;
+		if (kind === "block" && fields.length === 3) return { docId, location: { kind, blockIndex: start } };
+		if (fields.length !== 4 || typeof end !== "number" || !Number.isSafeInteger(end) || end < start) return undefined;
+		if (kind === "pdf") return { docId, location: { kind, pageStart: start, pageEnd: end } };
+		if (kind === "text") return { docId, location: { kind, lineStart: start, lineEnd: end } };
+		return undefined;
 	} catch {
 		return undefined;
 	}

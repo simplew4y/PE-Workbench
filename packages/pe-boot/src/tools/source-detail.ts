@@ -1,5 +1,6 @@
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { resolvePeEvidenceSource } from "../evidence.ts";
 import {
 	booleanValue,
 	evidenceLocator,
@@ -17,7 +18,7 @@ const DEFAULT_MAX_CHARS = 6_000;
 const DEFAULT_MAX_CELLS = 48;
 
 export const PE_SOURCE_DETAIL_PROMPT_SNIPPET =
-	"Inspect bounded PDF text or Excel context for an evidence ID returned by pe_dataset_search";
+	"Verify a PDF page: citation or a versioned source:/cell: location using the same resolver as the source preview";
 
 export type SourceDetailMode = "auto" | "meta" | "text" | "excel_window" | "full";
 
@@ -411,42 +412,53 @@ export const peSourceDetailTool = defineTool({
 	name: "pe_source_detail",
 	label: "PE Source Detail",
 	description:
-		"Verify an evidence ID returned by pe_dataset_search. Returns bounded PDF page text or an Excel cell window with values and formulas. Use auto mode unless a smaller meta/text/excel_window response is required.",
+		"Verify a PDF page: or versioned source:/cell: evidence ID. Returns PDF page text, Excel cells with formulas and cached values, text lines, or an Office block. Rebuilds missing reading caches. Historical versions remain resolvable.",
 	promptSnippet: PE_SOURCE_DETAIL_PROMPT_SNIPPET,
 	parameters: Type.Object({
 		evidence_id: Type.String({
-			description: "Evidence ID returned by pe_dataset_search: chunk:<id>, fact:<id>, or cell:<id>.",
+			description: "Exact page:, source:, or legacy cell:/fact:/chunk: evidence ID returned by PE tools.",
 			minLength: 3,
+			maxLength: 2048,
 		}),
 		dataset_id: Type.Optional(
 			Type.String({ description: "Optional dataset ID. It must match the dataset bound to the current workspace." }),
 		),
 		context_radius: Type.Optional(
 			Type.Integer({
-				description: "PDF pages or Excel rows around the source. Defaults to 1; maximum 3.",
+				description: "Legacy chunk: only: surrounding PDF pages. Defaults to 1; maximum 3.",
 				minimum: 0,
 				maximum: 3,
 			}),
 		),
 		mode: Type.Optional(
-			Type.String({ description: "Response shape: auto, meta, text, excel_window, or full. Defaults to auto." }),
+			Type.String({
+				description: "Legacy chunk: only: auto, meta, text, excel_window, or full. Defaults to auto.",
+			}),
 		),
 		max_chars: Type.Optional(
 			Type.Integer({
-				description: "Maximum characters for content windows. Defaults to 6000; maximum 20000.",
+				description: "Legacy chunk: only: maximum content characters. Defaults to 6000; maximum 20000.",
 				minimum: 500,
 				maximum: 20_000,
 			}),
 		),
 		max_cells: Type.Optional(
 			Type.Integer({
-				description: "Maximum Excel cells in the returned window. Defaults to 48; maximum 80.",
+				description: "Legacy chunk: only: maximum Excel cells. Defaults to 48; maximum 80.",
 				minimum: 1,
 				maximum: 80,
 			}),
 		),
 	}),
 	async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+		if (/^(source|page|cell|fact):/u.test(params.evidence_id.trim())) {
+			if (params.dataset_id) {
+				const connection = openPeDataset(ctx.cwd, params.dataset_id);
+				connection.database.close();
+			}
+			const { payload } = await resolvePeEvidenceSource(ctx.cwd, params.evidence_id.trim(), signal);
+			return { content: [{ type: "text", text: JSON.stringify(payload) }], details: payload };
+		}
 		const result = getPeSourceDetail(
 			ctx.cwd,
 			{

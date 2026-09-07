@@ -65,7 +65,7 @@ afterEach(() => {
 	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-describe("PE collection schema v3", () => {
+describe("legacy research PDF collection migration", () => {
 	it("migrates v2 without changing PDF rows or page IDs", () => {
 		const { databasePath } = v2Fixture();
 		initializePeCollectionDatabase(databasePath);
@@ -106,7 +106,7 @@ describe("PE collection schema v3", () => {
 			expect(
 				database.prepare("SELECT value FROM schema_metadata WHERE key='pipeline_schema_version'").get(),
 			).toEqual({
-				value: "3",
+				value: "4",
 			});
 		} finally {
 			database.close();
@@ -121,7 +121,7 @@ describe("PE collection schema v3", () => {
 		expect(() => initializePeCollectionDatabase(databasePath)).toThrow("Legacy Python Pipeline data");
 	});
 
-	it("enforces one filename and one hash per project", () => {
+	it("keeps one filename and one hash for pipeline PDFs", () => {
 		const { databasePath } = v2Fixture();
 		initializePeCollectionDatabase(databasePath);
 		const database = openPeCollectionDatabase(databasePath);

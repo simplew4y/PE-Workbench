@@ -4,7 +4,7 @@ import { preparePeDocument } from "../documents.ts";
 import { numberValue, openPeDataset, type SqlRow, sourceFilename, textValue } from "./database.ts";
 
 export const PE_WORKBOOK_INSPECT_PROMPT_SNIPPET =
-	"List Excel workbooks, sheets, formula-cache coverage, date-candidate counts, and selection warnings before locating valuation outputs";
+	"List active Excel workbooks and their versions, sheets, formula-cache coverage, date-candidate counts, and selection warnings before locating valuation outputs";
 
 export interface PeWorkbookInspectOptions {
 	datasetId?: string;
@@ -23,8 +23,8 @@ function workbookRows(
 ): SqlRow[] {
 	if (!tableExists(database, "documents")) return [];
 	const cached = tableExists(database, "excel_workbooks");
-	const select = `SELECT d.doc_id, d.original_filename, d.source_relpath,
-	                       d.file_type, d.document_date, d.parser_name, d.parser_version, d.status
+	const select = `SELECT d.doc_id, d.logical_doc_id, d.version_no, d.original_filename, d.source_relpath,
+	                       d.file_type, d.doc_type, d.document_date, d.parser_name, d.parser_version, d.status
 	                       ${
 										cached
 											? `, w.workbook_type, w.sheet_count, w.visible_sheet_count, w.formula_count,
@@ -34,13 +34,19 @@ function workbookRows(
 									}
 	                FROM documents d
 	                ${cached ? "LEFT JOIN excel_workbooks w ON w.doc_id = d.doc_id AND w.dataset_id = d.dataset_id" : ""}
-	                WHERE d.dataset_id = ? AND d.file_type IN ('xlsx', 'xlsm')`;
+	                WHERE d.dataset_id = ?
+	                  AND d.file_type IN ('xlsx', 'xlsm')
+	                  AND d.deleted_at IS NULL
+	                  AND COALESCE(d.is_current, 1) = 1
+	                  AND COALESCE(d.lifecycle_state, 'active') = 'active'`;
 	if (docId) {
 		return database
-			.prepare(`${select} AND d.doc_id = ? ORDER BY d.document_date DESC`)
+			.prepare(`${select} AND d.doc_id = ? ORDER BY d.document_date DESC, d.version_no DESC`)
 			.all(datasetId, docId) as SqlRow[];
 	}
-	return database.prepare(`${select} ORDER BY d.document_date DESC, d.original_filename`).all(datasetId) as SqlRow[];
+	return database
+		.prepare(`${select} ORDER BY d.document_date DESC, d.version_no DESC, d.original_filename`)
+		.all(datasetId) as SqlRow[];
 }
 
 function jsonObjectValue(row: SqlRow, key: string): Record<string, unknown> | undefined {
@@ -67,6 +73,7 @@ function inspectWorkbook(
 		return {
 			doc_id: docId,
 			filename: sourceFilename(row),
+			version_no: numberValue(row, "version_no"),
 			status: textValue(row, "status"),
 			prepared: false,
 			sheets: [],
@@ -154,9 +161,12 @@ function inspectWorkbook(
 	return {
 		doc_id: docId,
 		prepared: true,
+		logical_doc_id: textValue(row, "logical_doc_id"),
+		version_no: numberValue(row, "version_no"),
+		status: textValue(row, "status"),
 		filename: sourceFilename(row),
 		file_type: textValue(row, "file_type"),
-		status: textValue(row, "status"),
+		doc_type: textValue(row, "doc_type"),
 		document_date: textValue(row, "document_date"),
 		parser_name: textValue(row, "parser_name"),
 		parser_version: textValue(row, "parser_version"),
@@ -188,7 +198,7 @@ export function inspectPeWorkbooks(
 		signal?.throwIfAborted();
 		const rows = workbookRows(connection.database, connection.datasetId, requestedDocId);
 		if (requestedDocId && rows.length === 0) {
-			throw new Error(`Excel workbook not found in the current dataset: ${requestedDocId}`);
+			throw new Error(`active Excel workbook not found in the current dataset: ${requestedDocId}`);
 		}
 		const workbooks = rows.map((row) =>
 			inspectWorkbook(connection.database, connection.datasetId, row, options.includeHiddenSheets ?? true),
@@ -196,11 +206,12 @@ export function inspectPeWorkbooks(
 		const selectionRequired = !requestedDocId && workbooks.length > 1;
 		const selectedDocId = requestedDocId ?? (workbooks.length === 1 ? String(workbooks[0].doc_id) : undefined);
 		const warnings: string[] = [];
-		if (workbooks.length === 0) warnings.push("No uploaded Excel workbook was found");
-		if (selectionRequired) warnings.push("Multiple Excel workbooks exist; select one doc_id before reading cells");
+		if (workbooks.length === 0) warnings.push("No active uploaded Excel workbook was found");
+		if (selectionRequired)
+			warnings.push("Multiple active Excel workbooks exist; select one doc_id before reading cells");
 		return {
 			dataset_id: connection.datasetId,
-			workbook_count: workbooks.length,
+			active_workbook_count: workbooks.length,
 			selection_required: selectionRequired,
 			...(selectedDocId ? { selected_doc_id: selectedDocId } : {}),
 			warnings,
@@ -217,13 +228,13 @@ export const peWorkbookInspectTool = defineTool({
 	name: "pe_workbook_inspect",
 	label: "PE Workbook Inspect",
 	description:
-		"Inspect Excel workbooks, sheets, hidden states, formula counts, formula-cache coverage, and date-candidate counts. Select one doc_id before detailed analysis.",
+		"Inspect active Excel workbooks, versions, sheets, hidden states, formula counts, formula-cache coverage, and date-candidate counts. Call before valuation-output location and select exactly one doc_id.",
 	promptSnippet: PE_WORKBOOK_INSPECT_PROMPT_SNIPPET,
 	parameters: Type.Object({
 		dataset_id: Type.Optional(
 			Type.String({ description: "Optional dataset ID. It must match the dataset bound to the current workspace." }),
 		),
-		doc_id: Type.Optional(Type.String({ description: "Inspect one exact workbook document ID." })),
+		doc_id: Type.Optional(Type.String({ description: "Inspect one exact active workbook document ID." })),
 		include_hidden_sheets: Type.Optional(
 			Type.Boolean({ description: "Include hidden and very-hidden worksheets. Defaults to true." }),
 		),

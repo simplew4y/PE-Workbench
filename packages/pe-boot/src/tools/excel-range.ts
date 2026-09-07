@@ -36,13 +36,16 @@ export function getPeExcelRange(
 		signal?.throwIfAborted();
 		const document = connection.database
 			.prepare(
-				`SELECT d.doc_id, d.original_filename, d.source_relpath,
-				        d.file_type, d.document_date, d.parser_name, d.parser_version
+				`SELECT d.doc_id, d.logical_doc_id, d.version_no, d.original_filename, d.source_relpath,
+				        d.file_type, d.doc_type, d.document_date, d.parser_name, d.parser_version
 				 FROM documents d
-				 WHERE d.dataset_id = ? AND d.doc_id = ? AND d.file_type IN ('xlsx','xlsm')`,
+				 WHERE d.dataset_id = ? AND d.doc_id = ?
+				   AND d.deleted_at IS NULL
+				   AND COALESCE(d.is_current, 1) = 1
+				   AND COALESCE(d.lifecycle_state, 'active') = 'active'`,
 			)
 			.get(connection.datasetId, docId) as SqlRow | undefined;
-		if (!document) throw new Error(`Excel document not found in the current dataset: ${docId}`);
+		if (!document) throw new Error(`active document not found in the current dataset: ${docId}`);
 
 		const sheet = connection.database
 			.prepare(
@@ -52,7 +55,7 @@ export function getPeExcelRange(
 				 WHERE dataset_id = ? AND doc_id = ? AND sheet_name = ?`,
 			)
 			.get(connection.datasetId, docId, sheetName) as SqlRow | undefined;
-		if (!sheet) throw new Error(`Excel sheet not found in document ${docId}: ${sheetName}`);
+		if (!sheet) throw new Error(`Excel sheet not found in active document ${docId}: ${sheetName}`);
 
 		const cells = readExcelCellsByBounds(
 			connection.database,
@@ -74,9 +77,12 @@ export function getPeExcelRange(
 			dataset_id: connection.datasetId,
 			document: {
 				doc_id: textValue(document, "doc_id"),
+				logical_doc_id: textValue(document, "logical_doc_id"),
 				filename: sourceFilename(document),
 				file_type: textValue(document, "file_type"),
+				doc_type: textValue(document, "doc_type"),
 				document_date: textValue(document, "document_date"),
+				version_no: numberValue(document, "version_no"),
 				parser_name: textValue(document, "parser_name"),
 				parser_version: textValue(document, "parser_version"),
 			},
@@ -112,11 +118,11 @@ export const peExcelRangeTool = defineTool({
 	name: "pe_excel_range",
 	label: "PE Excel Range",
 	description:
-		"Read an exact A1 range from a selected Excel document, including formulas, cached values, number formats, units, and citations.",
+		"Read an exact A1 range from a specific active Excel document. Use after selecting doc_id; returns non-empty cells with formulas, cached values, number formats, units, and citations.",
 	promptSnippet: PE_EXCEL_RANGE_PROMPT_SNIPPET,
 	parameters: Type.Object({
 		doc_id: Type.String({
-			description: "Exact Excel document ID returned by pe_workbook_inspect.",
+			description: "Exact active Excel document ID returned by pe_workbook_inspect.",
 			minLength: 1,
 		}),
 		sheet_name: Type.String({ description: "Exact worksheet name.", minLength: 1 }),

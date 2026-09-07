@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { initializePeCollectionDatabase, openPeCollectionDatabase } from "../src/collection-schema.ts";
 import { preparePeDocument, registerPeDocuments } from "../src/documents.ts";
@@ -18,7 +18,7 @@ import { inspectPeWorkbooks } from "../src/tools/workbook-inspect.ts";
 const roots: string[] = [];
 
 function fixture(): { root: string; workbook: Uint8Array } {
-	const root = mkdtempSync(join(tmpdir(), "pe-excel-pipeline-"));
+	const root = realpathSync(mkdtempSync(join(tmpdir(), "pe-excel-pipeline-")));
 	roots.push(root);
 	for (const directory of ["raw", "meta", "generated"]) mkdirSync(join(root, directory));
 	initializePeCollectionDatabase(join(root, "meta", "collection.sqlite3"), {
@@ -84,9 +84,11 @@ describe("Excel preparation and tools", () => {
 			preparePeDocument(root, { docId, datasetId: "dataset-excel" }),
 			preparePeDocument(root, { docId, datasetId: "dataset-excel" }),
 		]);
-		expect(prepared.cachePath).toBe(join(root, "meta", "documents", "估值模型.xlsx", "manifest.json"));
+		expect(prepared.cachePath).toContain(join(root, "meta", "excel", docId));
 		expect(concurrent.cachePath).toBe(prepared.cachePath);
-		expect(prepared.readablePath).toBe(join(root, "meta", "text", "估值模型.xlsx.txt"));
+		expect(prepared.readablePath).toBe(join(dirname(prepared.cachePath), "readable.txt"));
+		expect(prepared.document.status).toBe("completed_with_warnings");
+		expect(prepared.warnings).toContainEqual(expect.stringContaining("not recalculated"));
 		expect(readFileSync(prepared.readablePath, "utf8")).toContain("估值模型!B4");
 
 		const database = openPeCollectionDatabase(join(root, "meta", "collection.sqlite3"));
@@ -112,10 +114,10 @@ describe("Excel preparation and tools", () => {
 		}
 
 		const inspected = inspectPeWorkbooks(root) as {
-			workbook_count: number;
+			active_workbook_count: number;
 			workbooks: Array<Record<string, unknown>>;
 		};
-		expect(inspected.workbook_count).toBe(1);
+		expect(inspected.active_workbook_count).toBe(1);
 		expect(inspected.workbooks[0]).toMatchObject({ doc_id: docId, sheet_count: 2, formula_count: 1 });
 
 		const range = getPeExcelRange(root, { docId, sheetName: "估值模型", cellRange: "A2:B4" }) as {
@@ -123,7 +125,10 @@ describe("Excel preparation and tools", () => {
 		};
 		const output = range.cells.find((cell) => cell.cell_ref === "B4");
 		expect(output?.formula).toBe("=B2*B3");
-		expect(parseSourceId(output?.evidence_id ?? "")).toEqual({ docId, sheet: "估值模型", range: "B4" });
+		expect(parseSourceId(output?.evidence_id ?? "")).toEqual({
+			docId,
+			location: { kind: "excel", sheet: "估值模型", range: "B4" },
+		});
 		const source = await resolvePeEvidenceSource(root, output?.evidence_id ?? "");
 		expect(source.payload).toMatchObject({ kind: "excel", doc_id: docId, sheet_name: "估值模型", cell_range: "B4" });
 		const trace = tracePeFormula(root, { docId, sheetName: "估值模型", cellRef: "B4" });
@@ -137,7 +142,10 @@ describe("Excel preparation and tools", () => {
 			sheet_name: "估值模型",
 			formula: "=B2*B3",
 		});
-		expect(parseSourceId(targetPrice?.evidence_ids[0] ?? "")).toEqual({ docId, sheet: "估值模型", range: "B4" });
+		expect(parseSourceId(targetPrice?.evidence_ids[0] ?? "")).toEqual({
+			docId,
+			location: { kind: "excel", sheet: "估值模型", range: "B4" },
+		});
 
 		const valuationDate = resolvePeValuationDate(root, { docId });
 		expect(valuationDate).toMatchObject({
@@ -154,15 +162,15 @@ describe("Excel preparation and tools", () => {
 		});
 	});
 
-	it("rejects duplicate filename, duplicate content, and dataset mismatch", async () => {
+	it("reuses an identical current version, permits another filename, and rejects dataset mismatch", async () => {
 		const { root, workbook } = fixture();
 		const registered = registerPeDocuments(root, "dataset-excel", [{ name: "模型.xlsx", bytes: workbook }]);
-		expect(() => registerPeDocuments(root, "dataset-excel", [{ name: "模型.xlsx", bytes: workbook }])).toThrow(
-			/already exists/u,
-		);
-		expect(() => registerPeDocuments(root, "dataset-excel", [{ name: "副本.xlsx", bytes: workbook }])).toThrow(
-			/already exists/u,
-		);
+		expect(
+			registerPeDocuments(root, "dataset-excel", [{ name: "模型.xlsx", bytes: workbook }]).documents[0].doc_id,
+		).toBe(registered.documents[0].doc_id);
+		expect(
+			registerPeDocuments(root, "dataset-excel", [{ name: "副本.xlsx", bytes: workbook }]).documents[0].doc_id,
+		).not.toBe(registered.documents[0].doc_id);
 		await expect(
 			preparePeDocument(root, { docId: String(registered.documents[0].doc_id), datasetId: "other" }),
 		).rejects.toThrow("does not match");
@@ -181,17 +189,16 @@ describe("Excel preparation and tools", () => {
 		]);
 		const docId = String(registered.documents[0].doc_id);
 		const prepared = await preparePeDocument(root, { docId });
-		expect(prepared.cachePath).toBe(join(root, "meta", "documents", "宏模型.xlsm", "manifest.json"));
+		expect(prepared.cachePath).toContain(join(root, "meta", "excel", docId));
 	});
 
 	it("rejects a changed original without publishing partial artifacts", async () => {
 		const { root, workbook } = fixture();
 		const registered = registerPeDocuments(root, "dataset-excel", [{ name: "被修改.xlsx", bytes: workbook }]);
 		const docId = String(registered.documents[0].doc_id);
-		writeFileSync(join(root, "raw", "被修改.xlsx"), Buffer.from("changed"));
+		writeFileSync(join(root, String(registered.documents[0].stored_path)), Buffer.from("changed"));
 		await expect(preparePeDocument(root, { docId })).rejects.toThrow("changed");
-		expect(existsSync(join(root, "meta", "documents", "被修改.xlsx"))).toBe(false);
-		expect(existsSync(join(root, "meta", "text", "被修改.xlsx.txt"))).toBe(false);
+		expect(existsSync(join(root, "meta", "excel", docId))).toBe(false);
 		const database = openPeCollectionDatabase(join(root, "meta", "collection.sqlite3"));
 		try {
 			expect(database.prepare("SELECT status FROM documents WHERE doc_id=?").get(docId)).toEqual({

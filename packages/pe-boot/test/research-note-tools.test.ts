@@ -1,4 +1,4 @@
-import fs, { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync } from "node:fs";
+import fs, { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -6,13 +6,16 @@ import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { loadSkillsFromDir } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
-import { initializePeCollectionDatabase } from "../src/collection-schema.ts";
 import { sourceId } from "../src/source.ts";
 import { buildPeSystemPrompt } from "../src/system-prompt.ts";
 import { peResearchNoteSaveTool } from "../src/tools/research-note-save.ts";
 import { type ResearchNotePresentationMode, savePeResearchNote } from "../src/tools/research-note-storage.ts";
+import { createTextDocumentProject } from "./document-fixture.ts";
 
 const temporaryDirectories: string[] = [];
+const evidenceA = sourceId({ docId: "doc-1", location: { kind: "text", lineStart: 1, lineEnd: 1 } });
+const evidenceB = sourceId({ docId: "doc-1", location: { kind: "text", lineStart: 2, lineEnd: 2 } });
+const evidenceC = sourceId({ docId: "doc-1", location: { kind: "text", lineStart: 3, lineEnd: 3 } });
 
 function temporaryDirectory(prefix: string): string {
 	const directory = mkdtempSync(join(tmpdir(), prefix));
@@ -21,142 +24,8 @@ function temporaryDirectory(prefix: string): string {
 }
 
 function createResearchNoteFixture(datasetId = "dataset-1"): string {
-	const root = temporaryDirectory("pe-boot-research-note-");
-	mkdirSync(join(root, "raw"));
-	mkdirSync(join(root, "meta"));
-	mkdirSync(join(root, "generated"));
-	initializePeCollectionDatabase(join(root, "meta", "collection.sqlite3"), {
-		datasetId,
-		name: "Research Note Test",
-	});
-	const database = new DatabaseSync(join(root, "meta", "collection.sqlite3"));
-	const insertDocument = database.prepare(`INSERT INTO documents (
-		doc_id,dataset_id,original_filename,filename_key,raw_path,sha256,status,page_count,
-		parser_name,parser_version,title,brokerage,document_date,rating,target_price,
-		exhibits_json,pdf_metadata_json,artifact_directory,document_markdown_path,
-		layout_json_path,warnings_json,created_at,updated_at,file_type,source_relpath,
-		file_size,readable_text_path
-	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
-	const now = "2026-08-01T00:00:00.000Z";
-	insertDocument.run(
-		"doc-pdf",
-		datasetId,
-		"经营数据.pdf",
-		"经营数据.pdf",
-		"raw/经营数据.pdf",
-		"a".repeat(64),
-		"completed",
-		1,
-		"pdfjs-dist",
-		"6.3.289",
-		"经营数据",
-		"",
-		"2026-08-01",
-		"",
-		"",
-		"[]",
-		"{}",
-		"meta/documents/经营数据",
-		"meta/text/经营数据.md",
-		"meta/documents/经营数据/layout.json",
-		"[]",
-		now,
-		now,
-		"pdf",
-		"经营数据.pdf",
-		0,
-		"meta/text/经营数据.md",
-	);
-	insertDocument.run(
-		"doc-excel",
-		datasetId,
-		"经营模型.xlsx",
-		"经营模型.xlsx",
-		"raw/经营模型.xlsx",
-		"b".repeat(64),
-		"completed",
-		0,
-		"openpyxl",
-		"3.1.5",
-		"经营模型",
-		"",
-		"2026-08-01",
-		"",
-		"",
-		"[]",
-		"{}",
-		"meta/documents/经营模型.xlsx",
-		"",
-		"",
-		"[]",
-		now,
-		now,
-		"xlsx",
-		"经营模型.xlsx",
-		0,
-		"meta/text/经营模型.xlsx.txt",
-	);
-	database
-		.prepare(`INSERT INTO pdf_pages (
-		page_id,doc_id,page_number,page_text,page_header,role,role_signals_json,text_quality,
-		quality_signals_json,width,height,rotation,image_paths_json,embedded_image_count,
-		large_embedded_image_count,drawing_operator_count
-	) VALUES ('page-a','doc-pdf',2,'收入增长20%。','经营数据.pdf · p.2/2','body','{}','passed','{}',595,842,0,'[]',0,0,0)`)
-		.run();
-	const insertCell = database.prepare(`INSERT INTO excel_cells (
-		cell_id,dataset_id,doc_id,sheet_name,cell_ref,row_index,col_index,value_type,display_value,
-		raw_value,numeric_value,formula,cached_value,number_format,row_label,col_label,period,unit,
-		is_formula,formula_type,formula_cache_status,metadata_json
-	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
-	insertCell.run(
-		"cell-b2",
-		datasetId,
-		"doc-excel",
-		"数据",
-		"B2",
-		2,
-		2,
-		"number",
-		"120",
-		"120",
-		120,
-		null,
-		null,
-		"0",
-		"收入",
-		"2025",
-		"2025",
-		"百万元",
-		0,
-		null,
-		"not_applicable",
-		"{}",
-	);
-	insertCell.run(
-		"cell-c3",
-		datasetId,
-		"doc-excel",
-		"数据",
-		"C3",
-		3,
-		3,
-		"number",
-		"30",
-		"30",
-		30,
-		null,
-		null,
-		"0",
-		"利润",
-		"2025",
-		"2025",
-		"百万元",
-		0,
-		null,
-		"not_applicable",
-		"{}",
-	);
-	database.close();
+	const root = createTextDocumentProject("经营数据.txt", datasetId);
+	temporaryDirectories.push(root);
 	return root;
 }
 
@@ -169,14 +38,26 @@ afterEach(() => {
 });
 
 describe("PE Research Note tool", () => {
-	it("registers the tool prompt and loads pe-research-note", () => {
+	it("registers the tool prompt and loads package Skills", async () => {
 		expect(peResearchNoteSaveTool.name).toBe("pe_research_note_save");
-		const prompt = buildPeSystemPrompt("/workspace");
-		expect(prompt).not.toContain("- pe_research_note_save:");
-		expect(prompt).toContain("- pe_pdf_search:");
-		expect(prompt).toContain("- pe_pdf_read:");
+		expect(buildPeSystemPrompt("/workspace")).not.toContain("- pe_research_note_save:");
+
+		for (const name of ["pe_pdf_search", "pe_pdf_read", "pe_workbook_inspect", "pe_excel_range", "pe_source_detail"])
+			expect(buildPeSystemPrompt("/workspace")).toContain(`- ${name}:`);
 
 		const packageDirectory = dirname(dirname(fileURLToPath(import.meta.url)));
+		const skill = readFileSync(join(packageDirectory, "skills", "pe-research-note", "SKILL.md"), "utf8");
+		for (const keyword of [
+			"pe_pdf_search",
+			"pe_pdf_read",
+			"pe_workbook_inspect",
+			"pe_excel_range",
+			"`page:`",
+			"`source:`",
+			"`cell:`",
+			"`fact:`",
+		])
+			expect(skill).toContain(keyword);
 		const result = loadSkillsFromDir({ dir: join(packageDirectory, "skills"), source: "test" });
 		expect(result.diagnostics).toEqual([]);
 		expect(result.skills.map((skill) => skill.name)).toEqual([
@@ -185,10 +66,13 @@ describe("PE Research Note tool", () => {
 			"pe-research-note",
 			"pe-valuation-model-explainer",
 		]);
-		expect(result.skills[2]?.description).toContain("Research Note");
+		expect(result.skills.find((skill) => skill.name === "pe-research-note")?.description).toContain("Research Note");
+		expect(result.skills.find((skill) => skill.name === "pe-valuation-model-explainer")?.description).toContain(
+			"估值模型",
+		);
 	});
 
-	it("saves all presentation modes as exact, independent HTML assets", () => {
+	it("saves all presentation modes as exact, independent HTML assets", async () => {
 		const root = createResearchNoteFixture();
 		const documents: Array<[ResearchNotePresentationMode, string]> = [
 			["text", completeHtml("<article>文字分析</article>")],
@@ -204,7 +88,7 @@ describe("PE Research Note tool", () => {
 		];
 		const ids = new Set<string>();
 		for (const [mode, html] of documents) {
-			const result = savePeResearchNote(root, {
+			const result = await savePeResearchNote(root, {
 				title: "收入研究",
 				summary: `${mode} 摘要`,
 				presentationMode: mode,
@@ -233,20 +117,18 @@ describe("PE Research Note tool", () => {
 		database.close();
 	});
 
-	it("registers valid citations and returns unresolved evidence without blocking the save", () => {
+	it("registers valid citations and returns unresolved evidence without blocking the save", async () => {
 		const root = createResearchNoteFixture();
-		const revenueSource = sourceId({ docId: "doc-excel", sheet: "数据", range: "B2" });
-		const profitSource = sourceId({ docId: "doc-excel", sheet: "数据", range: "C3" });
-		const result = savePeResearchNote(root, {
+		const result = await savePeResearchNote(root, {
 			title: "证据登记",
 			summary: "核验证据解析结果。",
 			presentationMode: "metrics",
 			contentHtml: completeHtml("<p>收入为120百万元。</p>"),
-			evidenceIds: ["page:page-a", revenueSource, profitSource, "page:missing", "invalid-evidence"],
+			evidenceIds: [evidenceA, evidenceB, evidenceC, "source:invalid", "invalid-evidence"],
 		});
 
-		expect(result.resolved_evidence_ids).toEqual(["page:page-a", revenueSource, profitSource]);
-		expect(result.unresolved_evidence_ids).toEqual(["page:missing", "invalid-evidence"]);
+		expect(result.resolved_evidence_ids).toEqual([evidenceA, evidenceB, evidenceC]);
+		expect(result.unresolved_evidence_ids).toEqual(["source:invalid", "invalid-evidence"]);
 		expect(existsSync(join(root, result.research_note_html_path))).toBe(true);
 		const database = new DatabaseSync(join(root, "meta", "collection.sqlite3"), { readOnly: true });
 		const evidence = database
@@ -256,18 +138,18 @@ describe("PE Research Note tool", () => {
 			.all(result.research_note_id);
 		expect(evidence).toEqual(
 			expect.arrayContaining([
-				expect.objectContaining({ evidence_id: "page:page-a", resolved: 1, citation: "经营数据.pdf p.2" }),
-				expect.objectContaining({ evidence_id: revenueSource, resolved: 1, citation: "经营模型.xlsx 数据!B2" }),
-				expect.objectContaining({ evidence_id: profitSource, resolved: 1, citation: "经营模型.xlsx 数据!C3" }),
-				expect.objectContaining({ evidence_id: "page:missing", resolved: 0, citation: null }),
+				expect.objectContaining({ evidence_id: evidenceA, resolved: 1, citation: "经营数据.txt:1-1" }),
+				expect.objectContaining({ evidence_id: evidenceB, resolved: 1, citation: "经营数据.txt:2-2" }),
+				expect.objectContaining({ evidence_id: evidenceC, resolved: 1, citation: "经营数据.txt:3-3" }),
+				expect.objectContaining({ evidence_id: "source:invalid", resolved: 0, citation: null }),
 			]),
 		);
 		database.close();
 	});
 
-	it("rejects invalid workspaces, dataset mismatches, and symlink escapes", () => {
+	it("rejects invalid workspaces, dataset mismatches, and symlink escapes", async () => {
 		const missingRoot = join(temporaryDirectory("pe-boot-missing-parent-"), "missing");
-		expect(() =>
+		await expect(
 			savePeResearchNote(missingRoot, {
 				title: "缺失目录",
 				summary: "缺失目录",
@@ -275,10 +157,10 @@ describe("PE Research Note tool", () => {
 				contentHtml: completeHtml("<p>内容</p>"),
 				evidenceIds: [],
 			}),
-		).toThrow("PE project workspace does not exist");
+		).rejects.toThrow("PE project workspace does not exist");
 
 		const root = createResearchNoteFixture();
-		expect(() =>
+		await expect(
 			savePeResearchNote(root, {
 				title: "错误数据集",
 				summary: "错误数据集",
@@ -287,13 +169,12 @@ describe("PE Research Note tool", () => {
 				evidenceIds: [],
 				datasetId: "another-dataset",
 			}),
-		).toThrow("does not match the current project dataset");
+		).rejects.toThrow("does not match the current project dataset");
 
 		const escapedRoot = createResearchNoteFixture();
 		const outside = temporaryDirectory("pe-boot-research-note-outside-");
-		rmSync(join(escapedRoot, "generated"), { recursive: true });
 		symlinkSync(outside, join(escapedRoot, "generated"), "dir");
-		expect(() =>
+		await expect(
 			savePeResearchNote(escapedRoot, {
 				title: "越界",
 				summary: "越界",
@@ -301,13 +182,13 @@ describe("PE Research Note tool", () => {
 				contentHtml: completeHtml("<p>内容</p>"),
 				evidenceIds: [],
 			}),
-		).toThrow("generated resolves outside");
+		).rejects.toThrow("generated resolves outside");
 		expect(readdirSync(outside)).toEqual([]);
 	});
 
-	it("rolls back metadata and removes the artifact when database persistence fails", () => {
+	it("rolls back metadata and removes the artifact when database persistence fails", async () => {
 		const root = createResearchNoteFixture();
-		const baseline = savePeResearchNote(root, {
+		const baseline = await savePeResearchNote(root, {
 			title: "基准笔记",
 			summary: "用于初始化表。",
 			presentationMode: "text",
@@ -320,22 +201,22 @@ describe("PE Research Note tool", () => {
 		database.exec(`
 			CREATE TRIGGER reject_research_note_evidence
 			BEFORE INSERT ON research_note_evidence
-			WHEN NEW.evidence_id = 'page:forced-failure'
+			WHEN NEW.evidence_id = 'chunk:forced-failure'
 			BEGIN
 				SELECT RAISE(ABORT, 'forced evidence failure');
 			END;
 		`);
 		database.close();
 
-		expect(() =>
+		await expect(
 			savePeResearchNote(root, {
 				title: "失败笔记",
 				summary: "应完整回滚。",
 				presentationMode: "table",
 				contentHtml: completeHtml("<table><tr><td>失败</td></tr></table>"),
-				evidenceIds: ["page:forced-failure"],
+				evidenceIds: ["chunk:forced-failure"],
 			}),
-		).toThrow("forced evidence failure");
+		).rejects.toThrow("forced evidence failure");
 		expect(readdirSync(notesDirectory)).toEqual(filesBeforeFailure);
 		expect(existsSync(join(root, baseline.research_note_html_path))).toBe(true);
 
@@ -346,7 +227,7 @@ describe("PE Research Note tool", () => {
 		inspection.close();
 	});
 
-	it("rolls back metadata and leaves no artifact when the file write fails", () => {
+	it("rolls back metadata and leaves no artifact when the file write fails", async () => {
 		const root = createResearchNoteFixture();
 		const originalWriteFileSync = fs.writeFileSync;
 		const failingWriteFileSync: typeof fs.writeFileSync = () => {
@@ -355,7 +236,7 @@ describe("PE Research Note tool", () => {
 		Object.defineProperty(fs, "writeFileSync", { configurable: true, value: failingWriteFileSync });
 		syncBuiltinESMExports();
 		try {
-			expect(() =>
+			await expect(
 				savePeResearchNote(root, {
 					title: "写入失败",
 					summary: "文件失败时回滚。",
@@ -363,7 +244,7 @@ describe("PE Research Note tool", () => {
 					contentHtml: completeHtml("<p>不会落盘</p>"),
 					evidenceIds: [],
 				}),
-			).toThrow("forced file write failure");
+			).rejects.toThrow("forced file write failure");
 		} finally {
 			Object.defineProperty(fs, "writeFileSync", { configurable: true, value: originalWriteFileSync });
 			syncBuiltinESMExports();
@@ -375,9 +256,9 @@ describe("PE Research Note tool", () => {
 		database.close();
 	});
 
-	it("requires complete HTML and enforces the content size limit", () => {
+	it("requires complete HTML and enforces the content size limit", async () => {
 		const root = createResearchNoteFixture();
-		expect(() =>
+		await expect(
 			savePeResearchNote(root, {
 				title: "不完整",
 				summary: "不完整",
@@ -385,8 +266,8 @@ describe("PE Research Note tool", () => {
 				contentHtml: "<p>fragment</p>",
 				evidenceIds: [],
 			}),
-		).toThrow("complete HTML document");
-		expect(() =>
+		).rejects.toThrow("complete HTML document");
+		await expect(
 			savePeResearchNote(root, {
 				title: "过长",
 				summary: "过长",
@@ -394,6 +275,6 @@ describe("PE Research Note tool", () => {
 				contentHtml: `<html><body>${"x".repeat(50_000)}</body></html>`,
 				evidenceIds: [],
 			}),
-		).toThrow("must not exceed 50000 characters");
+		).rejects.toThrow("must not exceed 50000 characters");
 	});
 });

@@ -4,7 +4,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { peDatasetMemoTool } from "./dataset-memo.ts";
 import { peDatasetSearchTool } from "./dataset-search.ts";
 import { peDocumentOpenTool } from "./document-open.ts";
-import { PE_SOURCE_DETAIL_PROMPT_SNIPPET, peEvidenceDetailTool } from "./evidence-detail.ts";
+import { peEvidenceDetailTool } from "./evidence-detail.ts";
 import { PE_EXCEL_RANGE_PROMPT_SNIPPET, peExcelRangeTool } from "./excel-range.ts";
 import { PE_FORMULA_TRACE_PROMPT_SNIPPET, peFormulaTraceTool } from "./formula-trace.ts";
 import { peHistoryCompareTool } from "./history-compare.ts";
@@ -13,7 +13,7 @@ import { PE_PDF_READ_PROMPT_SNIPPET, pePdfReadTool } from "./pdf-read.ts";
 import { PE_PDF_SEARCH_PROMPT_SNIPPET, pePdfSearchTool } from "./pdf-search.ts";
 import { PE_RENDER_UI_PROMPT_SNIPPET, peRenderUiTool } from "./render-ui.ts";
 import { peResearchNoteSaveTool } from "./research-note-save.ts";
-import { peSourceDetailTool } from "./source-detail.ts";
+import { PE_SOURCE_DETAIL_PROMPT_SNIPPET, peSourceDetailTool } from "./source-detail.ts";
 import { PE_VALUATION_DATE_PROMPT_SNIPPET, peValuationDateTool } from "./valuation-date.ts";
 import { PE_VALUATION_OUTPUT_PROMPT_SNIPPET, peValuationOutputTool } from "./valuation-output.ts";
 import { PE_WORKBOOK_INSPECT_PROMPT_SNIPPET, peWorkbookInspectTool } from "./workbook-inspect.ts";
@@ -31,7 +31,7 @@ export const PE_TOOL_PROMPT_SNIPPETS = [
 	// { name: "pe_source_detail", description: PE_SOURCE_DETAIL_PROMPT_SNIPPET },
 	{ name: "pe_pdf_search", description: PE_PDF_SEARCH_PROMPT_SNIPPET },
 	{ name: "pe_pdf_read", description: PE_PDF_READ_PROMPT_SNIPPET },
-	{ name: "pe_document_open", description: "Prepare one Excel workbook and return its readable text path" },
+	{ name: "pe_document_open", description: peDocumentOpenTool.promptSnippet },
 	{ name: "pe_workbook_inspect", description: PE_WORKBOOK_INSPECT_PROMPT_SNIPPET },
 	{ name: "pe_excel_range", description: PE_EXCEL_RANGE_PROMPT_SNIPPET },
 	{ name: "pe_formula_trace", description: PE_FORMULA_TRACE_PROMPT_SNIPPET },
@@ -53,7 +53,7 @@ export function registerPeTools(pi: ExtensionAPI): void {
 	pi.registerTool(peWorkbookInspectTool);
 	pi.registerTool(peExcelRangeTool);
 	pi.registerTool(peFormulaTraceTool);
-	pi.registerTool(peEvidenceDetailTool);
+	pi.registerTool(peSourceDetailTool);
 	pi.registerTool(peValuationOutputTool);
 	pi.registerTool(peValuationDateTool);
 	pi.registerTool(peModelValidateTool);

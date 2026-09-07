@@ -57,7 +57,7 @@ def dumps_json(value: Any) -> str:
 
 def source_id(doc_id: str, sheet: str, cell_range: str) -> str:
     payload = json.dumps(
-        {"v": 1, "doc_id": doc_id, "sheet": sheet, "range": cell_range},
+        [doc_id, "excel", sheet, cell_range],
         ensure_ascii=False,
         separators=(",", ":"),
     ).encode("utf-8")

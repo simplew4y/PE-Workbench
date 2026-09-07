@@ -2,19 +2,22 @@ import { relative } from "node:path";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { preparePeDocument } from "../documents.ts";
-import { sourceFilename, textValue } from "./database.ts";
+import { numberValue, sourceFilename, textValue } from "./database.ts";
 
 export const peDocumentOpenTool = defineTool({
 	name: "pe_document_open",
 	label: "PE Document Open",
 	description:
-		"Open one uploaded Excel workbook by filename or doc_id. Prepares its structured cache and returns a readable text path for native read or grep.",
-	promptSnippet: "Prepare one selected Excel workbook for native read/grep with stable source citations",
+		"Open one uploaded Excel, text, CSV, DOCX, or PPTX file by filename or immutable doc_id. Reuses Excel upload processing or prepares a disposable text view with versioned source citations. Rebuilds missing caches. Use native read/grep on readable_path. Use pe_pdf_search and pe_pdf_read for PDFs.",
+	promptSnippet:
+		"Prepare one selected workbook or text/Office document for native read/grep, with citations pinned to its original version and location",
 	parameters: Type.Object({
 		path: Type.Optional(
 			Type.String({ description: "Uploaded filename or path under raw/. Select with native ls/find first." }),
 		),
-		doc_id: Type.Optional(Type.String({ description: "Exact document ID; use instead of path." })),
+		doc_id: Type.Optional(
+			Type.String({ description: "Exact document version ID; use instead of path to reopen that version." }),
+		),
 		dataset_id: Type.Optional(Type.String({ description: "Must match the current project when provided." })),
 	}),
 	async execute(_toolCallId, params, signal, _onUpdate, ctx) {
@@ -26,6 +29,7 @@ export const peDocumentOpenTool = defineTool({
 		const result = {
 			dataset_id: prepared.datasetId,
 			doc_id: textValue(prepared.document, "doc_id"),
+			version_no: numberValue(prepared.document, "version_no"),
 			filename: sourceFilename(prepared.document),
 			readable_path: relative(ctx.cwd, prepared.readablePath).replaceAll("\\", "/"),
 			warnings: prepared.warnings,

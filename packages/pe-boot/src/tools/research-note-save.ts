@@ -23,8 +23,9 @@ export const peResearchNoteSaveTool = defineTool({
 			minLength: 1,
 			maxLength: 50_000,
 		}),
-		evidence_ids: Type.Array(Type.String({ minLength: 1, maxLength: 300 }), {
-			description: "Exact page: IDs returned by PE PDF retrieval and used by the note. May be empty.",
+		evidence_ids: Type.Array(Type.String({ minLength: 1, maxLength: 2048 }), {
+			description:
+				"Exact page: PDF or source: document-location evidence IDs used by the note. Legacy cell: and fact: IDs are accepted. May be empty.",
 			maxItems: 100,
 		}),
 		dataset_id: Type.Optional(
@@ -32,7 +33,7 @@ export const peResearchNoteSaveTool = defineTool({
 		),
 	}),
 	async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-		const result = savePeResearchNote(
+		const result = await savePeResearchNote(
 			ctx.cwd,
 			{
 				title: params.title,

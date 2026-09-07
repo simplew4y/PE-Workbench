@@ -115,10 +115,12 @@ export function tracePeFormula(
 		const document = connection.database
 			.prepare(
 				`SELECT doc_id FROM documents
-				 WHERE dataset_id = ? AND doc_id = ? AND file_type IN ('xlsx','xlsm')`,
+				 WHERE dataset_id = ? AND doc_id = ? AND deleted_at IS NULL
+				   AND COALESCE(is_current, 1) = 1
+				   AND COALESCE(lifecycle_state, 'active') = 'active'`,
 			)
 			.get(connection.datasetId, docId);
-		if (!document) throw new Error(`Excel document not found in the current dataset: ${docId}`);
+		if (!document) throw new Error(`active document not found in the current dataset: ${docId}`);
 
 		const sheetRows = connection.database
 			.prepare("SELECT sheet_name FROM excel_sheets WHERE dataset_id = ? AND doc_id = ? ORDER BY sheet_index")
@@ -129,7 +131,7 @@ export function tracePeFormula(
 			if (sheetName) sheetNames.set(sheetName.toLocaleLowerCase(), sheetName);
 		}
 		const rootSheetName = sheetNames.get(requestedSheetName.toLocaleLowerCase());
-		if (!rootSheetName) throw new Error(`Excel sheet not found in document ${docId}: ${requestedSheetName}`);
+		if (!rootSheetName) throw new Error(`Excel sheet not found in active document ${docId}: ${requestedSheetName}`);
 
 		const nodes: FormulaTraceNode[] = [];
 		const edges: FormulaTraceEdge[] = [];
@@ -340,7 +342,7 @@ export const peFormulaTraceTool = defineTool({
 		"Trace one selected Excel cell upstream through the deterministic formula-reference cache. Returns cited nodes, edges, cache warnings, unresolved links, cycles, and truncation status.",
 	promptSnippet: PE_FORMULA_TRACE_PROMPT_SNIPPET,
 	parameters: Type.Object({
-		doc_id: Type.String({ description: "Exact workbook document ID.", minLength: 1 }),
+		doc_id: Type.String({ description: "Exact active workbook document ID.", minLength: 1 }),
 		sheet_name: Type.String({ description: "Exact worksheet name containing the output cell.", minLength: 1 }),
 		cell_ref: Type.String({ description: "One A1 output cell reference, such as H42.", minLength: 2 }),
 		dataset_id: Type.Optional(

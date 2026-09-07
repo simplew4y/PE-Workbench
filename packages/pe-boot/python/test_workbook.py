@@ -46,8 +46,8 @@ class WorkbookParserTest(unittest.TestCase):
             self.assertTrue(candidates)
             encoded = candidates[0]["evidence_id"].removeprefix("source:")
             payload = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)))
-            self.assertEqual(payload["doc_id"], "doc_" + "a" * 24)
-            self.assertEqual(payload["sheet"], "Forecast")
+            self.assertEqual(payload, ["doc_" + "a" * 24, "excel", "Forecast", "B1"])
+            self.assertTrue(any("not recalculated" in warning for warning in result["warnings"]))
 
     def test_validates_xlsx_and_xlsm_content_types(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

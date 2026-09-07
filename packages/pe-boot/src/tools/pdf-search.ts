@@ -4,6 +4,7 @@ import { Type } from "typebox";
 import {
 	numberValue,
 	openPeDataset,
+	pdfDocumentSelection,
 	type SqlRow,
 	sourceCitation,
 	sourceMarkdownCitation,
@@ -28,6 +29,8 @@ export interface PePdfSearchOptions {
 
 export interface PePdfSearchHit {
 	evidence_id: string;
+	doc_id: string;
+	version_no: number;
 	filename: string;
 	title?: string;
 	page_number: number;
@@ -111,17 +114,19 @@ function ftsRows(
 	documentName: ReturnType<typeof documentFilterName>,
 ): SqlRow[] {
 	if (Array.from(query).length < 3) return [];
+	const selection = pdfDocumentSelection(database);
 	return database
 		.prepare(
 			`SELECT p.page_id, p.page_number, p.page_text, p.page_header, p.role,
 			        p.text_quality, p.image_paths_json,
-			        d.original_filename, d.title, d.page_count,
+			        d.doc_id, ${selection.versionNo} AS version_no, d.original_filename, d.title, d.page_count,
 			        d.document_markdown_path, d.layout_json_path,
 			        bm25(pdf_pages_fts) AS fts_rank
 			 FROM pdf_pages_fts
 			 JOIN pdf_pages p ON p.page_id=pdf_pages_fts.page_id
 			 JOIN documents d ON d.doc_id=p.doc_id AND d.doc_id=pdf_pages_fts.doc_id
 			 WHERE pdf_pages_fts MATCH ? AND d.dataset_id=?
+			   AND ${selection.predicate}
 			   AND d.status IN ('completed', 'completed_with_warnings')
 			   AND (? IS NULL OR lower(d.original_filename)=? OR lower(d.original_filename)=?)
 			 ORDER BY fts_rank, d.original_filename, p.page_number
@@ -142,16 +147,18 @@ function substringRows(
 	query: string,
 	documentName: ReturnType<typeof documentFilterName>,
 ): SqlRow[] {
+	const selection = pdfDocumentSelection(database);
 	return database
 		.prepare(
 			`SELECT p.page_id, p.page_number, p.page_text, p.page_header, p.role,
 			        p.text_quality, p.image_paths_json,
-			        d.original_filename, d.title, d.page_count,
+			        d.doc_id, ${selection.versionNo} AS version_no, d.original_filename, d.title, d.page_count,
 			        d.document_markdown_path, d.layout_json_path,
 			        0 AS fts_rank
 			 FROM pdf_pages p
 			 JOIN documents d ON d.doc_id=p.doc_id
 			 WHERE d.dataset_id=?
+			   AND ${selection.predicate}
 			   AND d.status IN ('completed', 'completed_with_warnings')
 			   AND (? IS NULL OR lower(d.original_filename)=? OR lower(d.original_filename)=?)
 			   AND (
@@ -250,6 +257,8 @@ function searchHit(item: AccumulatedPage): PePdfSearchHit {
 	const title = textValue(item.row, "title");
 	return {
 		evidence_id: evidenceId,
+		doc_id: textValue(item.row, "doc_id") ?? "",
+		version_no: numberValue(item.row, "version_no") ?? 1,
 		filename,
 		...(title ? { title } : {}),
 		page_number: pageNumber,
@@ -328,7 +337,7 @@ export const pePdfSearchTool = defineTool({
 	name: "pe_pdf_search",
 	label: "PE PDF Search",
 	description:
-		"Search complete PDF pages indexed in the current project. Supply one or more literal terms or phrases; use multiple variants when terminology is uncertain. Results include readable excerpts, source filenames, page numbers, page images, and clickable citations. Use pe_pdf_read before relying on decisive evidence.",
+		"Search complete PDF pages from current, active documents in the project. Supply one or more literal terms or phrases; use multiple variants when terminology is uncertain. Results include immutable doc_id and version, readable excerpts, source filenames, page numbers, page images, and clickable citations. Pass doc_id to pe_pdf_read before relying on decisive evidence.",
 	promptSnippet: PE_PDF_SEARCH_PROMPT_SNIPPET,
 	parameters: Type.Object({
 		queries: Type.Array(Type.String({ minLength: 1, maxLength: 300 }), {

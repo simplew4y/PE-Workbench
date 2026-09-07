@@ -3,7 +3,9 @@ import { createHash, randomUUID } from "node:crypto";
 import {
 	createReadStream,
 	existsSync,
+	lstatSync,
 	mkdirSync,
+	readdirSync,
 	readFileSync,
 	realpathSync,
 	renameSync,
@@ -11,7 +13,7 @@ import {
 	statSync,
 	writeFileSync,
 } from "node:fs";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { openPeCollectionDatabase } from "./collection-schema.ts";
@@ -27,9 +29,8 @@ export const EXCEL_TABLES = [
 	"valuation_date_candidates",
 	"metric_facts",
 ] as const;
-
 type ExcelTable = (typeof EXCEL_TABLES)[number];
-const parserRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../python");
+const readerRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../python");
 const LEASE_MS = 30_000;
 const HEARTBEAT_MS = 5_000;
 
@@ -44,12 +45,22 @@ interface WorkbookResult {
 	document_date: string;
 	warnings: string[];
 	tables: Record<ExcelTable, SqlRow[]>;
+	blocks?: DocumentBlock[];
+	text?: string;
+}
+
+interface DocumentBlock {
+	text: string;
+	block_index?: number;
+	heading_path?: string;
 }
 
 interface WorkbookManifest {
 	doc_id: string;
 	revision: string;
 	source_sha256: string;
+	blocks: DocumentBlock[];
+	text?: string;
 	warnings: string[];
 	row_counts: Record<ExcelTable, number>;
 	workbook_sha256: string;
@@ -62,15 +73,8 @@ export interface PreparedWorkbook {
 	warnings: string[];
 }
 
-interface PublishedFiles {
-	artifactDirectory: string;
-	readablePath: string;
-	backupDirectory?: string;
-	backupReadable?: string;
-}
-
 export function excelPython(): string {
-	const local = join(parserRoot, ".venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python");
+	const local = join(readerRoot, ".venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python");
 	return (
 		process.env.PE_EXCEL_PYTHON?.trim() ||
 		process.env.PE_DOCUMENT_PYTHON?.trim() ||
@@ -79,7 +83,7 @@ export function excelPython(): string {
 }
 
 export function validatePeExcelUpload(bytes: Uint8Array, fileType: string): void {
-	const result = spawnSync(excelPython(), [join(parserRoot, "validate_workbook.py"), fileType], {
+	const result = spawnSync(excelPython(), [join(readerRoot, "validate_workbook.py"), fileType], {
 		input: bytes,
 		encoding: "utf8",
 		maxBuffer: 64_000,
@@ -92,11 +96,12 @@ export function validatePeExcelUpload(bytes: Uint8Array, fileType: string): void
 export async function verifyPeOriginal(filePath: string, checksum: string, signal?: AbortSignal): Promise<void> {
 	const hash = createHash("sha256");
 	for await (const bytes of createReadStream(filePath, { signal })) hash.update(bytes);
-	if (hash.digest("hex") !== checksum) throw new Error("Original file changed after it was registered");
+	if (hash.digest("hex") !== checksum)
+		throw new Error("Original file changed; upload it as a new version before citing it");
 }
 
 export function excelParserRevision(): string {
-	const hash = createHash("sha256").update("pe-excel-json-v1\0readable-utf8-v3\0");
+	const hash = createHash("sha256").update("pe-excel-json-v1\0readable-utf8-v4\0");
 	for (const filename of [
 		"parse_workbook.py",
 		"validate_workbook.py",
@@ -104,9 +109,8 @@ export function excelParserRevision(): string {
 		"excel_formula_parser.py",
 		"excel_date_candidates.py",
 		"requirements.txt",
-	]) {
-		hash.update(readFileSync(join(parserRoot, filename)));
-	}
+	])
+		hash.update(readFileSync(join(readerRoot, filename)));
 	return hash.digest("hex");
 }
 
@@ -115,6 +119,7 @@ function object(value: unknown): value is Record<string, unknown> {
 }
 
 function validateResult(value: unknown, document: SqlRow, revision: string, database: DatabaseSync): WorkbookResult {
+	const excel = document.file_type === "xlsx" || document.file_type === "xlsm";
 	if (
 		!object(value) ||
 		value.schema_version !== 1 ||
@@ -122,15 +127,38 @@ function validateResult(value: unknown, document: SqlRow, revision: string, data
 		value.dataset_id !== document.dataset_id ||
 		value.revision !== revision ||
 		value.source_sha256 !== document.sha256 ||
-		value.parser_name !== "openpyxl" ||
-		value.parser_version !== "3.1.5" ||
+		(excel
+			? value.parser_name !== "openpyxl" || value.parser_version !== "3.1.5"
+			: value.parser_version !== "1" ||
+				value.parser_name !== (["docx", "pptx"].includes(String(document.file_type)) ? "stdlib_ooxml" : "text")) ||
 		typeof value.document_date !== "string" ||
 		!Array.isArray(value.warnings) ||
 		!value.warnings.every((item) => typeof item === "string") ||
-		!object(value.tables)
-	) {
+		(excel && !object(value.tables))
+	)
 		throw new Error("Invalid workbook parser result identity or metadata");
+	if (!excel) {
+		if (
+			!Array.isArray(value.blocks) ||
+			!value.blocks.every(
+				(block) =>
+					object(block) &&
+					typeof block.text === "string" &&
+					(block.block_index === undefined ||
+						(typeof block.block_index === "number" &&
+							Number.isInteger(block.block_index) &&
+							block.block_index > 0)) &&
+					(block.heading_path === undefined || typeof block.heading_path === "string"),
+			) ||
+			(value.text !== undefined && typeof value.text !== "string")
+		)
+			throw new Error("Invalid document content");
+		return {
+			...value,
+			tables: Object.fromEntries(EXCEL_TABLES.map((table) => [table, []])),
+		} as unknown as WorkbookResult;
 	}
+	if (!object(value.tables)) throw new Error("Missing workbook tables");
 	for (const table of EXCEL_TABLES) {
 		const columns = new Set(
 			(database.prepare(`PRAGMA table_info(${table})`).all() as SqlRow[]).map((row) => row.name),
@@ -138,16 +166,14 @@ function validateResult(value: unknown, document: SqlRow, revision: string, data
 		const rows = value.tables[table];
 		if (!Array.isArray(rows)) throw new Error(`Workbook parser omitted ${table}`);
 		for (const row of rows) {
-			if (!object(row) || row.doc_id !== document.doc_id || row.dataset_id !== document.dataset_id) {
+			if (!object(row) || row.doc_id !== document.doc_id || row.dataset_id !== document.dataset_id)
 				throw new Error(`Workbook row is outside its registered document: ${table}`);
-			}
 			for (const [key, item] of Object.entries(row)) {
 				if (
 					!columns.has(key) ||
 					!(item === null || typeof item === "string" || (typeof item === "number" && Number.isFinite(item)))
-				) {
+				)
 					throw new Error(`Invalid workbook row field: ${table}.${key}`);
-				}
 			}
 		}
 	}
@@ -160,39 +186,23 @@ function validateResult(value: unknown, document: SqlRow, revision: string, data
 			.update(`${document.doc_id}\0${row.sheet_name}\0${row.cell_ref}`)
 			.digest("hex")
 			.slice(0, 40);
-		if (row.cell_id !== expected || !sheets.has(row.sheet_name) || cells.has(expected)) {
+		if (row.cell_id !== expected || !sheets.has(row.sheet_name) || cells.has(expected))
 			throw new Error("Invalid workbook cell identity");
-		}
 		cells.add(expected);
 	}
-	for (const row of result.tables.excel_formula_references) {
+	for (const row of result.tables.excel_formula_references)
 		if (!cells.has(String(row.source_cell_id))) throw new Error("Formula reference has no source cell");
-	}
 	return result;
-}
-
-function within(root: string, candidate: string): boolean {
-	const local = relative(root, candidate);
-	return !local.startsWith("..") && !isAbsolute(local);
-}
-
-function artifactPaths(workspaceRoot: string, document: SqlRow): { directory: string; readable: string } {
-	const filename = textValue(document, "original_filename");
-	if (!filename || basename(filename) !== filename) throw new Error("Invalid registered Excel filename");
-	const directory = resolve(workspaceRoot, "meta", "documents", filename);
-	const readable = resolve(workspaceRoot, "meta", "text", `${filename}.txt`);
-	if (!within(workspaceRoot, directory) || !within(workspaceRoot, readable)) {
-		throw new Error("Excel artifacts resolve outside the project workspace");
-	}
-	return { directory, readable };
 }
 
 function cachedWorkbook(
 	database: DatabaseSync,
 	document: SqlRow,
 	revision: string,
+	directory: string,
 	workspaceRoot: string,
 ): PreparedWorkbook | undefined {
+	database.exec("BEGIN");
 	try {
 		const row = database
 			.prepare("SELECT revision,cache_path,readable_path FROM document_cache WHERE doc_id=?")
@@ -200,17 +210,18 @@ function cachedWorkbook(
 		if (row?.revision !== revision) return undefined;
 		const cachePath = resolve(workspaceRoot, String(row.cache_path));
 		const readablePath = resolve(workspaceRoot, String(row.readable_path));
-		const expected = artifactPaths(workspaceRoot, document);
+		const generationDirectory = dirname(cachePath);
 		if (
-			cachePath !== join(expected.directory, "manifest.json") ||
-			readablePath !== expected.readable ||
-			realpathSync(dirname(cachePath)) !== expected.directory ||
+			cachePath !== join(generationDirectory, "manifest.json") ||
+			readablePath !== join(generationDirectory, "readable.txt") ||
+			dirname(generationDirectory) !== directory ||
+			dirname(readablePath) !== generationDirectory ||
+			realpathSync(generationDirectory) !== generationDirectory ||
 			realpathSync(cachePath) !== cachePath ||
 			realpathSync(readablePath) !== readablePath
-		) {
+		)
 			return undefined;
-		}
-		const workbookPath = join(expected.directory, "workbook.json");
+		const workbookPath = join(generationDirectory, "workbook.json");
 		if (realpathSync(workbookPath) !== workbookPath) return undefined;
 		const manifest: unknown = JSON.parse(readFileSync(cachePath, "utf8"));
 		if (
@@ -220,16 +231,17 @@ function cachedWorkbook(
 			manifest.source_sha256 !== document.sha256 ||
 			!object(manifest.row_counts) ||
 			!Array.isArray(manifest.warnings) ||
-			!manifest.warnings.every((item) => typeof item === "string")
-		) {
+			!manifest.warnings.every((item) => typeof item === "string") ||
+			!Array.isArray(manifest.blocks) ||
+			!manifest.blocks.every((block) => object(block) && typeof block.text === "string") ||
+			(manifest.text !== undefined && typeof manifest.text !== "string")
+		)
 			return undefined;
-		}
 		if (
 			createHash("sha256").update(readFileSync(workbookPath)).digest("hex") !== manifest.workbook_sha256 ||
 			createHash("sha256").update(readFileSync(readablePath)).digest("hex") !== manifest.readable_sha256
-		) {
+		)
 			return undefined;
-		}
 		for (const table of EXCEL_TABLES) {
 			const count = database
 				.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE doc_id=?`)
@@ -239,13 +251,30 @@ function cachedWorkbook(
 		return { cachePath, readablePath, warnings: manifest.warnings as string[] };
 	} catch {
 		return undefined;
+	} finally {
+		database.exec("COMMIT");
 	}
 }
 
-function claim(database: DatabaseSync, document: SqlRow, revision: string, ownerId: string): boolean {
+function claim(
+	database: DatabaseSync,
+	document: SqlRow,
+	revision: string,
+	ownerId: string,
+	waited: boolean,
+	expectedCachePath: string | undefined,
+): boolean {
 	const jobKey = `${document.doc_id}:${revision}`;
 	database.exec("BEGIN IMMEDIATE");
 	try {
+		const cache = database.prepare("SELECT cache_path FROM document_cache WHERE doc_id=?").get(document.doc_id) as
+			| SqlRow
+			| undefined;
+		if (textValue(cache ?? {}, "cache_path") !== expectedCachePath) {
+			database.exec("COMMIT");
+			return false;
+		}
+		const row = database.prepare("SELECT * FROM processing_jobs WHERE job_key=?").get(jobKey) as SqlRow | undefined;
 		if (
 			database
 				.prepare("SELECT 1 FROM processing_jobs WHERE doc_id=? AND status='processing' AND lease_expires_at>?")
@@ -254,16 +283,16 @@ function claim(database: DatabaseSync, document: SqlRow, revision: string, owner
 			database.exec("COMMIT");
 			return false;
 		}
+		if (waited && row?.status === "failed") throw new Error(textValue(row, "error") || "Workbook preparation failed");
 		const now = new Date().toISOString();
 		database
-			.prepare(`INSERT INTO processing_jobs
-				(job_key,doc_id,revision,status,owner_id,lease_expires_at,attempt,error,created_at,updated_at)
-				VALUES (?,?,?,'processing',?,?,1,'',?,?)
-				ON CONFLICT(job_key) DO UPDATE SET status='processing',owner_id=excluded.owner_id,
-				lease_expires_at=excluded.lease_expires_at,attempt=processing_jobs.attempt+1,error='',updated_at=excluded.updated_at`)
+			.prepare(`INSERT INTO processing_jobs (job_key,doc_id,revision,status,owner_id,lease_expires_at,attempt,error,created_at,updated_at)
+			VALUES (?,?,?,'processing',?,?,1,'',?,?) ON CONFLICT(job_key) DO UPDATE SET
+			status='processing',owner_id=excluded.owner_id,lease_expires_at=excluded.lease_expires_at,
+			attempt=processing_jobs.attempt+1,error='',updated_at=excluded.updated_at`)
 			.run(jobKey, document.doc_id, revision, ownerId, Date.now() + LEASE_MS, now, now);
 		database
-			.prepare("UPDATE documents SET status='processing',updated_at=? WHERE doc_id=?")
+			.prepare("UPDATE documents SET status='processing',updated_at=? WHERE doc_id=? AND deleted_at IS NULL")
 			.run(now, document.doc_id);
 		database.exec("COMMIT");
 		return true;
@@ -281,7 +310,10 @@ function runParser(
 	signal: AbortSignal,
 ): Promise<void> {
 	const args = [
-		join(parserRoot, "parse_workbook.py"),
+		join(
+			readerRoot,
+			document.file_type === "xlsx" || document.file_type === "xlsm" ? "parse_workbook.py" : "read_document.py",
+		),
 		"--input",
 		filePath,
 		"--output",
@@ -315,75 +347,32 @@ function runParser(
 		signal.addEventListener("abort", aborted, { once: true });
 		const configuredTimeout = Number(process.env.PE_EXCEL_TIMEOUT_MS);
 		const timeoutMs = Number.isFinite(configuredTimeout) && configuredTimeout > 0 ? configuredTimeout : 15 * 60_000;
-		const timer = setTimeout(() => stop(new Error(`Workbook parser exceeded ${timeoutMs} ms`)), timeoutMs);
+		const timer = setTimeout(() => {
+			stop(new Error(`Workbook parser exceeded ${timeoutMs} ms`));
+		}, timeoutMs);
 		timer.unref();
 		let error = "";
 		child.stderr.on("data", (chunk: Buffer) => {
 			error = (error + chunk.toString()).slice(-8_000);
 		});
-		child.once("error", (cause) => {
-			failure = cause;
+		child.once("error", (error) => {
+			failure = error;
 		});
 		child.once("close", (code) => {
 			clearTimeout(timer);
 			if (killTimer) clearTimeout(killTimer);
 			signal.removeEventListener("abort", aborted);
-			if (code === 0 && !failure) {
-				resolveParser();
-				return;
-			}
-			reject(
-				failure ??
-					new Error(
-						error.trim() ||
-							`Workbook parser exited with code ${code}; run npm run setup:python --workspace=@earendil-works/pe-boot`,
-					),
-			);
+			code === 0 && !failure
+				? resolveParser()
+				: reject(
+						failure ??
+							new Error(
+								error.trim() ||
+									`Workbook parser exited with code ${code}; run npm run setup:python --workspace=@earendil-works/pe-boot`,
+							),
+					);
 		});
 	});
-}
-
-function installFiles(
-	workspaceRoot: string,
-	document: SqlRow,
-	stageDirectory: string,
-	ownerId: string,
-): PublishedFiles {
-	const target = artifactPaths(workspaceRoot, document);
-	mkdirSync(dirname(target.directory), { recursive: true });
-	mkdirSync(dirname(target.readable), { recursive: true });
-	const backupDirectory = `${stageDirectory}.artifact-backup`;
-	const backupReadable = `${stageDirectory}.readable-backup`;
-	if (existsSync(target.directory)) renameSync(target.directory, backupDirectory);
-	if (existsSync(target.readable)) renameSync(target.readable, backupReadable);
-	try {
-		renameSync(join(stageDirectory, "artifact"), target.directory);
-		renameSync(join(stageDirectory, "readable.txt"), target.readable);
-		return {
-			artifactDirectory: target.directory,
-			readablePath: target.readable,
-			...(existsSync(backupDirectory) ? { backupDirectory } : {}),
-			...(existsSync(backupReadable) ? { backupReadable } : {}),
-		};
-	} catch (error) {
-		rmSync(target.directory, { recursive: true, force: true });
-		rmSync(target.readable, { force: true });
-		if (existsSync(backupDirectory)) renameSync(backupDirectory, target.directory);
-		if (existsSync(backupReadable)) renameSync(backupReadable, target.readable);
-		throw new Error(`Failed to publish Excel artifacts for ${ownerId}`, { cause: error });
-	}
-}
-
-function restoreFiles(files: PublishedFiles): void {
-	rmSync(files.artifactDirectory, { recursive: true, force: true });
-	rmSync(files.readablePath, { force: true });
-	if (files.backupDirectory) renameSync(files.backupDirectory, files.artifactDirectory);
-	if (files.backupReadable) renameSync(files.backupReadable, files.readablePath);
-}
-
-function finishFiles(files: PublishedFiles): void {
-	if (files.backupDirectory) rmSync(files.backupDirectory, { recursive: true, force: true });
-	if (files.backupReadable) rmSync(files.backupReadable, { force: true });
 }
 
 function publish(
@@ -392,10 +381,9 @@ function publish(
 	revision: string,
 	ownerId: string,
 	result: WorkbookResult,
-	stageDirectory: string,
+	directory: string,
 	workspaceRoot: string,
-): PreparedWorkbook {
-	let files: PublishedFiles | undefined;
+): void {
 	database.exec("BEGIN IMMEDIATE");
 	try {
 		const job = database
@@ -403,13 +391,13 @@ function publish(
 			.get(`${document.doc_id}:${revision}`, Date.now()) as SqlRow | undefined;
 		if (job?.owner_id !== ownerId) throw new Error("Workbook processing lease was lost");
 		if (
-			!database.prepare("SELECT 1 FROM documents WHERE doc_id=? AND sha256=?").get(document.doc_id, document.sha256)
-		) {
-			throw new Error("Workbook was removed during preparation");
-		}
-		for (const table of [...EXCEL_TABLES].reverse()) {
+			!database
+				.prepare("SELECT 1 FROM documents WHERE doc_id=? AND sha256=? AND deleted_at IS NULL")
+				.get(document.doc_id, document.sha256)
+		)
+			throw new Error("Workbook version was removed during preparation");
+		for (const table of [...EXCEL_TABLES].reverse())
 			database.prepare(`DELETE FROM ${table} WHERE doc_id=?`).run(document.doc_id);
-		}
 		for (const table of EXCEL_TABLES) {
 			const rows = result.tables[table];
 			if (rows.length === 0) continue;
@@ -419,25 +407,30 @@ function publish(
 			);
 			for (const row of rows) statement.run(...columns.map((column) => row[column] ?? null));
 		}
-		files = installFiles(workspaceRoot, document, stageDirectory, ownerId);
-		const rel = (path: string) => relative(workspaceRoot, path).replaceAll("\\", "/");
-		const manifestPath = join(files.artifactDirectory, "manifest.json");
+		const evidence = database.prepare(
+			"INSERT OR IGNORE INTO evidence_locations (evidence_id,doc_id,sheet_name,cell_range) VALUES (?,?,?,?)",
+		);
+		for (const row of result.tables.excel_cells)
+			evidence.run(`cell:${row.cell_id}`, document.doc_id, row.sheet_name, row.cell_ref);
+		for (const row of result.tables.metric_facts)
+			evidence.run(`fact:${row.fact_id}`, document.doc_id, row.sheet_name, row.cell_ref);
+		const rel = (file: string) => relative(workspaceRoot, join(directory, file)).replaceAll("\\", "/");
 		const now = new Date().toISOString();
 		database
 			.prepare(`INSERT INTO document_cache (doc_id,revision,prepared_at,cache_path,readable_path) VALUES (?,?,?,?,?)
-				ON CONFLICT(doc_id) DO UPDATE SET revision=excluded.revision,prepared_at=excluded.prepared_at,
-				cache_path=excluded.cache_path,readable_path=excluded.readable_path`)
-			.run(document.doc_id, revision, now, rel(manifestPath), rel(files.readablePath));
+			ON CONFLICT(doc_id) DO UPDATE SET revision=excluded.revision,prepared_at=excluded.prepared_at,cache_path=excluded.cache_path,readable_path=excluded.readable_path`)
+			.run(document.doc_id, revision, now, rel("manifest.json"), rel("readable.txt"));
 		database
 			.prepare(`UPDATE documents SET status=?,parser_name=?,parser_version=?,document_date=?,artifact_directory=?,
-				document_markdown_path='',layout_json_path='',readable_text_path=?,warnings_json=?,updated_at=? WHERE doc_id=?`)
+			document_markdown_path=?,readable_text_path=?,warnings_json=?,updated_at=? WHERE doc_id=?`)
 			.run(
 				result.warnings.length > 0 ? "completed_with_warnings" : "completed",
 				result.parser_name,
 				result.parser_version,
 				result.document_date,
-				rel(files.artifactDirectory),
-				rel(files.readablePath),
+				relative(workspaceRoot, directory).replaceAll("\\", "/"),
+				rel("readable.txt"),
+				rel("readable.txt"),
 				JSON.stringify(result.warnings),
 				now,
 				document.doc_id,
@@ -448,11 +441,8 @@ function publish(
 			)
 			.run(now, `${document.doc_id}:${revision}`, ownerId);
 		database.exec("COMMIT");
-		finishFiles(files);
-		return { cachePath: manifestPath, readablePath: files.readablePath, warnings: result.warnings };
 	} catch (error) {
 		database.exec("ROLLBACK");
-		if (files) restoreFiles(files);
 		throw error;
 	}
 }
@@ -463,10 +453,20 @@ export async function prepareWorkbook(
 	filePath: string,
 	signal?: AbortSignal,
 ): Promise<PreparedWorkbook> {
-	const revision = excelParserRevision();
-	const stagingRoot = join(workspaceRoot, "meta", ".excel-staging");
-	mkdirSync(stagingRoot, { recursive: true });
-	if (realpathSync(stagingRoot) !== stagingRoot) throw new Error("Excel staging directory must not be a symlink");
+	const excel = document.file_type === "xlsx" || document.file_type === "xlsm";
+	const revision = excel
+		? excelParserRevision()
+		: createHash("sha256")
+				.update("pe-document-json-v1\0")
+				.update(readFileSync(join(readerRoot, "read_document.py")))
+				.update(readFileSync(join(readerRoot, "office.py")))
+				.digest("hex");
+	const documentDirectory = join(workspaceRoot, "meta", excel ? "excel" : "read-cache", String(document.doc_id));
+	mkdirSync(documentDirectory, { recursive: true });
+	if (realpathSync(documentDirectory) !== documentDirectory) throw new Error("Excel cache must not be a symlink");
+	const directory = join(documentDirectory, revision);
+	mkdirSync(directory, { recursive: true });
+	if (realpathSync(directory) !== directory) throw new Error("Excel revision directory must not be a symlink");
 	const database = openPeCollectionDatabase(join(workspaceRoot, "meta", "collection.sqlite3"));
 	const ownerId = randomUUID();
 	const controller = new AbortController();
@@ -474,16 +474,21 @@ export async function prepareWorkbook(
 	signal?.addEventListener("abort", forwardAbort, { once: true });
 	let heartbeat: ReturnType<typeof setInterval> | undefined;
 	let claimed = false;
-	const stageDirectory = join(stagingRoot, ownerId);
+	let stage: string | undefined;
 	try {
+		let waited = false;
 		for (;;) {
 			signal?.throwIfAborted();
-			const existing = cachedWorkbook(database, document, revision, workspaceRoot);
+			const observedCache = database
+				.prepare("SELECT cache_path FROM document_cache WHERE doc_id=?")
+				.get(document.doc_id) as SqlRow | undefined;
+			const existing = cachedWorkbook(database, document, revision, directory, workspaceRoot);
 			if (existing) return existing;
-			if (claim(database, document, revision, ownerId)) {
+			if (claim(database, document, revision, ownerId, waited, textValue(observedCache ?? {}, "cache_path"))) {
 				claimed = true;
 				break;
 			}
+			waited = true;
 			await new Promise<void>((resolveWait) => setTimeout(resolveWait, 150));
 		}
 		heartbeat = setInterval(() => {
@@ -505,21 +510,31 @@ export async function prepareWorkbook(
 			}
 		}, HEARTBEAT_MS);
 		heartbeat.unref();
-		mkdirSync(join(stageDirectory, "artifact"), { recursive: true });
-		const workbookPath = join(stageDirectory, "artifact", "workbook.json");
-		await runParser(filePath, workbookPath, document, revision, controller.signal);
-		controller.signal.throwIfAborted();
-		const result = validateResult(
-			JSON.parse(readFileSync(workbookPath, "utf8")) as unknown,
-			document,
-			revision,
-			database,
-		);
-		await verifyPeOriginal(filePath, String(document.sha256), controller.signal);
-		const lines = [`# ${document.original_filename}`, ...result.warnings.map((warning) => `Warning: ${warning}`)];
-		for (const sheet of result.tables.excel_sheets) {
-			lines.push(`Sheet: ${sheet.sheet_name} | ${sheet.used_range || "empty"} | ${sheet.sheet_state}`);
+		const published = database.prepare("SELECT cache_path FROM document_cache WHERE doc_id=?").get(document.doc_id) as
+			| SqlRow
+			| undefined;
+		const publishedDirectory = published ? dirname(resolve(workspaceRoot, String(published.cache_path))) : undefined;
+		for (const entry of readdirSync(directory)) {
+			if (!/^\.?[a-f0-9-]{36}(?:\.tmp)?$/u.test(entry)) continue;
+			const path = join(directory, entry);
+			const stat = lstatSync(path);
+			if (!stat.isDirectory() || stat.isSymbolicLink() || path === publishedDirectory) continue;
+			const retention = entry.endsWith(".tmp") ? LEASE_MS : 24 * 60 * 60_000;
+			if (Date.now() - stat.mtimeMs > retention) rmSync(path, { recursive: true, force: true });
 		}
+		stage = join(directory, `.${ownerId}.tmp`);
+		mkdirSync(stage);
+		const output = join(stage, "workbook.json");
+		await runParser(filePath, output, document, revision, controller.signal);
+		controller.signal.throwIfAborted();
+		const result = validateResult(JSON.parse(readFileSync(output, "utf8")) as unknown, document, revision, database);
+		await verifyPeOriginal(filePath, String(document.sha256), controller.signal);
+		const lines = [
+			`# ${document.original_filename} (version ${document.version_no})`,
+			...result.warnings.map((warning) => `Warning: ${warning}`),
+		];
+		for (const sheet of result.tables.excel_sheets)
+			lines.push(`Sheet: ${sheet.sheet_name} | ${sheet.used_range || "empty"} | ${sheet.sheet_state}`);
 		for (const cell of [...result.tables.excel_cells].sort(
 			(left, right) =>
 				Buffer.compare(
@@ -534,25 +549,45 @@ export async function prepareWorkbook(
 				`${document.original_filename} ${cell.sheet_name}!${cell.cell_ref} | value=${JSON.stringify(cell.raw_value ?? "")} | cached=${JSON.stringify(cell.cached_value ?? "")} | formula=${JSON.stringify(cell.formula ?? "")} | ${sourceMarkdownCitation(row, sourceEvidenceId(row))}`,
 			);
 		}
+		if (result.text !== undefined) {
+			for (const [index, line] of result.text.split("\n").entries()) {
+				const row = { ...document, line_start: index + 1, line_end: index + 1 };
+				lines.push(`${line} ${sourceMarkdownCitation(row, sourceEvidenceId(row))}`);
+			}
+		} else
+			for (const block of result.blocks ?? []) {
+				const row = { ...document, ...block };
+				const citation = sourceMarkdownCitation(row, sourceEvidenceId(row));
+				lines.push(`\n${block.heading_path ?? ""} ${citation}`);
+				for (const line of block.text.split("\n")) lines.push(`${line} ${citation}`);
+			}
 		const readable = `${lines.join("\n")}\n`;
-		writeFileSync(join(stageDirectory, "readable.txt"), readable, { flag: "wx", mode: 0o600 });
+		writeFileSync(join(stage, "readable.txt"), readable, { flag: "wx", mode: 0o600 });
 		const manifest: WorkbookManifest = {
 			doc_id: String(document.doc_id),
 			revision,
 			source_sha256: String(document.sha256),
+			blocks: result.blocks ?? [],
+			...(result.text === undefined ? {} : { text: result.text }),
 			warnings: result.warnings,
 			row_counts: Object.fromEntries(EXCEL_TABLES.map((table) => [table, result.tables[table].length])) as Record<
 				ExcelTable,
 				number
 			>,
-			workbook_sha256: createHash("sha256").update(readFileSync(workbookPath)).digest("hex"),
+			workbook_sha256: createHash("sha256").update(readFileSync(output)).digest("hex"),
 			readable_sha256: createHash("sha256").update(readable).digest("hex"),
 		};
-		writeFileSync(join(stageDirectory, "artifact", "manifest.json"), JSON.stringify(manifest), {
-			flag: "wx",
-			mode: 0o600,
-		});
-		return publish(database, document, revision, ownerId, result, stageDirectory, workspaceRoot);
+		writeFileSync(join(stage, "manifest.json"), JSON.stringify(manifest), { flag: "wx", mode: 0o600 });
+		// Generations are immutable. Only the transaction below changes the visible pointer.
+		const generation = join(directory, ownerId);
+		renameSync(stage, generation);
+		stage = undefined;
+		publish(database, document, revision, ownerId, result, generation, workspaceRoot);
+		return {
+			cachePath: join(generation, "manifest.json"),
+			readablePath: join(generation, "readable.txt"),
+			warnings: result.warnings,
+		};
 	} catch (error) {
 		if (claimed) {
 			const message = error instanceof Error ? error.message : String(error);
@@ -564,11 +599,21 @@ export async function prepareWorkbook(
 						"UPDATE processing_jobs SET status='failed',lease_expires_at=0,error=?,updated_at=? WHERE job_key=? AND owner_id=? AND status='processing'",
 					)
 					.run(message, now, `${document.doc_id}:${revision}`, ownerId);
-				if (Number(updated.changes) > 0) {
+				if (Number(updated.changes) > 0)
 					database
-						.prepare("UPDATE documents SET status='failed',warnings_json=?,updated_at=? WHERE doc_id=?")
-						.run(JSON.stringify([message]), now, document.doc_id);
-				}
+						.prepare(`UPDATE documents SET status='failed',warnings_json=?,updated_at=?
+							WHERE doc_id=? AND status='processing' AND NOT EXISTS (
+								SELECT 1 FROM processing_jobs WHERE doc_id=? AND job_key<>?
+								AND status='processing' AND lease_expires_at>?
+							)`)
+						.run(
+							JSON.stringify([message]),
+							now,
+							document.doc_id,
+							document.doc_id,
+							`${document.doc_id}:${revision}`,
+							Date.now(),
+						);
 				database.exec("COMMIT");
 			} catch {
 				database.exec("ROLLBACK");
@@ -578,7 +623,7 @@ export async function prepareWorkbook(
 	} finally {
 		if (heartbeat) clearInterval(heartbeat);
 		signal?.removeEventListener("abort", forwardAbort);
-		rmSync(stageDirectory, { recursive: true, force: true });
+		if (stage) rmSync(stage, { recursive: true, force: true });
 		database.close();
 	}
 }

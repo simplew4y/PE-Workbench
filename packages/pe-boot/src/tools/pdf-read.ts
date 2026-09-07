@@ -4,6 +4,7 @@ import { Type } from "typebox";
 import {
 	numberValue,
 	openPeDataset,
+	pdfDocumentSelection,
 	type SqlRow,
 	sourceCitation,
 	sourceMarkdownCitation,
@@ -14,10 +15,11 @@ const MAX_PAGE_RANGE = 10;
 const MAX_PAGE_TEXT_CHARS = 30_000;
 
 export const PE_PDF_READ_PROMPT_SNIPPET =
-	"Read complete pages from a named project PDF, including neighboring context, page images, and citations";
+	"Read complete PDF pages by filename or immutable doc_id, including neighboring context, page images, and citations";
 
 export interface PePdfReadOptions {
-	documentName: string;
+	documentName?: string;
+	docId?: string;
 	pageStart: number;
 	pageEnd?: number;
 	datasetId?: string;
@@ -39,6 +41,8 @@ export interface PePdfReadPage {
 export interface PePdfReadResult {
 	dataset_id: string;
 	document: {
+		doc_id: string;
+		version_no: number;
 		filename: string;
 		title?: string;
 		page_count: number;
@@ -95,7 +99,9 @@ function pagePayload(row: SqlRow, filename: string): PePdfReadPage {
 }
 
 export function readPePdfPages(cwd: string, options: PePdfReadOptions, signal?: AbortSignal): PePdfReadResult {
-	const documentName = normalizeDocumentName(options.documentName);
+	const requestedDocId = options.docId?.trim();
+	if (!requestedDocId && !options.documentName?.trim()) throw new Error("document_name or doc_id is required");
+	const documentName = options.documentName?.trim() ? normalizeDocumentName(options.documentName) : undefined;
 	const pageStart = Math.trunc(options.pageStart);
 	const pageEnd = Math.trunc(options.pageEnd ?? pageStart);
 	if (pageStart < 1 || pageEnd < pageStart) throw new Error("page range is invalid");
@@ -110,16 +116,25 @@ export function readPePdfPages(cwd: string, options: PePdfReadOptions, signal?: 
 			.get();
 		if (!pageTextColumn)
 			throw new Error("pe_pdf_read requires the page-level PDF Pipeline schema; rebuild this project");
-		const document = connection.database
+		const selection = pdfDocumentSelection(connection.database, Boolean(requestedDocId));
+		const documents = connection.database
 			.prepare(
-				`SELECT doc_id, original_filename, title, page_count,
-				        document_markdown_path, layout_json_path
-				 FROM documents
-				 WHERE dataset_id=? AND lower(original_filename)=?
-				   AND status IN ('completed', 'completed_with_warnings')`,
+				`SELECT d.doc_id, ${selection.versionNo} AS version_no, d.original_filename, d.title, d.page_count,
+				        d.document_markdown_path, d.layout_json_path, d.status
+				 FROM documents d
+				 WHERE d.dataset_id=? AND ${requestedDocId ? "d.doc_id=?" : "lower(d.original_filename)=?"}
+				   AND ${selection.predicate}`,
 			)
-			.get(connection.datasetId, documentName) as SqlRow | undefined;
-		if (!document) throw new Error(`PDF is not indexed in the current project: ${options.documentName}`);
+			.all(connection.datasetId, requestedDocId ?? documentName ?? "") as SqlRow[];
+		if (documents.length > 1)
+			throw new Error(
+				`Ambiguous PDF filename: ${options.documentName}. Specify the exact doc_id from pe_pdf_search.`,
+			);
+		const document = documents[0];
+		if (!document || !["completed", "completed_with_warnings"].includes(textValue(document, "status") ?? ""))
+			throw new Error(`PDF is not indexed in the current project: ${requestedDocId ?? options.documentName}`);
+		if (requestedDocId && documentName && normalizeDocumentName(String(document.original_filename)) !== documentName)
+			throw new Error("document_name does not match the selected doc_id");
 		const pageCount = numberValue(document, "page_count") ?? 0;
 		if (pageStart > pageCount || pageEnd > pageCount) {
 			throw new Error(`requested page range exceeds the document's ${pageCount} pages`);
@@ -134,11 +149,15 @@ export function readPePdfPages(cwd: string, options: PePdfReadOptions, signal?: 
 				 ORDER BY page_number`,
 			)
 			.all(docId, pageStart, pageEnd) as SqlRow[];
-		const filename = textValue(document, "original_filename") ?? options.documentName;
+		if (rows.length !== pageEnd - pageStart + 1)
+			throw new Error("PDF page index is incomplete; retry document processing before reading these pages");
+		const filename = textValue(document, "original_filename") ?? options.documentName ?? "unknown.pdf";
 		const title = textValue(document, "title");
 		return {
 			dataset_id: connection.datasetId,
 			document: {
+				doc_id: docId,
+				version_no: numberValue(document, "version_no") ?? 1,
 				filename,
 				...(title ? { title } : {}),
 				page_count: pageCount,
@@ -160,14 +179,23 @@ export const pePdfReadTool = defineTool({
 	name: "pe_pdf_read",
 	label: "PE PDF Read",
 	description:
-		"Read one to ten complete pages from a named PDF in the current project. Use after pe_pdf_search to inspect the full page, adjacent pages, source location, extraction quality, and page image before relying on decisive evidence.",
+		"Read one to ten complete pages from a PDF in the current project. A filename selects one current active document; ambiguous names require doc_id. Pass the immutable doc_id returned by pe_pdf_search to read that exact version, including a historical version. Deleted versions are unavailable. Inspect the full page, adjacent pages, extraction quality, and page image before relying on decisive evidence.",
 	promptSnippet: PE_PDF_READ_PROMPT_SNIPPET,
 	parameters: Type.Object({
-		document_name: Type.String({
-			description: "Exact PDF filename returned by pe_pdf_search, with or without .pdf.",
-			minLength: 1,
-			maxLength: 500,
-		}),
+		document_name: Type.Optional(
+			Type.String({
+				description: "Exact current PDF filename, with or without .pdf. Required unless doc_id is supplied.",
+				minLength: 1,
+				maxLength: 500,
+			}),
+		),
+		doc_id: Type.Optional(
+			Type.String({
+				description: "Exact immutable PDF document ID from pe_pdf_search. Allows historical versions.",
+				minLength: 1,
+				maxLength: 128,
+			}),
+		),
 		page_start: Type.Integer({ description: "First one-based page number to read.", minimum: 1 }),
 		page_end: Type.Optional(
 			Type.Integer({
@@ -184,6 +212,7 @@ export const pePdfReadTool = defineTool({
 			ctx.cwd,
 			{
 				documentName: params.document_name,
+				docId: params.doc_id,
 				pageStart: params.page_start,
 				pageEnd: params.page_end,
 				datasetId: params.dataset_id,

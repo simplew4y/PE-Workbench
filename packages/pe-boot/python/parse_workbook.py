@@ -25,7 +25,7 @@ def main() -> None:
     parser.add_argument("--filename", required=True)
     parser.add_argument("--modified-at")
     args = parser.parse_args()
-    if not re.fullmatch(r"doc_[a-f0-9]{24}", args.doc_id):
+    if not re.fullmatch(r"(?:[a-f0-9]{40}|doc_[a-f0-9]{24})", args.doc_id):
         raise ValueError("Invalid document ID")
     original = args.input.resolve(strict=True)
     data = original.read_bytes()

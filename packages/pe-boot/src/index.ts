@@ -6,15 +6,29 @@ export {
 	PE_PIPELINE_SCHEMA_VERSION,
 } from "./collection-schema.ts";
 export {
-	DOCUMENT_EXTENSIONS,
+	type PeDocumentOptions,
 	PeSourceError,
+	type PreparedPeDocument,
 	preparePeDocument,
 	registerPeDocuments,
 } from "./documents.ts";
-export { resolvePeEvidenceReference, resolvePeEvidenceSource, resolvePeEvidenceSources } from "./evidence.ts";
+export {
+	resolvePeEvidenceRecord,
+	resolvePeEvidenceReference,
+	resolvePeEvidenceSource,
+	resolvePeEvidenceSources,
+	sourceLocationRow,
+} from "./evidence.ts";
 export { excelParserRevision, excelPython, validatePeExcelUpload } from "./excel-processing.ts";
-export { parseExcelCellRange, parseSourceId, sourceId, sourceLink, sourceUrl } from "./source.ts";
+export * from "./source.ts";
 export { buildPeSystemPrompt, toolsList } from "./system-prompt.ts";
+export { peDocumentOpenTool } from "./tools/document-open.ts";
+export { getPeExcelRange, peExcelRangeTool } from "./tools/excel-range.ts";
+export { peFormulaTraceTool, tracePeFormula } from "./tools/formula-trace.ts";
 export { registerPeTools } from "./tools/index.ts";
+export { peModelValidateTool, validatePeModel } from "./tools/model-validate.ts";
 export { pePdfReadTool, readPePdfPages } from "./tools/pdf-read.ts";
 export { pePdfSearchTool, searchPePdfPages } from "./tools/pdf-search.ts";
+export { peValuationDateTool, resolvePeValuationDate } from "./tools/valuation-date.ts";
+export { locatePeValuationOutputs, peValuationOutputTool } from "./tools/valuation-output.ts";
+export { inspectPeWorkbooks, peWorkbookInspectTool } from "./tools/workbook-inspect.ts";

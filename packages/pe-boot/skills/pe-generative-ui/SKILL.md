@@ -37,7 +37,7 @@ Use Markdown only for quick factual answers, definitions, short reasoning, code,
 - Use `sankey_chart` for measured non-negative flows on a single unit, with unique named nodes and acyclic links; use relationship_map for qualitative relationships.
 - Use `radar_chart` for comparable or explicitly normalized dimensions, indicators with name/max, aligned series with name/values; explain normalization and do not invent scores.
 - Use `candlestick_chart` for verified chronological OHLC data; each candle has date/open/close/low/high. It supports zoom and an exact data table, not live market feeds.
-- All seven components can also be research_brief blocks. Select them only when they help; never replace claim-level green evidence citations. The catalog is not permission to execute arbitrary ECharts options, JS or HTML.
+- All seven components can also be research_brief blocks. Select them only when they help; never replace claim-level compact evidence citation markers. The catalog is not permission to execute arbitrary ECharts options, JS or HTML.
 
 - `company_overview`: an identifiable company with at least three verified attributes or metrics.
 - `financial_trend`: comparable numeric values across at least two periods or categories. Prefer line for time, bar for category comparison, pie only for a valid part-to-whole series.
@@ -60,7 +60,7 @@ Use Markdown only for quick factual answers, definitions, short reasoning, code,
 - The catalog describes capabilities, not mandatory routing. Having three metrics does not make a company card necessary. A single risk and its evidence normally belong in a short paragraph.
 - Distinguish visual structure from interaction: default to `presentation.interaction: static`. Choose `explore` only when the user needs to navigate or select details. Never put essential conclusions only behind buttons, hover, or carousel navigation.
 - When UI is justified, actively select its palette instead of repeatedly choosing neutral. Available themes: neutral, cool, warm, ink, lagoon, orchid, forest, ember, berry, cobalt, gold, slate. For original art direction provide `presentation.palette: {accent: "#RRGGBB", series: ["#RRGGBB", "#RRGGBB"]}` with 2–5 distinct series colors. Do not claim invented brand colors are official. Keep one coherent palette per answer. The frontend adjusts contrast, not your intended mood.
-- Skins (`treatment`): minimal, divider, soft, card, paper, glass, outline, spotlight. Choose one suited to the information; extra skins do not justify extra UI. Placement and interaction remain independent; default inline/static. Semantic red/green risk signals and green source citations never inherit decorative colors.
+- Skins (`treatment`): minimal, divider, soft, card, paper, glass, outline, spotlight. Choose one suited to the information; extra skins do not justify extra UI. Placement and interaction remain independent; default inline/static. Semantic red/green risk signals and compact source citation markers never inherit decorative colors.
 - Natural prose can contain a local visual and resume reasoning afterward. Do not force an opening, chart, risk card, and conclusion template. A small Markdown table is often enough.
 
 - Each block must answer a different sub-question. A KPI strip plus a table containing the same KPIs is duplication, not composition.

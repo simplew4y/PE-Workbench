@@ -55,12 +55,14 @@ export function validatePeModel(
 		}
 		const document = connection.database
 			.prepare(
-				`SELECT doc_id, original_filename, source_relpath, document_date
+				`SELECT doc_id, original_filename, source_relpath, version_no, document_date
 				 FROM documents
-				 WHERE dataset_id = ? AND doc_id = ? AND file_type IN ('xlsx','xlsm')`,
+				 WHERE dataset_id = ? AND doc_id = ? AND deleted_at IS NULL
+				   AND COALESCE(is_current, 1) = 1
+				   AND COALESCE(lifecycle_state, 'active') = 'active'`,
 			)
 			.get(connection.datasetId, docId) as SqlRow | undefined;
-		if (!document) throw new Error(`Excel document not found in the current dataset: ${docId}`);
+		if (!document) throw new Error(`active document not found in the current dataset: ${docId}`);
 
 		const formulaCacheStatusCounts = groupedCounts(
 			connection.database,
@@ -105,7 +107,8 @@ export function validatePeModel(
 		const errorRows = connection.database
 			.prepare(
 				`SELECT c.*, c.cell_ref AS cell_range,
-				        d.original_filename, d.source_relpath, d.file_type, d.document_date
+				        d.original_filename, d.source_relpath, d.file_type, d.doc_type,
+				        d.document_date, d.version_no
 				 FROM excel_cells c
 				 JOIN documents d ON d.doc_id = c.doc_id
 				 WHERE c.dataset_id = ? AND c.doc_id = ?
@@ -177,6 +180,7 @@ export function validatePeModel(
 			document: {
 				doc_id: docId,
 				filename: textValue(document, "source_relpath") ?? textValue(document, "original_filename"),
+				version_no: numberValue(document, "version_no"),
 				document_date: textValue(document, "document_date"),
 			},
 			structural_status: errorCount > 0 ? "error" : warningCount > 0 ? "warning" : "pass",

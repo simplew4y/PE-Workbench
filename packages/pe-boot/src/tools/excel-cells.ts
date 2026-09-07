@@ -83,11 +83,13 @@ export function readExcelCellsByBounds(
 	const rows = database
 		.prepare(
 			`SELECT c.*, c.cell_ref AS cell_range,
-			        d.original_filename, d.source_relpath, d.file_type, d.document_date
+			        d.original_filename, d.source_relpath, d.file_type, d.doc_type,
+			        d.document_date, d.version_no
 			 FROM excel_cells c
 			 JOIN documents d ON d.doc_id = c.doc_id
 			 WHERE c.dataset_id = ? AND c.doc_id = ? AND c.sheet_name = ?
 			   AND c.row_index BETWEEN ? AND ? AND c.col_index BETWEEN ? AND ?
+			   AND d.deleted_at IS NULL
 			 ORDER BY c.row_index, c.col_index LIMIT ?`,
 		)
 		.all(

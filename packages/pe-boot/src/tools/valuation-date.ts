@@ -117,6 +117,7 @@ export interface PeValuationDateResult {
 	document: {
 		doc_id: string;
 		filename: string;
+		version_no?: number;
 		document_date?: string;
 	};
 	status: PeValuationDateStatus;
@@ -316,12 +317,14 @@ export function resolvePeValuationDate(
 		}
 		const document = connection.database
 			.prepare(
-				`SELECT doc_id, original_filename, source_relpath, document_date
+				`SELECT doc_id, original_filename, source_relpath, version_no, document_date
 				 FROM documents
-				 WHERE dataset_id = ? AND doc_id = ? AND file_type IN ('xlsx','xlsm')`,
+				 WHERE dataset_id = ? AND doc_id = ? AND deleted_at IS NULL
+				   AND COALESCE(is_current, 1) = 1
+				   AND COALESCE(lifecycle_state, 'active') = 'active'`,
 			)
 			.get(connection.datasetId, docId) as SqlRow | undefined;
-		if (!document) throw new Error(`Excel document not found in the current dataset: ${docId}`);
+		if (!document) throw new Error(`active document not found in the current dataset: ${docId}`);
 
 		let outputSheet: string | undefined;
 		let valuationOutputConfirmation: PeValuationOutputConfirmation | undefined;
@@ -333,7 +336,8 @@ export function resolvePeValuationDate(
 				)
 				.get(connection.datasetId, docId, requestedOutputSheet) as SqlRow | undefined;
 			outputSheet = sheet ? textValue(sheet, "sheet_name") : undefined;
-			if (!outputSheet) throw new Error(`Excel sheet not found in document ${docId}: ${requestedOutputSheet}`);
+			if (!outputSheet)
+				throw new Error(`Excel sheet not found in active document ${docId}: ${requestedOutputSheet}`);
 			const outputCell = connection.database
 				.prepare(
 					`SELECT * FROM excel_cells
@@ -360,7 +364,8 @@ export function resolvePeValuationDate(
 		const rows = connection.database
 			.prepare(
 				`SELECT v.*, v.cell_ref AS cell_range,
-				        d.original_filename, d.source_relpath, d.file_type, d.document_date
+				        d.original_filename, d.source_relpath, d.file_type, d.doc_type,
+				        d.document_date, d.version_no
 				 FROM valuation_date_candidates v
 				 JOIN documents d ON d.doc_id = v.doc_id AND d.dataset_id = v.dataset_id
 				 WHERE v.dataset_id = ? AND v.doc_id = ?
@@ -643,6 +648,9 @@ export function resolvePeValuationDate(
 			document: {
 				doc_id: docId,
 				filename: sourceFilename(document),
+				...(numberValue(document, "version_no") !== undefined
+					? { version_no: numberValue(document, "version_no") }
+					: {}),
 				...(textValue(document, "document_date") ? { document_date: textValue(document, "document_date") } : {}),
 			},
 			status,
