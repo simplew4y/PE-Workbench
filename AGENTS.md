@@ -58,6 +58,7 @@ app/api/
   files/[...path]/route.ts        GET file contents for viewer
   home/route.ts                   GET user home directory
   models/route.ts                 GET { models, modelList, defaultModel }
+  pe/consensus/route.ts           GET ?datasetId=&types=&itemKey=&limit= — consensus/divergence cards from ingest
   models-config/route.ts          GET/PUT — read/write ~/.pi/agent/models.json
   models-config/catalog/route.ts  GET models.dev pricing presets
   models-config/discover/route.ts POST fetch a configured provider's upstream model list

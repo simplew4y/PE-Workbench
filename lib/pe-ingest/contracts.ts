@@ -46,6 +46,7 @@ export interface PeIngestJobResult {
   files: PeIngestFileResult[];
   createdCount: number;
   failedCount: number;
+  analysis?: Record<string, unknown>;
 }
 
 export interface PeIngestJob {

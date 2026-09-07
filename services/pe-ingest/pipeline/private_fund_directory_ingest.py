@@ -66,6 +66,25 @@ except ImportError:
         classify_document,
     )
 
+try:
+    from .analysis_checklist import ensure_checklist_schema  # type: ignore
+    from .atomic_claims import (  # type: ignore
+        ClaimChatClient,
+        ensure_claims_schema,
+        scan_documents,
+    )
+    from .consensus_cards import build_consensus_cards, ensure_cards_schema  # type: ignore
+    from .issuer_identification import ensure_issuer_schema  # type: ignore
+except ImportError:
+    from analysis_checklist import ensure_checklist_schema  # type: ignore
+    from atomic_claims import (  # type: ignore
+        ClaimChatClient,
+        ensure_claims_schema,
+        scan_documents,
+    )
+    from consensus_cards import build_consensus_cards, ensure_cards_schema  # type: ignore
+    from issuer_identification import ensure_issuer_schema  # type: ignore
+
 CORE_EXTENSIONS = {".pdf", ".xlsx", ".xlsm"}
 SUPPORTED_EXTENSIONS = CORE_EXTENSIONS | set(ADAPTER_EXTENSIONS)
 DEFAULT_MAX_PDF_CHARS = 2200
@@ -223,6 +242,7 @@ class IngestResult:
     removed_file_count: int = 0
     warning_count: int = 0
     documents: list[DocumentIngestResult] = field(default_factory=list)
+    claim_summary: dict[str, Any] = field(default_factory=dict)
     started_at: str = ""
     finished_at: str = ""
     message: str = ""
@@ -549,6 +569,12 @@ def ensure_collection_schema(
         """
     )
     _ensure_collection_schema_migrations(conn)
+    # pe-boot queries the consensus tables whether or not a model has ever run,
+    # so they are created with the collection rather than on first extraction.
+    ensure_checklist_schema(conn)
+    ensure_issuer_schema(conn)
+    ensure_claims_schema(conn)
+    ensure_cards_schema(conn)
     if initialize_current_data_version:
         # Omnigent records its product-wide migration version here. PE-Workbench
         # vendors the core ingestion schema without the Omnigent application,
@@ -2674,6 +2700,43 @@ def _sync_index_registry(conn: sqlite3.Connection, dataset_id: str, source_doc_i
     )
 
 
+def _extract_atomic_claims(
+    conn: sqlite3.Connection,
+    *,
+    dataset_id: str,
+    doc_ids: list[str],
+    company_name: str,
+    llm_client: ClaimChatClient | None,
+    ingested_at: str = "",
+) -> dict[str, Any]:
+    """Read every newly indexed document once for issuer, date and atomic claims.
+
+    Runs after all documents are chunked. Documents that already have a
+    completed scan for the current extractor version are skipped, so a
+    re-ingest of an unchanged project makes no model calls. Without a model
+    the checklist is still seeded and retired documents still retire their
+    claims, which keeps a later backfill a pure re-run rather than a migration.
+    """
+
+    summary = scan_documents(
+        conn,
+        dataset_id=dataset_id,
+        doc_ids=doc_ids,
+        llm_client=llm_client,
+        company_name=company_name,
+        ingested_at=ingested_at,
+    )
+    # Cards are derived from whatever claims exist, so they are rebuilt even
+    # when this ingest scanned nothing: a removed document changes the sample.
+    try:
+        summary["cards"] = build_consensus_cards(
+            conn, dataset_id, llm_client=llm_client, company_name=company_name
+        )
+    except Exception as exc:  # noqa: BLE001 - cards never fail the ingest
+        summary["cards"] = {"status": "failed", "message": str(exc)[:300]}
+    return summary
+
+
 def ingest_directory(
     *,
     directory_path: str | Path,
@@ -2687,6 +2750,7 @@ def ingest_directory(
     reset: bool = False,
     job_id: Optional[str] = None,
     classification_llm: ClassificationChatClient | None = None,
+    claim_llm: ClaimChatClient | None = None,
 ) -> IngestResult:
     source_dir = Path(directory_path).expanduser().resolve()
     if not source_dir.is_dir():
@@ -3112,6 +3176,19 @@ def ingest_directory(
                 (dataset_id,),
             ).fetchone()[0]
             _sync_index_registry(conn, dataset_id, active_doc_ids, int(total_chunks or 0))
+            try:
+                result.claim_summary = _extract_atomic_claims(
+                    conn,
+                    dataset_id=dataset_id,
+                    doc_ids=active_doc_ids,
+                    company_name=company_name,
+                    llm_client=claim_llm,
+                    ingested_at=started,
+                )
+            except Exception as claim_exc:  # noqa: BLE001
+                # Claim extraction is additive analysis over an already-indexed
+                # collection. A failure here must not invalidate the ingest.
+                result.claim_summary = {"status": "failed", "message": str(claim_exc)[:300]}
             failures = [doc for doc in result.documents if doc.status == "failed"]
             warnings = [
                 doc

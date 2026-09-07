@@ -14,6 +14,7 @@ from typing import Any
 PIPELINE_DIR = Path(__file__).resolve().parent / "pipeline"
 sys.path.insert(0, str(PIPELINE_DIR))
 
+from llm_client import build_chat_client_from_env  # noqa: E402
 from private_fund_directory_ingest import ingest_directory, result_to_dict  # noqa: E402
 
 
@@ -68,6 +69,9 @@ def main() -> int:
                 "startedAt": now_iso(),
             },
         )
+        # One upstream identity for the whole job. Absent configuration leaves
+        # the pipeline fully deterministic instead of failing the ingest.
+        chat_client = build_chat_client_from_env()
         result = ingest_directory(
             directory_path=args.directory,
             workspace_root=args.workspace_root,
@@ -79,6 +83,8 @@ def main() -> int:
             recursive=True,
             reset=False,
             job_id=args.job_id,
+            classification_llm=chat_client,
+            claim_llm=chat_client,
         )
         write_job(
             job_file,

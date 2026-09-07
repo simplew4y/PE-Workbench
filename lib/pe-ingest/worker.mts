@@ -9,9 +9,11 @@ import {
   statSync,
 } from "node:fs";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { preparePeDocument } from "@earendil-works/pe-boot/documents";
 import type { PeIngestFileResult, PeIngestJob } from "./contracts.ts";
+import { runPeClaimAnalysis } from "./analysis.ts";
 import { failPeIngestJob, readPeIngestJobFile, updatePeIngestJob } from "./jobs.ts";
 import {
   ensureDirectoryWithin,
@@ -63,6 +65,18 @@ function failureMessage(error: unknown, fileType?: string): string {
   if (fileType === "pdf" && /password|encrypted/iu.test(message)) return "PDF 已加密，暂不支持解析。";
   if (fileType === "pdf" && /InvalidPDF|invalid pdf|header|corrupt|format/iu.test(message)) return "PDF 文件已损坏或格式无效。";
   return message;
+}
+
+function projectCompanyName(registryPath: string, datasetId: string): string {
+  const database = new DatabaseSync(registryPath, { readOnly: true, timeout: 10_000 });
+  try {
+    const row = database.prepare(
+      "SELECT company_name FROM datasets WHERE dataset_id = ?",
+    ).get(datasetId) as { company_name?: unknown } | undefined;
+    return typeof row?.company_name === "string" ? row.company_name : "";
+  } finally {
+    database.close();
+  }
 }
 
 export async function runPeIngestJob(jobFile: string): Promise<PeIngestJob> {
@@ -165,6 +179,42 @@ export async function runPeIngestJob(jobFile: string): Promise<PeIngestJob> {
         });
       }
       updatePeIngestJob(paths, job);
+    }
+
+    if (job.result.createdCount > 0) {
+      job.message = "文档解析完成，正在抽取机构观点、分析问题与共识分歧。";
+      updatePeIngestJob(paths, job);
+      try {
+        const docIds = job.result.files.flatMap((file) => (
+          file.status === "created" && file.docId ? [file.docId] : []
+        ));
+        const analysis = await runPeClaimAnalysis({
+          collectionPath: paths.collectionPath,
+          datasetId: paths.datasetId,
+          companyName: projectCompanyName(paths.registryPath, paths.datasetId),
+          ingestedAt: job.startedAt,
+          docIds,
+        });
+        job.result.analysis = analysis;
+        const cards = analysis.cards;
+        const cardResult = cards && typeof cards === "object" && !Array.isArray(cards)
+          ? cards as Record<string, unknown>
+          : undefined;
+        const analysisErrors = Array.isArray(analysis.errors) ? analysis.errors : [];
+        const cardErrors = Array.isArray(cardResult?.errors) ? cardResult.errors : [];
+        if (
+          analysis.status === "failed"
+          || Number(analysis.documents_partial ?? 0) > 0
+          || analysisErrors.length > 0
+          || cardResult?.status === "failed"
+          || cardErrors.length > 0
+        ) {
+          job.warnings.push("观点与共识分析未完整完成；文档索引不受影响，可稍后重试分析。");
+        }
+      } catch (error) {
+        job.result.analysis = { status: "failed", message: failureMessage(error) };
+        job.warnings.push(`观点与共识分析失败：${failureMessage(error)}。文档索引不受影响。`);
+      }
     }
 
     try {
