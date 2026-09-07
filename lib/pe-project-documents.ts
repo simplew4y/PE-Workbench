@@ -27,6 +27,11 @@ interface DocumentRow {
   page_count: number;
   document_markdown_path: string;
   warnings_json: string;
+  title: string | null;
+  brokerage: string | null;
+  document_date: string | null;
+  rating: string | null;
+  target_price: string | null;
   created_at: string;
   updated_at: string;
   needs_ocr_page_count: number;
@@ -138,6 +143,21 @@ function publicMessage(value: string): string {
   );
 }
 
+function coverMetadata(row: DocumentRow): Pick<PeProjectDocumentSummary, "title" | "brokerage" | "documentDate" | "rating" | "targetPrice"> {
+  if (row.file_type !== "pdf") return {};
+  const text = (value: string | null): string | undefined => {
+    const trimmed = typeof value === "string" ? value.trim() : "";
+    return trimmed ? trimmed : undefined;
+  };
+  return {
+    ...(text(row.title) ? { title: text(row.title) } : {}),
+    ...(text(row.brokerage) ? { brokerage: text(row.brokerage) } : {}),
+    ...(text(row.document_date) ? { documentDate: text(row.document_date) } : {}),
+    ...(text(row.rating) ? { rating: text(row.rating) } : {}),
+    ...(text(row.target_price) ? { targetPrice: text(row.target_price) } : {}),
+  };
+}
+
 export function listPeProjectDocuments(
   datasetId: string,
   options: PeProjectDocumentOptions = {},
@@ -157,6 +177,7 @@ export function listPeProjectDocuments(
         d.page_count,
         d.document_markdown_path,
         d.warnings_json,
+        d.title, d.brokerage, d.document_date, d.rating, d.target_price,
         d.created_at,
         d.updated_at,
         EXISTS(SELECT 1 FROM processing_jobs j WHERE j.doc_id = d.doc_id
@@ -193,6 +214,7 @@ export function listPeProjectDocuments(
         needsOcrPageCount,
         rawRelativePath: rawFile?.relativePath ?? null,
         markdownRelativePath: markdownFile?.relativePath ?? null,
+        ...coverMetadata(row),
       });
       summariesByDocId.set(row.doc_id, documents[documents.length - 1]);
       if (row.file_type === "pdf" && row.registration_kind === "pipeline") {

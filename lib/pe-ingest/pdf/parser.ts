@@ -24,7 +24,7 @@ import {
 } from "../contracts.ts";
 import { pePdfDocumentName, registeredPePdfArtifactPaths, sha256, stablePeId } from "../paths.ts";
 import { buildPePdfLayout } from "./layout.ts";
-import { renderPePdfLayoutJson, renderPePdfMarkdown } from "./markdown.ts";
+import { pePdfPageHeader, renderPePdfLayoutJson, renderPePdfMarkdown } from "./markdown.ts";
 import { extractPePdfMetadata } from "./metadata.ts";
 import { evaluatePePdfTextQuality } from "./quality.ts";
 import { renderPePdfPage } from "./renderer.ts";
@@ -103,21 +103,6 @@ async function openPdf(content: Buffer): Promise<OpenPePdfResult> {
   }
 }
 
-function pageHeader(
-  originalFilename: string,
-  page: PePdfPageArtifact,
-  pageCount: number,
-  brokerage: string,
-  documentDate: string,
-): string {
-  const exhibit = page.text.split(/\r?\n/u).find((line) => (
-    /^(?:(?:图|表)\s*\d+|(?:Exhibit|Figure|Table)\s*\d+)/iu.test(line.trim())
-  ))?.trim() ?? "";
-  return [originalFilename, brokerage, documentDate, `p.${page.pageNumber}/${pageCount}`, exhibit]
-    .filter(Boolean)
-    .join(" · ");
-}
-
 export async function processPePdf(options: ProcessPePdfOptions): Promise<PeParsedPdfDocument> {
   const content = readFileSync(options.rawAbsolutePath);
   if (sha256(content) !== options.sha256) throw new Error("Raw PDF content changed after upload");
@@ -189,15 +174,10 @@ export async function processPePdf(options: ProcessPePdfOptions): Promise<PePars
       rawMetadata,
       pages[0]?.text ?? "",
       pages.map((page) => page.text),
+      pages[0]?.blocks.map((block) => ({ text: block.text, height: block.height, x: block.x })) ?? [],
     );
     for (const page of pages) {
-      page.pageHeader = pageHeader(
-        options.originalFilename,
-        page,
-        pages.length,
-        metadata.brokerage,
-        metadata.documentDate,
-      );
+      page.pageHeader = pePdfPageHeader(options.originalFilename, metadata, page, pages.length);
     }
 
     const { artifactDirectory, documentMarkdownPath, layoutJsonPath } = options.registeredDocument
