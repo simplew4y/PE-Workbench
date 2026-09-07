@@ -120,6 +120,7 @@ export function PeResearchUpload({ project, onComplete, onBusyChange, onDocument
         onComplete?.();
       } catch (cause) {
         if (!mountedRef.current) return;
+        onDocumentsChanged?.();
         setStage("failed");
         setMessage(cause instanceof Error ? cause.message : String(cause));
       }

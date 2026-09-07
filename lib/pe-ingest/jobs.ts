@@ -106,14 +106,14 @@ function reconcilePeIngestJob(paths: PeProjectPaths, job: PeIngestJob): PeIngest
       process.kill(job.workerPid, 0);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ESRCH") {
-        return failPeIngestJob(paths, job, "文档处理进程已退出，可以重试失败的 Excel。");
+        return failPeIngestJob(paths, job, "文档处理进程已退出，可以重试失败的已登记文档。");
       }
     }
   }
   const lastActivity = Date.parse(job.heartbeatAt ?? job.startedAt ?? job.createdAt);
   const timeout = job.workerPid ? 30 * 60_000 : 2 * 60_000;
   if (Number.isFinite(lastActivity) && Date.now() - lastActivity > timeout) {
-    return failPeIngestJob(paths, job, "文档处理任务已超时，可以重试失败的 Excel。");
+    return failPeIngestJob(paths, job, "文档处理任务已超时，可以重试失败的已登记文档。");
   }
   return job;
 }
@@ -130,46 +130,49 @@ export function findActivePeIngestJob(paths: PeProjectPaths): PeIngestJob | null
     .filter((name) => /^[a-f0-9]{16}\.json$/u.test(name))
     .sort()
     .reverse();
+  const active: PeIngestJob[] = [];
   for (const name of candidates) {
     try {
       const job = readPeIngestJob(paths, name.slice(0, -5));
-      if (job.datasetId === paths.datasetId && PE_INGEST_ACTIVE_STATUSES.has(job.status)) return job;
+      if (job.datasetId === paths.datasetId && PE_INGEST_ACTIVE_STATUSES.has(job.status)) active.push(job);
     } catch {
       // Damaged files are not active-job authorities.
     }
   }
-  recoverOrphanedExcelDocuments(paths);
-  return null;
+  recoverOrphanedRegisteredDocuments(paths, active);
+  return active[0] ?? null;
 }
 
-function recoverOrphanedExcelDocuments(paths: PeProjectPaths): void {
+function recoverOrphanedRegisteredDocuments(paths: PeProjectPaths, active: PeIngestJob[]): void {
+  const activeDocIds = new Set(active.flatMap((job) => job.files.flatMap((file) => file.docId ? [file.docId] : [])));
   const now = Date.now();
   const cutoff = new Date(now - 2 * 60_000).toISOString();
   const database = openPeCollectionDatabase(paths.collectionPath);
   try {
+    // Registration and UI job creation are separate commits. Recover a server killed between
+    // them, while preserving valid agent leases and UI jobs whose worker is still alive.
     database.exec("BEGIN IMMEDIATE");
     try {
-      const orphans = database.prepare(`SELECT d.doc_id,d.warnings_json FROM documents d
-        WHERE d.dataset_id=? AND d.file_type IN ('xlsx','xlsm')
-          AND d.status IN ('queued','processing') AND julianday(d.updated_at)<julianday(?)
+      const orphans = database.prepare(`SELECT d.doc_id, d.warnings_json FROM documents d
+        WHERE d.dataset_id = ? AND (d.file_type IN ('xlsx', 'xlsm')
+          OR (d.file_type = 'pdf' AND d.registration_kind = 'catalog'))
+          AND d.status IN ('queued', 'processing') AND d.deleted_at IS NULL AND d.lifecycle_state = 'active'
+          AND julianday(d.updated_at) < julianday(?)
           AND NOT EXISTS (SELECT 1 FROM processing_jobs p
-            WHERE p.doc_id=d.doc_id AND p.status='processing' AND p.lease_expires_at>?)
+            WHERE p.doc_id = d.doc_id AND p.status = 'processing' AND p.lease_expires_at > ?)
           AND NOT EXISTS (SELECT 1 FROM ingest_jobs j,
             json_tree(CASE WHEN json_valid(j.input_files_json) THEN j.input_files_json ELSE '[]' END) f
-            WHERE j.dataset_id=d.dataset_id AND j.status IN ('queued','running')
-              AND julianday(j.updated_at)>=julianday(?) AND f.key='docId' AND f.value=d.doc_id)`)
-        .all(paths.datasetId, cutoff, now, cutoff) as Array<{ doc_id: string; warnings_json: string }>;
-      const fail = database.prepare(
-        "UPDATE documents SET status='failed',warnings_json=?,updated_at=? WHERE doc_id=? AND dataset_id=?",
-      );
+            WHERE j.dataset_id = d.dataset_id AND j.status IN ('queued', 'running')
+              AND julianday(j.updated_at) >= julianday(?) AND f.key = 'docId' AND f.value = d.doc_id)
+      `).all(paths.datasetId, cutoff, now, cutoff);
+      const fail = database.prepare("UPDATE documents SET status='failed', warnings_json=?, updated_at=? WHERE doc_id=? AND dataset_id=?");
       for (const document of orphans) {
+        if (activeDocIds.has(String(document.doc_id))) continue;
         let warnings: string[] = [];
         try {
-          const value: unknown = JSON.parse(document.warnings_json);
+          const value: unknown = JSON.parse(String(document.warnings_json));
           if (Array.isArray(value)) warnings = value.filter((item): item is string => typeof item === "string");
-        } catch {
-          // Preserve the recovery message when old warning metadata is malformed.
-        }
+        } catch { /* Preserve the recovery message when old warning metadata is malformed. */ }
         warnings.push("文档处理未启动或进程已退出，可以重试解析。");
         fail.run(JSON.stringify([...new Set(warnings)]), new Date(now).toISOString(), document.doc_id, paths.datasetId);
       }

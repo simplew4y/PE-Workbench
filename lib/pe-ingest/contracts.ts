@@ -1,4 +1,4 @@
-export const PE_PIPELINE_SCHEMA_VERSION = 3;
+export const PE_PIPELINE_SCHEMA_VERSION = 4;
 export const PE_PDF_PARSER_NAME = "pdfjs-dist";
 export const PE_PDF_PARSER_VERSION = "6.3.289";
 export const PE_MAX_PDF_PAGES = 300;
@@ -30,6 +30,7 @@ export interface PeIngestInputFile {
   sha256: string;
   fileType: "pdf" | "xlsx" | "xlsm";
   docId?: string;
+  registrationKind?: "pipeline" | "catalog";
 }
 
 export interface PeIngestFileResult {
@@ -164,4 +165,6 @@ export interface PeParsedPdfDocument {
   documentMarkdownPath: string;
   layoutJsonPath: string;
   warnings: string[];
+  registrationKind?: "pipeline" | "catalog";
+  artifactGeneration?: string;
 }

@@ -22,7 +22,7 @@ import {
   type PePdfPageArtifact,
   type PePdfTextToken,
 } from "../contracts.ts";
-import { pePdfDocumentName, stablePeId } from "../paths.ts";
+import { pePdfDocumentName, registeredPePdfArtifactPaths, sha256, stablePeId } from "../paths.ts";
 import { buildPePdfLayout } from "./layout.ts";
 import { renderPePdfLayoutJson, renderPePdfMarkdown } from "./markdown.ts";
 import { extractPePdfMetadata } from "./metadata.ts";
@@ -37,6 +37,7 @@ export interface ProcessPePdfOptions {
   rawAbsolutePath: string;
   sha256: string;
   stagingDocumentDirectory: string;
+  registeredDocument?: { docId: string; generation: string };
 }
 
 function isTextItem(item: TextItem | TextMarkedContent): item is TextItem {
@@ -119,6 +120,7 @@ function pageHeader(
 
 export async function processPePdf(options: ProcessPePdfOptions): Promise<PeParsedPdfDocument> {
   const content = readFileSync(options.rawAbsolutePath);
+  if (sha256(content) !== options.sha256) throw new Error("Raw PDF content changed after upload");
   if (content.subarray(0, 5).toString("ascii") !== "%PDF-") {
     throw new Error("Invalid PDF file header");
   }
@@ -131,8 +133,8 @@ export async function processPePdf(options: ProcessPePdfOptions): Promise<PePars
     mkdirSync(options.stagingDocumentDirectory, { recursive: true });
     const pagesDirectory = path.join(options.stagingDocumentDirectory, "pages");
     mkdirSync(pagesDirectory);
-    const docId = stablePeId("doc", options.datasetId, options.sha256);
-    const documentName = pePdfDocumentName(options.originalFilename);
+    const docId = options.registeredDocument?.docId ?? stablePeId("doc", options.datasetId, options.sha256);
+    const documentName = options.registeredDocument ? "" : pePdfDocumentName(options.originalFilename);
     const pages: PePdfPageArtifact[] = [];
     const warnings: string[] = [];
 
@@ -198,9 +200,13 @@ export async function processPePdf(options: ProcessPePdfOptions): Promise<PePars
       );
     }
 
-    const artifactDirectory = `meta/documents/${documentName}`;
-    const documentMarkdownPath = `meta/text/${documentName}.md`;
-    const layoutJsonPath = `${artifactDirectory}/layout.json`;
+    const { artifactDirectory, documentMarkdownPath, layoutJsonPath } = options.registeredDocument
+      ? registeredPePdfArtifactPaths(docId, options.registeredDocument.generation)
+      : {
+        artifactDirectory: `meta/documents/${documentName}`,
+        documentMarkdownPath: `meta/text/${documentName}.md`,
+        layoutJsonPath: `meta/documents/${documentName}/layout.json`,
+      };
     writeFileSync(
       path.join(options.stagingDocumentDirectory, "document.md"),
       renderPePdfMarkdown(options.originalFilename, metadata, pages),
@@ -235,6 +241,10 @@ export async function processPePdf(options: ProcessPePdfOptions): Promise<PePars
       documentMarkdownPath,
       layoutJsonPath,
       warnings,
+      ...(options.registeredDocument ? {
+        registrationKind: "catalog" as const,
+        artifactGeneration: options.registeredDocument.generation,
+      } : {}),
     };
   } finally {
     await loadingTask.destroy();

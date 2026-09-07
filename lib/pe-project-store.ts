@@ -107,6 +107,7 @@ function renderProjectOverview(
     "- `raw/`：用户上传的原始资料。",
     "- `meta/text/`：从当前资料提取的、供研究与检索使用的 Markdown 文本。",
     "- `meta/documents/`：PDF 页面图片和布局数据。",
+    "- `meta/excel/`：按 Excel 文档版本保存的解析结果与可读文本。",
     "- `generated/`：Memo、Research Note 等研究产物。",
     "",
   ].join("\n");
@@ -133,11 +134,36 @@ function openRegistry(options: PeProjectStoreOptions = {}): DatabaseSync {
   database.exec("PRAGMA busy_timeout=10000");
   database.exec("PRAGMA foreign_keys=ON");
   database.exec("PRAGMA journal_mode=WAL");
-  database.exec(REGISTRY_SCHEMA);
-  database.prepare(
-    "INSERT OR IGNORE INTO dataset_state (id, active_dataset_id, updated_at) VALUES (1, NULL, ?)",
-  ).run(new Date().toISOString());
-  return database;
+  try {
+    database.exec("BEGIN IMMEDIATE");
+    database.exec(REGISTRY_SCHEMA);
+    const columns = database.prepare("PRAGMA table_info(datasets)").all();
+    if (!columns.some((column) => column.name === "name_key")) {
+      database.exec("ALTER TABLE datasets ADD COLUMN name_key TEXT");
+    }
+    const missingKeys = database.prepare(
+      "SELECT dataset_id, name FROM datasets WHERE name_key IS NULL",
+    ).all() as { dataset_id: string; name: string }[];
+    const setNameKey = database.prepare("UPDATE datasets SET name_key = ? WHERE dataset_id = ?");
+    for (const row of missingKeys) {
+      setNameKey.run(projectNameKey(row.name.trim()), row.dataset_id);
+    }
+    // Older registries allowed duplicate display names. Preserve those projects;
+    // new registrations enforce uniqueness inside their write transaction.
+    database.exec("CREATE INDEX IF NOT EXISTS datasets_name_key_idx ON datasets(name_key)");
+    database.prepare(
+      "INSERT OR IGNORE INTO dataset_state (id, active_dataset_id, updated_at) VALUES (1, NULL, ?)",
+    ).run(new Date().toISOString());
+    database.exec("COMMIT");
+    return database;
+  } catch (error) {
+    try {
+      database.exec("ROLLBACK");
+    } finally {
+      database.close();
+    }
+    throw error;
+  }
 }
 
 function isInside(root: string, candidate: string): boolean {
@@ -313,6 +339,9 @@ export function createPeProject(
     const database = openRegistry(options);
     try {
       database.exec("BEGIN IMMEDIATE");
+      if (database.prepare("SELECT dataset_id FROM datasets WHERE name_key = ?").get(nameKey)) {
+        throw new Error(`Project name already exists: ${name}`);
+      }
       database.prepare(`
         INSERT INTO datasets (
           dataset_id, name, name_key, status, source_dir, dataset_root, company_name,
@@ -376,7 +405,7 @@ export function deletePeProject(
   }
 
   const paths = storePaths(options);
-  const projectsRoot = resolve(paths.projectsRoot);
+  const projectsRoot = existsSync(paths.projectsRoot) ? realpathSync(paths.projectsRoot) : resolve(paths.projectsRoot);
   const database = openRegistry(options);
   let row: SqlRow | undefined;
   try {
@@ -389,7 +418,10 @@ export function deletePeProject(
     database.close();
   }
   if (!row) throw new Error(`Project not found: ${normalizedDatasetId}`);
-  const expectedProjectRoot = join(projectsRoot, normalizeProjectName(row.name));
+  const legacyProjectRoot = join(projectsRoot, normalizedDatasetId);
+  const expectedProjectRoot = resolve(row.dataset_root) === legacyProjectRoot
+    ? legacyProjectRoot
+    : join(projectsRoot, normalizeProjectName(row.name));
   if (resolve(row.dataset_root) !== expectedProjectRoot || dirname(expectedProjectRoot) !== projectsRoot) {
     throw new Error("Registered project root is outside the PE projects directory");
   }

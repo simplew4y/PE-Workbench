@@ -35,13 +35,16 @@ export function PeProjectDocuments({ project, refreshKey = 0, onOpenFile }: Prop
   const [expanded, setExpanded] = useState(true);
   const [reloadKey, setReloadKey] = useState(0);
   const [documents, setDocuments] = useState<PeProjectDocumentSummary[]>([]);
+  const [currentCount, setCurrentCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [retryingFilename, setRetryingFilename] = useState<string | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
+  const [retryingDocId, setRetryingDocId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!project) {
       setDocuments([]);
+      setCurrentCount(0);
       setError(null);
       setLoading(false);
       return;
@@ -63,6 +66,7 @@ export function PeProjectDocuments({ project, refreshKey = 0, onOpenFile }: Prop
         }
         if (cancelled) return;
         setDocuments(body.documents);
+        setCurrentCount(body.currentCount ?? body.documents.filter((document) => document.isCurrent !== false).length);
         setError(null);
         if (body.documents.some((document) => document.status === "queued" || document.status === "running")) {
           timer = setTimeout(() => void load(false), 1500);
@@ -82,7 +86,7 @@ export function PeProjectDocuments({ project, refreshKey = 0, onOpenFile }: Prop
     };
   }, [project, refreshKey, reloadKey]);
 
-  const hasAttention = documents.some((document) => (
+  const hasAttention = documents.some((document) => document.isCurrent !== false && (
     document.status === "failed"
     || document.status === "completed_with_warnings"
     || document.needsOcrPageCount > 0
@@ -91,24 +95,23 @@ export function PeProjectDocuments({ project, refreshKey = 0, onOpenFile }: Prop
     if (!project || !onOpenFile) return;
     onOpenFile(joinFilePath(project.root, relativePath), fileName);
   };
-  const retryExcel = async (document: PeProjectDocumentSummary) => {
-    if (!project || retryingFilename) return;
-    setRetryingFilename(document.filename);
+  const retryDocument = async (docId: string) => {
+    if (!project || retryingDocId) return;
+    setRetryingDocId(docId);
     setError(null);
     try {
       const response = await fetch("/api/pe/ingest/retry", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ datasetId: project.datasetId, filename: document.filename }),
+        body: JSON.stringify({ datasetId: project.datasetId, docId }),
       });
       const body = await response.json().catch(() => ({})) as { error?: string };
       if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
       setReloadKey((value) => value + 1);
-      window.setTimeout(() => setReloadKey((value) => value + 1), 1200);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
-      setRetryingFilename(null);
+      setRetryingDocId(null);
     }
   };
 
@@ -142,7 +145,7 @@ export function PeProjectDocuments({ project, refreshKey = 0, onOpenFile }: Prop
           </svg>
           <span style={{ whiteSpace: "nowrap" }}>{t("projectDocuments.title")}</span>
           <span style={{ color: hasAttention ? "#d97706" : "var(--text-dim)", fontVariantNumeric: "tabular-nums" }}>
-            {documents.length}
+            {currentCount}
           </span>
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" style={{ marginLeft: "auto", transform: expanded ? "rotate(180deg)" : "none", transition: "transform 120ms ease" }}>
             <path d="m6 9 6 6 6-6" />
@@ -164,6 +167,12 @@ export function PeProjectDocuments({ project, refreshKey = 0, onOpenFile }: Prop
 
       {expanded && (
         <div style={{ maxHeight: 230, overflowY: "auto", borderTop: "1px solid var(--border)" }}>
+          {documents.some((document) => document.isCurrent === false) && (
+            <label style={{ display: "block", padding: "7px 9px", fontSize: 10.5, color: "var(--text-muted)" }}>
+              <input type="checkbox" checked={showHistory} onChange={(event) => setShowHistory(event.target.checked)} />
+              {locale.startsWith("zh") ? " 显示历史版本" : " Show previous versions"}
+            </label>
+          )}
           {!project && (
             <div style={{ padding: "9px 10px", color: "var(--text-dim)", fontSize: 10.5 }}>
               {t("projectDocuments.noProject")}
@@ -184,7 +193,8 @@ export function PeProjectDocuments({ project, refreshKey = 0, onOpenFile }: Prop
               {t("projectDocuments.loadFailed")}: {error}
             </div>
           )}
-          {documents.map((document) => {
+          {documents.filter((document) => showHistory || document.isCurrent !== false).map((document) => {
+            const docId = document.docId;
             const rawRelativePath = document.rawRelativePath;
             const markdownRelativePath = document.markdownRelativePath;
             const color = statusColor(document.status, document.needsOcrPageCount);
@@ -192,6 +202,7 @@ export function PeProjectDocuments({ project, refreshKey = 0, onOpenFile }: Prop
             const uploadedAt = new Date(document.uploadedAt);
             const metadata = [
               document.fileType.toUpperCase(),
+              document.versionNo ? `v${document.versionNo}${document.isCurrent === false ? (locale.startsWith("zh") ? " · 历史" : " · previous") : (locale.startsWith("zh") ? " · 当前" : " · current")}` : null,
               size,
               document.pageCount > 0 ? t("projectDocuments.pages", { count: document.pageCount }) : null,
               document.sheetCount > 0 ? t("projectDocuments.sheets", { count: document.sheetCount }) : null,
@@ -213,7 +224,7 @@ export function PeProjectDocuments({ project, refreshKey = 0, onOpenFile }: Prop
               statusLabel = t("projectDocuments.statusFailed");
             }
             return (
-              <div key={document.filename} style={{ padding: "8px 9px", borderBottom: "1px solid var(--border)" }}>
+              <div key={document.docId ?? document.filename} style={{ padding: "8px 9px", borderBottom: "1px solid var(--border)" }}>
                 <div style={{ display: "flex", alignItems: "flex-start", gap: 7 }}>
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div title={document.filename} style={{ color: "var(--text)", fontSize: 11, lineHeight: 1.35, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -232,7 +243,7 @@ export function PeProjectDocuments({ project, refreshKey = 0, onOpenFile }: Prop
                     {document.warnings[0]}
                   </div>
                 )}
-                {(rawRelativePath || markdownRelativePath) && (
+                {(rawRelativePath || markdownRelativePath || (docId && document.retryable)) && (
                   <div style={{ display: "flex", gap: 10, marginTop: 5 }}>
                     {rawRelativePath && (
                       <button
@@ -254,14 +265,14 @@ export function PeProjectDocuments({ project, refreshKey = 0, onOpenFile }: Prop
                         {t("projectDocuments.previewText")}
                       </button>
                     )}
-                    {document.retryable && (
+                    {docId && document.retryable && (
                       <button
                         type="button"
-                        onClick={() => void retryExcel(document)}
-                        disabled={retryingFilename !== null}
-                        style={{ padding: 0, border: 0, background: "transparent", color: "var(--accent)", cursor: retryingFilename ? "wait" : "pointer", fontSize: 9.5 }}
+                        onClick={() => void retryDocument(docId)}
+                        disabled={retryingDocId !== null}
+                        style={{ padding: 0, border: 0, background: "transparent", color: "var(--accent)", cursor: retryingDocId ? "wait" : "pointer", fontSize: 9.5 }}
                       >
-                        {retryingFilename === document.filename
+                        {retryingDocId === docId
                           ? t("projectDocuments.retrying")
                           : t("projectDocuments.retry")}
                       </button>

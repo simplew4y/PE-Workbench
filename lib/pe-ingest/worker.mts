@@ -16,6 +16,7 @@ import { failPeIngestJob, readPeIngestJobFile, updatePeIngestJob } from "./jobs.
 import {
   ensureDirectoryWithin,
   isPathInside,
+  registeredPePdfArtifactPaths,
   resolvePeProjectPathsFromJobFile,
   resolveProjectFile,
   sha256,
@@ -26,6 +27,7 @@ import {
   commitParsedPeDocument,
   findPeDocumentByFilename,
   findPeDocumentByHash,
+  registeredPePdfInput,
   updatePeProjectRegistry,
 } from "./repository.ts";
 import { assertPeCollectionDataset } from "./schema.ts";
@@ -120,15 +122,23 @@ export async function runPeIngestJob(jobFile: string): Promise<PeIngestJob> {
           continue;
         }
 
-        const existingByName = findPeDocumentByFilename(paths.collectionPath, paths.datasetId, input.originalFilename);
-        if (existingByName) throw new Error(`Document filename already exists: ${input.originalFilename}`);
-        const existingByHash = findPeDocumentByHash(paths.collectionPath, paths.datasetId, input.sha256);
-        if (existingByHash) throw new Error(`The same document content already exists as ${existingByHash.originalFilename}`);
+        if (input.registrationKind === "catalog") {
+          if (!input.docId) throw new Error("Registered PDF ingest input has no document ID");
+          const registered = registeredPePdfInput(paths, input.docId);
+          if (registered.originalFilename !== input.originalFilename || registered.rawPath !== input.rawPath
+            || registered.sha256 !== input.sha256) throw new Error("Registered PDF input changed after retry was queued");
+        } else {
+          const existingByName = findPeDocumentByFilename(paths.collectionPath, paths.datasetId, input.originalFilename);
+          if (existingByName) throw new Error(`Document filename already exists: ${input.originalFilename}`);
+          const existingByHash = findPeDocumentByHash(paths.collectionPath, paths.datasetId, input.sha256);
+          if (existingByHash) throw new Error(`The same document content already exists as ${existingByHash.originalFilename}`);
+        }
         const rawAbsolutePath = resolveProjectFile(paths, input.rawPath);
         if (sha256(readFileSync(rawAbsolutePath)) !== input.sha256) {
           throw new Error("Raw PDF content changed after upload");
         }
-        const docId = stablePeId("doc", paths.datasetId, input.sha256);
+        const docId = input.registrationKind === "catalog" ? input.docId! : stablePeId("doc", paths.datasetId, input.sha256);
+        if (input.registrationKind === "catalog") registeredPePdfArtifactPaths(docId, job.jobId);
         const stagingDocumentDirectory = path.join(jobStaging, docId);
         if (existsSync(stagingDocumentDirectory)) {
           const resolved = realpathSync(stagingDocumentDirectory);
@@ -143,8 +153,12 @@ export async function runPeIngestJob(jobFile: string): Promise<PeIngestJob> {
           rawAbsolutePath,
           sha256: input.sha256,
           stagingDocumentDirectory,
+          ...(input.registrationKind === "catalog" ? { registeredDocument: { docId, generation: job.jobId } } : {}),
         });
         controller.signal.throwIfAborted();
+        if (sha256(readFileSync(rawAbsolutePath)) !== input.sha256) {
+          throw new Error("Raw PDF content changed while it was being parsed");
+        }
         commitParsedPeDocument(paths, stagingDocumentDirectory, parsed);
         appendResult(job, {
           originalFilename: input.originalFilename,

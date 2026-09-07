@@ -89,6 +89,22 @@ export function pePdfDocumentName(filename: string): string {
   return path.parse(normalizePePdfFilename(filename)).name;
 }
 
+export function registeredPePdfArtifactPaths(docId: string, generation: string): {
+  artifactDirectory: string;
+  documentMarkdownPath: string;
+  layoutJsonPath: string;
+} {
+  if (!/^[A-Za-z0-9_-]+$/u.test(docId) || !/^[a-f0-9]{16}$/u.test(generation)) {
+    throw new Error("Invalid registered PDF artifact identity");
+  }
+  const artifactDirectory = `meta/pdf-catalog/${docId}/${generation}`;
+  return {
+    artifactDirectory,
+    documentMarkdownPath: `${artifactDirectory}/document.md`,
+    layoutJsonPath: `${artifactDirectory}/layout.json`,
+  };
+}
+
 export function hasPeRawFilename(paths: PeProjectPaths, filename: string): boolean {
   const filenameKey = peDocumentFilenameKey(filename);
   return readdirSync(paths.rawPath).some((entry) => {
@@ -160,8 +176,8 @@ export function resolvePeProjectPaths(
   const rawPath = requireDirectoryWithin(projectPath, "raw");
   const metaPath = requireDirectoryWithin(projectPath, "meta");
   requireDirectoryWithin(projectPath, "generated");
-  const textPath = requireDirectoryWithin(metaPath, "text");
-  const documentsPath = requireDirectoryWithin(metaPath, "documents");
+  const textPath = ensureDirectoryWithin(metaPath, "text");
+  const documentsPath = ensureDirectoryWithin(metaPath, "documents");
   const collectionPath = realpathSync(path.join(metaPath, "collection.sqlite3"));
   if (!isPathInside(projectPath, collectionPath) || !statSync(collectionPath).isFile()) {
     throw new Error("PE project collection database is invalid");

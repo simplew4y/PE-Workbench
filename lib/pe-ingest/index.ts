@@ -19,7 +19,7 @@ import {
   sha256,
   writePeRawFile,
 } from "./paths.ts";
-import { findPeDocumentByFilename, findPeDocumentByHash } from "./repository.ts";
+import { findPeDocumentByFilename, findPeDocumentByHash, registeredPePdfInput } from "./repository.ts";
 import { assertPeCollectionDataset, openPeCollectionDatabase } from "./schema.ts";
 
 export const PE_SUPPORTED_EXTENSIONS = new Set([".pdf", ".xlsx", ".xlsm"]);
@@ -151,6 +151,9 @@ export function queuePeIngest(options: QueuePeIngestOptions): PeIngestJob {
       const filenameKey = upload.filename.toLocaleLowerCase("und");
       if (names.has(filenameKey)) throw new Error(`Duplicate document filename in upload: ${upload.filename}`);
       names.add(filenameKey);
+      // Excel registration owns immutable versions and same-content reuse.
+      // PDF pipeline uploads retain their existing duplicate checks.
+      if (path.extname(upload.filename).toLocaleLowerCase() !== ".pdf") continue;
       const digest = sha256(upload.content);
       const duplicateUpload = digests.get(digest);
       if (duplicateUpload) {
@@ -204,7 +207,7 @@ export function queuePeIngest(options: QueuePeIngestOptions): PeIngestJob {
 
 export const queuePePdfIngest = queuePeIngest;
 
-export function queuePeExcelRetry(project: PeProjectSummary, registryPath: string, filename: string): PeIngestJob {
+export function queuePeDocumentRetry(project: PeProjectSummary, registryPath: string, docId: string): PeIngestJob {
   const paths = resolvePeProjectPaths(project, registryPath);
   assertPeCollectionDataset(paths.collectionPath, paths.datasetId);
   const release = acquireSubmissionLock(paths);
@@ -214,11 +217,13 @@ export function queuePeExcelRetry(project: PeProjectSummary, registryPath: strin
     try {
       const document = database
         .prepare(`SELECT doc_id,original_filename,raw_path,sha256,file_type FROM documents
-          WHERE filename_key=? AND dataset_id=? AND file_type IN ('xlsx','xlsm')`)
-        .get(peDocumentFilenameKey(filename), paths.datasetId) as Record<string, unknown> | undefined;
-      if (!document) throw new Error("Excel document not found");
+          WHERE doc_id=? AND dataset_id=?
+            AND (file_type IN ('xlsx','xlsm') OR (file_type='pdf' AND registration_kind='catalog'))
+            AND deleted_at IS NULL AND lifecycle_state='active'`)
+        .get(docId, paths.datasetId) as Record<string, unknown> | undefined;
+      if (!document) throw new Error("Retryable document not found");
       const job = newPeIngestJob(paths.datasetId);
-      job.files.push({
+      job.files.push(document.file_type === "pdf" ? registeredPePdfInput(paths, docId) : {
         originalFilename: String(document.original_filename),
         rawPath: String(document.raw_path),
         sha256: String(document.sha256),
@@ -232,6 +237,27 @@ export function queuePeExcelRetry(project: PeProjectSummary, registryPath: strin
   } finally {
     release();
   }
+}
+
+export function queuePeExcelRetry(project: PeProjectSummary, registryPath: string, filename: string): PeIngestJob {
+  const paths = resolvePeProjectPaths(project, registryPath);
+  assertPeCollectionDataset(paths.collectionPath, paths.datasetId);
+  const database = openPeCollectionDatabase(paths.collectionPath);
+  let docId: string;
+  try {
+    const document = database.prepare(`SELECT doc_id FROM documents
+      WHERE dataset_id=? AND file_type IN ('xlsx','xlsm')
+        AND is_current=1 AND deleted_at IS NULL AND lifecycle_state='active'
+        AND (source_relpath=? OR original_filename=? OR (logical_doc_id GLOB 'doc_*' AND filename_key=?))
+      ORDER BY CASE WHEN source_relpath=? OR original_filename=? THEN 0 ELSE 1 END
+      LIMIT 1`)
+      .get(paths.datasetId, filename, filename, peDocumentFilenameKey(filename), filename, filename);
+    if (!document) throw new Error("Excel document not found");
+    docId = String(document.doc_id);
+  } finally {
+    database.close();
+  }
+  return queuePeDocumentRetry(project, registryPath, docId);
 }
 
 export { findActivePeIngestJob, readPeIngestJob, resolvePeProjectPaths };

@@ -3,14 +3,17 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type {
   PeIngestJob,
+  PeIngestInputFile,
   PeParsedPdfDocument,
 } from "./contracts.ts";
 import {
+  ensureDirectoryWithin,
   isPathInside,
   pePdfDocumentName,
-  peDocumentFilenameKey,
-  type PeProjectPaths,
+  pePdfFilenameKey,
+  registeredPePdfArtifactPaths,
   resolveProjectFile,
+  type PeProjectPaths,
 } from "./paths.ts";
 import { assertPeCollectionDataset, openPeCollectionDatabase } from "./schema.ts";
 
@@ -41,7 +44,7 @@ export function findPeDocumentByHash(
     const row = database.prepare(`
       SELECT doc_id, original_filename, raw_path
       FROM documents
-      WHERE dataset_id = ? AND sha256 = ?
+      WHERE dataset_id = ? AND file_type = 'pdf' AND registration_kind = 'pipeline' AND sha256 = ?
       LIMIT 1
     `).get(datasetId, digest) as unknown as ExistingDocumentRow | undefined;
     return row ? {
@@ -65,9 +68,9 @@ export function findPeDocumentByFilename(
     const row = database.prepare(`
       SELECT doc_id, original_filename, raw_path
       FROM documents
-      WHERE dataset_id = ? AND filename_key = ?
+      WHERE dataset_id = ? AND file_type = 'pdf' AND registration_kind = 'pipeline' AND filename_key = ?
       LIMIT 1
-    `).get(datasetId, peDocumentFilenameKey(filename)) as unknown as ExistingDocumentRow | undefined;
+    `).get(datasetId, pePdfFilenameKey(filename)) as unknown as ExistingDocumentRow | undefined;
     return row ? {
       docId: row.doc_id,
       originalFilename: row.original_filename,
@@ -76,6 +79,22 @@ export function findPeDocumentByFilename(
   } finally {
     database.close();
   }
+}
+
+export function registeredPePdfInput(paths: PeProjectPaths, docId: string): PeIngestInputFile {
+  assertPeCollectionDataset(paths.collectionPath, paths.datasetId);
+  const database = openPeCollectionDatabase(paths.collectionPath);
+  try {
+    const row = database.prepare(`SELECT doc_id, original_filename, raw_path, sha256
+      FROM documents WHERE doc_id = ? AND dataset_id = ? AND file_type = 'pdf'
+        AND registration_kind = 'catalog' AND deleted_at IS NULL AND lifecycle_state = 'active'`)
+      .get(docId, paths.datasetId);
+    if (!row) throw new Error("Registered PDF document not found");
+    return {
+      docId: String(row.doc_id), originalFilename: String(row.original_filename),
+      rawPath: String(row.raw_path), sha256: String(row.sha256), fileType: "pdf", registrationKind: "catalog",
+    };
+  } finally { database.close(); }
 }
 
 function writeJobRow(database: DatabaseSync, job: PeIngestJob): void {
@@ -136,55 +155,78 @@ export function saveParsedPeDocument(
   try {
     database.exec("BEGIN IMMEDIATE");
     try {
-      const existing = database.prepare(
-        "SELECT doc_id FROM documents WHERE dataset_id = ? AND (sha256 = ? OR filename_key = ?)",
-      ).get(
-        paths.datasetId,
-        document.sha256,
-        peDocumentFilenameKey(document.originalFilename),
-      ) as { doc_id: string } | undefined;
-      if (existing) throw new Error(`Document name or content already indexed as ${existing.doc_id}`);
+      if (document.registrationKind === "catalog") {
+        const updated = database.prepare(`UPDATE documents SET
+          status = ?, page_count = ?, parser_name = ?, parser_version = ?,
+          title = ?, brokerage = ?, document_date = ?, rating = ?, target_price = ?,
+          exhibits_json = ?, pdf_metadata_json = ?, artifact_directory = ?,
+          document_markdown_path = ?, readable_text_path = ?, layout_json_path = ?, warnings_json = ?, updated_at = ?
+          WHERE doc_id = ? AND dataset_id = ? AND file_type = 'pdf' AND registration_kind = 'catalog'
+            AND original_filename = ? AND raw_path = ? AND sha256 = ? AND checksum = ?
+            AND deleted_at IS NULL AND lifecycle_state = 'active'`).run(
+          document.warnings.length > 0 ? "completed_with_warnings" : "completed",
+          document.pages.length, document.parserName, document.parserVersion,
+          document.metadata.title, document.metadata.brokerage, document.metadata.documentDate,
+          document.metadata.rating, document.metadata.targetPrice, JSON.stringify(document.metadata.exhibits),
+          JSON.stringify(document.metadata.pdfMetadata), document.artifactDirectory,
+          document.documentMarkdownPath, document.documentMarkdownPath, document.layoutJsonPath, JSON.stringify(document.warnings), now,
+          document.docId, paths.datasetId, document.originalFilename, document.rawPath,
+          document.sha256, document.sha256,
+        );
+        if (Number(updated.changes) !== 1) throw new Error("Registered PDF changed before its parsed pages could be saved");
+        database.prepare("DELETE FROM pdf_pages_fts WHERE doc_id = ?").run(document.docId);
+        database.prepare("DELETE FROM pdf_pages WHERE doc_id = ?").run(document.docId);
+      } else {
+        const existing = database.prepare(
+          "SELECT doc_id FROM documents WHERE dataset_id = ? AND file_type = 'pdf' AND registration_kind = 'pipeline' AND (sha256 = ? OR filename_key = ?)",
+        ).get(
+          paths.datasetId,
+          document.sha256,
+          pePdfFilenameKey(document.originalFilename),
+        ) as { doc_id: string } | undefined;
+        if (existing) throw new Error(`Document name or content already indexed as ${existing.doc_id}`);
 
-      database.prepare(`
-        INSERT INTO documents (
-          doc_id, dataset_id, original_filename, filename_key, raw_path, sha256,
-          status, page_count, parser_name, parser_version,
-          title, brokerage, document_date, rating, target_price, exhibits_json,
-          pdf_metadata_json, artifact_directory, document_markdown_path,
-          layout_json_path, warnings_json, created_at, updated_at,
-          file_type, source_relpath, file_size, readable_text_path
-        ) VALUES (
-          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-        )
-      `).run(
-        document.docId,
-        document.datasetId,
-        document.originalFilename,
-        peDocumentFilenameKey(document.originalFilename),
-        document.rawPath,
-        document.sha256,
-        document.warnings.length > 0 ? "completed_with_warnings" : "completed",
-        document.pages.length,
-        document.parserName,
-        document.parserVersion,
-        document.metadata.title,
-        document.metadata.brokerage,
-        document.metadata.documentDate,
-        document.metadata.rating,
-        document.metadata.targetPrice,
-        JSON.stringify(document.metadata.exhibits),
-        JSON.stringify(document.metadata.pdfMetadata),
-        document.artifactDirectory,
-        document.documentMarkdownPath,
-        document.layoutJsonPath,
-        JSON.stringify(document.warnings),
-        now,
-        now,
-        "pdf",
-        document.originalFilename,
-        statSync(resolveProjectFile(paths, document.rawPath)).size,
-        document.documentMarkdownPath,
-      );
+        database.prepare(`
+          INSERT INTO documents (
+            doc_id, dataset_id, original_filename, filename_key, raw_path, sha256,
+            status, page_count, parser_name, parser_version,
+            title, brokerage, document_date, rating, target_price, exhibits_json,
+            pdf_metadata_json, artifact_directory, document_markdown_path,
+            layout_json_path, warnings_json, created_at, updated_at,
+            file_type, source_relpath, file_size, readable_text_path
+          ) VALUES (
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+          )
+        `).run(
+          document.docId,
+          document.datasetId,
+          document.originalFilename,
+          pePdfFilenameKey(document.originalFilename),
+          document.rawPath,
+          document.sha256,
+          document.warnings.length > 0 ? "completed_with_warnings" : "completed",
+          document.pages.length,
+          document.parserName,
+          document.parserVersion,
+          document.metadata.title,
+          document.metadata.brokerage,
+          document.metadata.documentDate,
+          document.metadata.rating,
+          document.metadata.targetPrice,
+          JSON.stringify(document.metadata.exhibits),
+          JSON.stringify(document.metadata.pdfMetadata),
+          document.artifactDirectory,
+          document.documentMarkdownPath,
+          document.layoutJsonPath,
+          JSON.stringify(document.warnings),
+          now,
+          now,
+          "pdf",
+          document.originalFilename,
+          statSync(resolveProjectFile(paths, document.rawPath)).size,
+          document.documentMarkdownPath,
+        );
+      }
 
       const insertPage = database.prepare(`
         INSERT INTO pdf_pages (
@@ -267,6 +309,27 @@ export function commitParsedPeDocument(
   if (!isPathInside(realpathSync(paths.stagingPath), stagingDirectory)) {
     throw new Error("Document staging directory escapes the PE workspace");
   }
+  if (document.registrationKind === "catalog") {
+    const expected = registeredPePdfArtifactPaths(document.docId, document.artifactGeneration ?? "");
+    if (document.artifactDirectory !== expected.artifactDirectory
+      || document.documentMarkdownPath !== expected.documentMarkdownPath
+      || document.layoutJsonPath !== expected.layoutJsonPath) {
+      throw new Error("Registered PDF artifacts do not match their immutable version");
+    }
+    const versionRoot = ensureDirectoryWithin(paths.metaPath, "pdf-catalog", document.docId);
+    const finalDirectory = path.join(versionRoot, document.artifactGeneration!);
+    if (existsSync(finalDirectory)) throw new Error("Registered PDF artifact generation already exists");
+    const markdown = lstatSync(path.join(stagingDirectory, "document.md"));
+    if (!markdown.isFile() || markdown.isSymbolicLink()) throw new Error("Staged document Markdown is not a regular file");
+    renameSync(stagingDirectory, finalDirectory);
+    try {
+      saveParsedPeDocument(paths, document);
+    } catch (error) {
+      rmSync(finalDirectory, { recursive: true, force: true });
+      throw error;
+    }
+    return;
+  }
   const documentName = pePdfDocumentName(document.originalFilename);
   const finalDirectory = path.join(documentsRoot, documentName);
   const finalMarkdown = path.join(textRoot, `${documentName}.md`);
@@ -314,7 +377,7 @@ export function updatePeProjectRegistry(paths: PeProjectPaths): void {
   try {
     const row = collection.prepare(`
       SELECT COUNT(*) AS count FROM documents
-      WHERE dataset_id = ?
+      WHERE dataset_id = ? AND is_current = 1 AND deleted_at IS NULL AND lifecycle_state = 'active'
     `).get(paths.datasetId) as unknown as CountRow;
     fileCount = Number(row.count);
   } finally {
