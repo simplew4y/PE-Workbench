@@ -79,6 +79,34 @@ test("renders pe_render_ui as a native standalone surface instead of tool chrome
   assert.doesNotMatch(html, />pe_render_ui</);
 });
 
+test("renders pe_render_ui when the provider JSON-encodes component", () => {
+  const html = renderMessage({
+    role: "assistant",
+    provider: "test",
+    model: "test-model",
+    content: [{
+      type: "toolCall",
+      toolCallId: "call-ui-stringified",
+      toolName: "pe_render_ui",
+      input: {
+        version: 1,
+        component: JSON.stringify({
+          kind: "kpi_strip",
+          title: "经营摘要",
+          metrics: [
+            { label: "收入", value: "100 亿元" },
+            { label: "利润", value: "10 亿元" },
+          ],
+        }),
+      },
+    }],
+  });
+
+  assert.match(html, /经营摘要/);
+  assert.match(html, /100 亿元/);
+  assert.doesNotMatch(html, /界面数据无效/);
+});
+
 const COMPLETE_SKILL_EXPANSION = `<skill name="review" location="/skills/review/SKILL.md">
 References are relative to /skills/review.
 
