@@ -34,28 +34,6 @@ interface SessionRow {
   updated_at: number;
 }
 
-interface CapabilityRow {
-  user_id: string;
-  data_namespace: string;
-  expires_at: number;
-}
-
-export interface GatewayWorkerInstance {
-  userId: string;
-  dataNamespace: string;
-  containerName: string;
-  lastAccessAt: number;
-  updatedAt: number;
-}
-
-interface WorkerInstanceRow {
-  user_id: string;
-  data_namespace: string;
-  container_name: string;
-  last_access_at: number;
-  updated_at: number;
-}
-
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
 function assertUuid(value: string, name: string): string {
@@ -87,10 +65,10 @@ export class PeGatewaySessionStore {
 
   private migrate(): void {
     const row = this.database.prepare("PRAGMA user_version").get() as unknown as { user_version: number };
-    if (row.user_version > 3) {
+    if (row.user_version > 4) {
       throw new Error(`Gateway database schema version ${row.user_version} is newer than this application supports`);
     }
-    if (row.user_version === 3) return;
+    if (row.user_version === 4) return;
 
     if (row.user_version === 1) {
       this.database.exec("BEGIN IMMEDIATE");
@@ -111,16 +89,25 @@ export class PeGatewaySessionStore {
       this.database.exec("BEGIN IMMEDIATE");
       try {
         this.database.exec(`
-          CREATE TABLE IF NOT EXISTS gateway_worker_instances (
-            data_namespace TEXT PRIMARY KEY,
-            user_id TEXT NOT NULL,
-            container_name TEXT NOT NULL UNIQUE,
-            last_access_at INTEGER NOT NULL,
-            updated_at INTEGER NOT NULL
-          );
-          CREATE INDEX IF NOT EXISTS idx_gateway_worker_instances_idle
-            ON gateway_worker_instances(last_access_at);
-          PRAGMA user_version=3;
+          DROP TABLE IF EXISTS gateway_worker_capabilities;
+          DROP TABLE IF EXISTS gateway_worker_instances;
+          PRAGMA user_version=4;
+        `);
+        this.database.exec("COMMIT");
+      } catch (error) {
+        this.database.exec("ROLLBACK");
+        throw error;
+      }
+      return;
+    }
+
+    if (current.user_version === 3) {
+      this.database.exec("BEGIN IMMEDIATE");
+      try {
+        this.database.exec(`
+          DROP TABLE IF EXISTS gateway_worker_capabilities;
+          DROP TABLE IF EXISTS gateway_worker_instances;
+          PRAGMA user_version=4;
         `);
         this.database.exec("COMMIT");
       } catch (error) {
@@ -157,25 +144,7 @@ export class PeGatewaySessionStore {
         updated_at INTEGER NOT NULL
       );
 
-      CREATE TABLE IF NOT EXISTS gateway_worker_capabilities (
-        capability_hash TEXT PRIMARY KEY,
-        user_id TEXT NOT NULL,
-        data_namespace TEXT NOT NULL,
-        expires_at INTEGER NOT NULL,
-        created_at INTEGER NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_gateway_worker_capabilities_expiry
-        ON gateway_worker_capabilities(expires_at);
-      CREATE TABLE IF NOT EXISTS gateway_worker_instances (
-        data_namespace TEXT PRIMARY KEY,
-        user_id TEXT NOT NULL,
-        container_name TEXT NOT NULL UNIQUE,
-        last_access_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_gateway_worker_instances_idle
-        ON gateway_worker_instances(last_access_at);
-      PRAGMA user_version=3;
+      PRAGMA user_version=4;
     `);
       this.database.exec("COMMIT");
     } catch (error) {
@@ -308,128 +277,11 @@ export class PeGatewaySessionStore {
     return row?.selected_platform_model ?? null;
   }
 
-  createWorkerCapability(
-    userId: string,
-    dataNamespace: string,
-    expiresAt: number,
-    now = Math.floor(Date.now() / 1000),
-  ): string {
-    if (expiresAt <= now) throw new Error("Worker capability expiry must be in the future");
-    const capability = randomToken("pew_");
-    this.database.prepare(`
-      INSERT INTO gateway_worker_capabilities
-        (capability_hash, user_id, data_namespace, expires_at, created_at)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(
-      hashSecret(capability),
-      assertUuid(userId, "userId"),
-      assertUuid(dataNamespace, "dataNamespace"),
-      expiresAt,
-      now,
-    );
-    return capability;
-  }
-
-  resolveWorkerCapability(
-    capability: string,
-    now = Math.floor(Date.now() / 1000),
-  ): { userId: string; dataNamespace: string } | null {
-    if (!capability) return null;
-    const capabilityHash = hashSecret(capability);
-    const row = this.database.prepare(`
-      SELECT user_id, data_namespace, expires_at
-      FROM gateway_worker_capabilities
-      WHERE capability_hash = ?
-    `).get(capabilityHash) as unknown as CapabilityRow | undefined;
-    if (!row) return null;
-    if (row.expires_at <= now) {
-      this.database.prepare("DELETE FROM gateway_worker_capabilities WHERE capability_hash = ?").run(capabilityHash);
-      return null;
-    }
-    return { userId: row.user_id, dataNamespace: row.data_namespace };
-  }
-
-  revokeWorkerCapabilities(userId: string): number {
-    return Number(this.database
-      .prepare("DELETE FROM gateway_worker_capabilities WHERE user_id = ?")
-      .run(assertUuid(userId, "userId")).changes);
-  }
-
-  touchWorkerInstance(
-    userId: string,
-    dataNamespace: string,
-    containerName: string,
-    now = Math.floor(Date.now() / 1000),
-  ): GatewayWorkerInstance {
-    const normalizedUserId = assertUuid(userId, "userId");
-    const normalizedNamespace = assertUuid(dataNamespace, "dataNamespace");
-    if (!/^pe-worker-[0-9a-f]{32}$/u.test(containerName)) {
-      throw new Error("containerName is invalid");
-    }
-    const existing = this.getWorkerInstance(normalizedNamespace);
-    if (
-      existing
-      && (existing.userId !== normalizedUserId || existing.containerName !== containerName)
-    ) {
-      throw new Error("Worker namespace is already owned by another identity");
-    }
-    this.database.prepare(`
-      INSERT INTO gateway_worker_instances
-        (data_namespace, user_id, container_name, last_access_at, updated_at)
-      VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT(data_namespace) DO UPDATE SET
-        last_access_at = excluded.last_access_at,
-        updated_at = excluded.updated_at
-    `).run(normalizedNamespace, normalizedUserId, containerName, now, now);
-    return this.getWorkerInstance(normalizedNamespace)!;
-  }
-
-  getWorkerInstance(dataNamespace: string): GatewayWorkerInstance | null {
-    const row = this.database.prepare(`
-      SELECT user_id, data_namespace, container_name, last_access_at, updated_at
-      FROM gateway_worker_instances
-      WHERE data_namespace = ?
-    `).get(assertUuid(dataNamespace, "dataNamespace")) as unknown as WorkerInstanceRow | undefined;
-    return row ? {
-      userId: row.user_id,
-      dataNamespace: row.data_namespace,
-      containerName: row.container_name,
-      lastAccessAt: row.last_access_at,
-      updatedAt: row.updated_at,
-    } : null;
-  }
-
-  listIdleWorkerInstances(
-    lastAccessBeforeOrAt: number,
-  ): GatewayWorkerInstance[] {
-    const rows = this.database.prepare(`
-      SELECT user_id, data_namespace, container_name, last_access_at, updated_at
-      FROM gateway_worker_instances
-      WHERE last_access_at <= ?
-      ORDER BY last_access_at ASC
-    `).all(lastAccessBeforeOrAt) as unknown as WorkerInstanceRow[];
-    return rows.map((row) => ({
-      userId: row.user_id,
-      dataNamespace: row.data_namespace,
-      containerName: row.container_name,
-      lastAccessAt: row.last_access_at,
-      updatedAt: row.updated_at,
-    }));
-  }
-
-  deleteWorkerInstance(dataNamespace: string): boolean {
-    return this.database.prepare("DELETE FROM gateway_worker_instances WHERE data_namespace = ?")
-      .run(assertUuid(dataNamespace, "dataNamespace")).changes === 1;
-  }
-
-  deleteExpired(now = Math.floor(Date.now() / 1000)): { sessions: number; capabilities: number } {
+  deleteExpired(now = Math.floor(Date.now() / 1000)): { sessions: number } {
     const sessions = this.database
       .prepare("DELETE FROM gateway_sessions WHERE session_expires_at <= ?")
       .run(now).changes;
-    const capabilities = this.database
-      .prepare("DELETE FROM gateway_worker_capabilities WHERE expires_at <= ?")
-      .run(now).changes;
-    return { sessions: Number(sessions), capabilities: Number(capabilities) };
+    return { sessions: Number(sessions) };
   }
 
   close(): void {

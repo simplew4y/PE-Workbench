@@ -11,19 +11,6 @@ export interface PeGatewayConfig {
     path: string;
     secure: boolean;
   };
-  worker: {
-    storage: "bind" | "volume";
-    image: string;
-    dataRoot: string;
-    idleSeconds: number;
-    capabilityTtlSeconds: number;
-    startTimeoutMs: number;
-    cpuLimit: number;
-    memoryMb: number;
-    pidsLimit: number;
-    uid: number;
-    gid: number;
-  };
 }
 
 function required(env: NodeJS.ProcessEnv, name: string): string {
@@ -37,28 +24,6 @@ function positiveNumber(value: string | undefined, fallback: number, name: strin
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) throw new Error(`${name} must be a positive number`);
   return parsed;
-}
-
-function positiveInteger(value: string | undefined, fallback: number, name: string): number {
-  const parsed = positiveNumber(value, fallback, name);
-  if (!Number.isSafeInteger(parsed)) throw new Error(`${name} must be a positive integer`);
-  return parsed;
-}
-
-function dockerImage(value: string | undefined): string {
-  const image = value?.trim() || "pe-workbench-worker:local";
-  if (image.length > 255 || image.startsWith("-") || /\s/u.test(image)) {
-    throw new Error("PE_WORKER_IMAGE is invalid");
-  }
-  return image;
-}
-
-function workerStorage(value: string | undefined): "bind" | "volume" {
-  const storage = value?.trim().toLowerCase() || "bind";
-  if (storage !== "bind" && storage !== "volume") {
-    throw new Error("PE_WORKER_STORAGE must be bind or volume");
-  }
-  return storage;
 }
 
 function parseSecret(value: string): Buffer {
@@ -89,14 +54,9 @@ export function loadPeGatewayConfig(env: NodeJS.ProcessEnv = process.env): PeGat
   if (!isAbsolute(configuredDatabasePath)) throw new Error("PE_GATEWAY_DATABASE_PATH must be absolute");
   const databasePath = resolve(configuredDatabasePath);
 
-  const configuredWorkerDataRoot = env.PE_WORKER_DATA_ROOT?.trim() || "/srv/pe-workbench/users";
-  if (!isAbsolute(configuredWorkerDataRoot)) throw new Error("PE_WORKER_DATA_ROOT must be absolute");
-  if (configuredWorkerDataRoot.includes(",")) throw new Error("PE_WORKER_DATA_ROOT cannot contain commas");
-  const workerDataRoot = resolve(configuredWorkerDataRoot);
-
   const cookieName = env.PE_SESSION_COOKIE_NAME?.trim() || "pe_workbench_session";
   if (!/^[A-Za-z0-9_-]+$/u.test(cookieName)) throw new Error("PE_SESSION_COOKIE_NAME is invalid");
-  const cookiePath = env.PE_SESSION_COOKIE_PATH?.trim() || "/pe_workbench";
+  const cookiePath = env.PE_SESSION_COOKIE_PATH?.trim() || "/";
   if (!cookiePath.startsWith("/")) throw new Error("PE_SESSION_COOKIE_PATH must start with /");
 
   return {
@@ -112,28 +72,7 @@ export function loadPeGatewayConfig(env: NodeJS.ProcessEnv = process.env): PeGat
     cookie: {
       name: cookieName,
       path: cookiePath,
-      secure: parseBoolean(env.PE_SESSION_COOKIE_SECURE, true, "PE_SESSION_COOKIE_SECURE"),
-    },
-    worker: {
-      storage: workerStorage(env.PE_WORKER_STORAGE),
-      image: dockerImage(env.PE_WORKER_IMAGE),
-      dataRoot: workerDataRoot,
-      idleSeconds: positiveInteger(env.PE_WORKER_IDLE_MINUTES, 30, "PE_WORKER_IDLE_MINUTES") * 60,
-      capabilityTtlSeconds: positiveInteger(
-        env.PE_WORKER_CAPABILITY_TTL_HOURS,
-        168,
-        "PE_WORKER_CAPABILITY_TTL_HOURS",
-      ) * 3600,
-      startTimeoutMs: positiveInteger(
-        env.PE_WORKER_START_TIMEOUT_SECONDS,
-        120,
-        "PE_WORKER_START_TIMEOUT_SECONDS",
-      ) * 1000,
-      cpuLimit: positiveNumber(env.PE_WORKER_CPU_LIMIT, 2, "PE_WORKER_CPU_LIMIT"),
-      memoryMb: positiveInteger(env.PE_WORKER_MEMORY_MB, 4096, "PE_WORKER_MEMORY_MB"),
-      pidsLimit: positiveInteger(env.PE_WORKER_PIDS_LIMIT, 256, "PE_WORKER_PIDS_LIMIT"),
-      uid: positiveInteger(env.PE_WORKER_UID, 1000, "PE_WORKER_UID"),
-      gid: positiveInteger(env.PE_WORKER_GID, 1000, "PE_WORKER_GID"),
+      secure: parseBoolean(env.PE_SESSION_COOKIE_SECURE, false, "PE_SESSION_COOKIE_SECURE"),
     },
   };
 }

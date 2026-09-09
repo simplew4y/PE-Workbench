@@ -29,12 +29,10 @@ export class PeGatewayAuthService {
   ): PeBackendUser {
     if (user.id !== session.userId || user.dataNamespace !== session.dataNamespace) {
       this.store.deleteSession(sessionId);
-      this.store.revokeWorkerCapabilities(session.userId);
       throw new PeBackendError(401, "session_identity_changed", "登录身份校验失败，请重新登录");
     }
     if (user.status !== "active") {
       this.store.deleteSession(sessionId);
-      this.store.revokeWorkerCapabilities(session.userId);
       throw new PeBackendError(403, "account_disabled", "账号已被停用");
     }
     return user;
@@ -83,7 +81,6 @@ export class PeGatewayAuthService {
       const bundle = await this.backend.refresh(session.refreshToken);
       if (bundle.user.id !== session.userId || bundle.user.dataNamespace !== session.dataNamespace) {
         this.store.deleteSession(sessionId);
-        this.store.revokeWorkerCapabilities(session.userId);
         throw new PeBackendError(401, "session_identity_changed", "登录身份校验失败，请重新登录");
       }
       const updated = this.store.updateTokens(
@@ -97,7 +94,6 @@ export class PeGatewayAuthService {
     } catch (error) {
       if (error instanceof PeBackendError && [401, 403].includes(error.status)) {
         this.store.deleteSession(sessionId);
-        this.store.revokeWorkerCapabilities(session.userId);
       }
       throw error;
     }
@@ -130,7 +126,6 @@ export class PeGatewayAuthService {
     } catch (error) {
       if (error instanceof PeBackendError && error.status === 403) {
         this.store.deleteSession(sessionId);
-        this.store.revokeWorkerCapabilities(session.userId);
         throw error;
       }
       if (error instanceof PeBackendError && error.status === 401) {
@@ -157,7 +152,6 @@ export class PeGatewayAuthService {
     } catch (error) {
       if (error instanceof PeBackendError && error.status === 403) {
         this.store.deleteSession(sessionId);
-        this.store.revokeWorkerCapabilities(session.userId);
         throw error;
       }
       if (!(error instanceof PeBackendError) || error.status !== 401) throw error;
@@ -186,7 +180,6 @@ export class PeGatewayAuthService {
       if (!session) return false;
       await this.backend.changePassword(session.accessToken, code, newPassword);
     }
-    this.store.revokeWorkerCapabilities(session.userId);
     this.store.deleteSession(sessionId);
     return true;
   }
@@ -199,7 +192,6 @@ export class PeGatewayAuthService {
       } catch {
         // Local logout must succeed even when the account service is unavailable.
       }
-      this.store.revokeWorkerCapabilities(session.userId);
     }
     this.store.deleteSession(sessionId);
   }

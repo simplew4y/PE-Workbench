@@ -1,12 +1,10 @@
-import { cookies, headers } from "next/headers";
+import { cookies } from "next/headers";
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import { getPeGatewayRuntime } from "./pe-gateway/runtime";
 import { isPeMultiUserMode } from "./pe-multi-user-paths";
 import type { RpcSessionStartOptions } from "./rpc-manager";
 import type { PePlatformRuntime } from "./pe-gateway/model-service";
 import type { PeBackendUser } from "./pe-gateway/backend-client";
-import { isPeWorkerRuntime } from "./pe-runtime-role";
-import { readPeWorkerContext, type PeWorkerRequestContext } from "./pe-worker-context";
 
 interface PublicPlatformModel {
   id: string;
@@ -35,9 +33,6 @@ async function authenticatedPeContextForRequest(): Promise<{
   user: PeBackendUser;
 } | null> {
   if (!isPeMultiUserMode()) return null;
-  if (isPeWorkerRuntime()) {
-    throw new Error("Gateway session context is unavailable inside a worker");
-  }
   const gateway = getPeGatewayRuntime();
   const cookieStore = await cookies();
   const sessionId = cookieStore.get(gateway.config.cookie.name)?.value ?? "";
@@ -48,16 +43,7 @@ async function authenticatedPeContextForRequest(): Promise<{
   return { gateway, session, user };
 }
 
-async function workerPeContextForRequest(): Promise<PeWorkerRequestContext> {
-  const capability = process.env.PE_WORKER_CAPABILITY ?? "";
-  return readPeWorkerContext(await headers(), capability);
-}
-
 export async function getPePlatformRuntimeForRequest(): Promise<PePlatformRuntime | null> {
-  if (isPeWorkerRuntime()) {
-    const context = await workerPeContextForRequest();
-    return context.source === "platform" ? context.platform! : null;
-  }
   const context = await authenticatedPeContextForRequest();
   if (!context) return null;
   return context.gateway.models.platformRuntime(context.session, context.user);
@@ -101,13 +87,6 @@ function platformRpcOptions(
 }
 
 export async function getPePlatformRpcOptions(): Promise<RpcSessionStartOptions> {
-  if (isPeWorkerRuntime()) {
-    const context = await workerPeContextForRequest();
-    return platformRpcOptions(
-      context.userName,
-      context.source === "platform" ? context.platform! : null,
-    );
-  }
   const context = await authenticatedPeContextForRequest();
   if (!context) return {};
   const userName = context.user.nickName?.trim()

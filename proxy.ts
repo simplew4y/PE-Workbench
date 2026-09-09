@@ -11,23 +11,10 @@ import { getPeGatewayRuntime } from "@/lib/pe-gateway/runtime";
 import {
   clearSessionCookie,
   gatewayError,
-  noStoreJson,
   sessionIdFromRequest,
   unauthenticated,
 } from "@/lib/pe-gateway/route-helpers";
 import { isPeMultiUserMode } from "@/lib/pe-multi-user-paths";
-import {
-  isPeWorkerRequestAuthorized,
-  isPeWorkerRuntime,
-} from "@/lib/pe-runtime-role";
-import {
-  forwardPeWorkerRequest,
-  isGatewayOwnedApiPath,
-  isPeProxyRequestAbort,
-  workerRequestContext,
-  workerRequestNeedsUserContext,
-} from "@/lib/pe-gateway/worker-proxy";
-import { PeModelServiceError } from "@/lib/pe-gateway/model-service";
 
 const PUBLIC_PE_API_PATHS = new Set([
   "/api/health",
@@ -36,17 +23,11 @@ const PUBLIC_PE_API_PATHS = new Set([
 
 export function isPublicPeApiPath(pathname: string): boolean {
   return PUBLIC_PE_API_PATHS.has(pathname)
-    || (!isPeWorkerRuntime() && pathname.startsWith("/api/account/"));
+    || pathname.startsWith("/api/account/");
 }
 
 async function dispatchPeApiRequest(request: NextRequest): Promise<Response | null> {
   if (!isPeMultiUserMode() || isPublicPeApiPath(request.nextUrl.pathname)) return null;
-
-  if (isPeWorkerRuntime()) {
-    return isPeWorkerRequestAuthorized(request)
-      ? null
-      : unauthenticated();
-  }
 
   let gateway: ReturnType<typeof getPeGatewayRuntime>;
   try {
@@ -65,36 +46,16 @@ async function dispatchPeApiRequest(request: NextRequest): Promise<Response | nu
       clearSessionCookie(response, gateway.config);
       return response;
     }
-    if (isGatewayOwnedApiPath(request.nextUrl.pathname)) return null;
-
     const user = await gateway.auth.currentUser(sessionId);
     if (!user) {
       const response = unauthenticated();
       clearSessionCookie(response, gateway.config);
       return response;
     }
-    try {
-      const target = await gateway.workers.ensureWorker(session);
-      const context = workerRequestNeedsUserContext(request.nextUrl.pathname, request.method)
-        ? await workerRequestContext(gateway, session, user)
-        : undefined;
-      return await forwardPeWorkerRequest(request, target, context);
-    } catch (error) {
-      if (request.signal.aborted || isPeProxyRequestAbort(error)) {
-        return new Response(null, { status: 499, statusText: "Client Closed Request" });
-      }
-      if (error instanceof PeModelServiceError) {
-        return noStoreJson(
-          { code: error.code, message: error.message },
-          { status: error.status },
-        );
-      }
-      console.error(`PE worker proxy failed for namespace ${session.dataNamespace}`, error);
-      return noStoreJson(
-        { code: "worker_unavailable", message: "个人工作区暂时不可用，请稍后重试" },
-        { status: 503 },
-      );
-    }
+    // The authenticated desktop/local process owns the API, Agent RPC and
+    // filesystem directly. Returning null lets Next.js dispatch the request to
+    // the local route after the server-side account check succeeds.
+    return null;
   } catch (error) {
     const response = gatewayError(error);
     if (response.status === 401 || response.status === 403) {

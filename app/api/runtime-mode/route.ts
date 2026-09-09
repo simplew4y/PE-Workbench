@@ -5,7 +5,7 @@ export const runtime = "nodejs";
 
 export async function GET() {
   return NextResponse.json(
-    { multi_user: isPeMultiUserMode() },
+    { multi_user: isPeMultiUserMode(), execution: "local" },
     { headers: { "Cache-Control": "private, no-store" } },
   );
 }

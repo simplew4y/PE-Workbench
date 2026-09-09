@@ -12,7 +12,7 @@ import { DatabaseSync } from "node:sqlite";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { allowFileRoot } from "./file-access";
 import { disallowFileRoot } from "./allowed-roots";
-import { getPeUserRoot, isPeMultiUserMode, isPeUserPathAllowed } from "./pe-multi-user-paths";
+import { getPeAgentDir, isPeMultiUserMode, isPeUserPathAllowed } from "./pe-multi-user-paths";
 import { projectIdentityKey } from "./project-identity";
 import type {
   CreatePeProjectInput,
@@ -76,7 +76,7 @@ function storePaths(options: PeProjectStoreOptions = {}): {
   storeRoot: string;
 } {
   const agentDir = resolve(options.agentDir ?? (
-    isPeMultiUserMode() ? join(getPeUserRoot(), ".pi", "agent") : getAgentDir()
+    isPeMultiUserMode() ? getPeAgentDir() : getAgentDir()
   ));
   const storeRoot = join(agentDir, "pe-workbench");
   return {

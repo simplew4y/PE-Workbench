@@ -32,14 +32,13 @@ function isHostRuntimeVariable(name: string, platform: NodeJS.Platform): boolean
     || comparableName.startsWith("NEXT_");
 }
 
-function isPeGatewaySecretVariable(name: string, platform: NodeJS.Platform): boolean {
+function isPeHostSecretVariable(name: string, platform: NodeJS.Platform): boolean {
   const comparableName = platform === "win32" ? name.toUpperCase() : name;
   return comparableName === "PI_WEB_PASSWORD"
     || comparableName.startsWith("PE_SESSION_")
     || comparableName.startsWith("PE_GATEWAY_")
     || comparableName.startsWith("PE_BACKEND_")
-    || comparableName.startsWith("PE_PLATFORM_")
-    || comparableName.startsWith("PE_WORKER_");
+    || comparableName.startsWith("PE_PLATFORM_");
 }
 
 export function sanitizeProjectCommandEnvironment(
@@ -51,7 +50,7 @@ export function sanitizeProjectCommandEnvironment(
   for (const name of Object.keys(environment)) {
     if (
       isHostRuntimeVariable(name, platform)
-      || (multiUserMode && isPeGatewaySecretVariable(name, platform))
+      || (multiUserMode && isPeHostSecretVariable(name, platform))
     ) {
       delete environment[name];
     }

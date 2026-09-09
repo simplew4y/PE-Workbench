@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import type {
   PeBackendClient,
   PeBackendUser,
@@ -37,12 +40,25 @@ function platformModelIds(platform: PePlatformModels): string[] {
   });
 }
 
+function hasConfiguredCustomModel(): boolean {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(join(getAgentDir(), "auth.json"), "utf8"));
+    return typeof parsed === "object"
+      && parsed !== null
+      && !Array.isArray(parsed)
+      && Object.keys(parsed).length > 0;
+  } catch {
+    return false;
+  }
+}
+
 export class PeGatewayModelService {
   private readonly accessTokens = new Map<string, { value: PePlatformAccessToken; expiresAt: number }>();
 
   constructor(
     private readonly backend: Pick<PeBackendClient, "models" | "modelAccessToken">,
     private readonly store: PeGatewaySessionStore,
+    private readonly customModelConfigured: () => boolean = hasConfiguredCustomModel,
   ) {}
 
   sourceForUser(userId: string): ModelSource {
@@ -80,8 +96,7 @@ export class PeGatewayModelService {
     return {
       source,
       platform: { ...platform, balanceCny: user.balanceCny, selectedModel },
-      // The shared gateway cannot inspect auth.json until the user's worker is attached.
-      custom: { configured: null },
+      custom: { configured: this.customModelConfigured() },
     };
   }
 

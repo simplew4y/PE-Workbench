@@ -1,6 +1,6 @@
 import { existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 export function isPeMultiUserMode(env: NodeJS.ProcessEnv = process.env): boolean {
   return ["1", "true", "yes", "on"].includes(env.PE_MULTI_USER_MODE?.trim().toLowerCase() ?? "");
@@ -17,6 +17,20 @@ export function getPeUserRoot(
   } catch {
     throw new Error(`PE user root does not exist: ${configured}`);
   }
+}
+
+export function getPeAgentDir(
+  env: NodeJS.ProcessEnv = process.env,
+  defaultHome = homedir(),
+): string {
+  return join(getPeUserRoot(env, defaultHome), ".pi", "agent");
+}
+
+export function getPeWorkbenchRoot(
+  env: NodeJS.ProcessEnv = process.env,
+  defaultHome = homedir(),
+): string {
+  return join(getPeAgentDir(env, defaultHome), "pe-workbench");
 }
 
 function isInside(root: string, target: string): boolean {
