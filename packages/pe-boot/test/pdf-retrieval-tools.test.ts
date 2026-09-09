@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -11,7 +11,8 @@ import { sourceId } from "../src/source.ts";
 import { buildPeSystemPrompt } from "../src/system-prompt.ts";
 import { registerPeTools } from "../src/tools/index.ts";
 import { savePeMemo } from "../src/tools/memo-storage.ts";
-import { pePdfReadTool, readPePdfPages } from "../src/tools/pdf-read.ts";
+import { listPePdfDocuments } from "../src/tools/pdf-list.ts";
+import { attachPePdfImages, pePdfReadTool, readPePdfPages } from "../src/tools/pdf-read.ts";
 import { pePdfSearchTool, searchPePdfPages } from "../src/tools/pdf-search.ts";
 import { savePeResearchNote } from "../src/tools/research-note-storage.ts";
 
@@ -225,14 +226,122 @@ afterEach(() => {
 });
 
 describe("PE page-level PDF retrieval", () => {
+	it("paginates beyond 200 matches without ranking by document hit count", () => {
+		const root = createVersionedPageFixture();
+		addCatalogPdf(root, { docId: "first", filename: "AAA.pdf" });
+		const database = new DatabaseSync(join(root, "meta", "collection.sqlite3"));
+		database.exec("UPDATE documents SET page_count=251 WHERE doc_id='doc-v2'");
+		const insert = database.prepare(
+			"INSERT INTO pdf_pages VALUES (?, 'doc-v2', ?, ?, 'p', 'body', '{}', 'passed', '{}', 595, 842, 0, '[]', 0, 0, 0)",
+		);
+		for (let i = 2; i <= 251; i++) insert.run(`many-${i}`, i, `AIDC line ${i}`);
+		database.close();
+		const first = searchPePdfPages(root, { queries: ["AIDC"], maxPages: 200 });
+		expect(first.documents[0].filename).toBe("AAA.pdf");
+		expect(first.shown_page_count).toBe(200);
+		expect(first.next_page_offset).toBe(200);
+		const second = searchPePdfPages(root, { queries: ["AIDC"], maxPages: 200, pageOffset: 200 });
+		expect(second.shown_page_count).toBe(52);
+		expect(second.next_page_offset).toBeNull();
+		const ids = [...first.documents, ...second.documents].flatMap((doc) => doc.pages.map((page) => page.evidence_id));
+		expect(new Set(ids).size).toBe(252);
+	});
+
+	it("folds disclosure pages without consuming pagination and finds normalized literal text", () => {
+		const root = createPageDatasetFixture();
+		const db = new DatabaseSync(join(root, "meta", "collection.sqlite3"));
+		db.prepare(
+			"UPDATE pdf_pages SET role='disclosure_boilerplate', page_text='AIDC disclosure' WHERE page_number=1",
+		).run();
+		db.prepare("UPDATE pdf_pages SET page_text=? WHERE page_number=2").run(`${"ﬀ".repeat(180)} ＡＩＤＣ conclusion`);
+		db.close();
+		const result = searchPePdfPages(root, { queries: ["aidc"], maxPages: 1 });
+		expect(result.documents[0].folded_disclosure_pages).toEqual([1]);
+		expect(result.documents[0].pages[0].page_number).toBe(2);
+		expect(result.documents[0].pages[0].lines[0].text).toContain("AIDC conclusion");
+		expect(result.truncated).toBe(false);
+		expect(searchPePdfPages(root, { queries: ["AIDC"], includeDisclosure: true }).shown_page_count).toBe(2);
+	});
+
+	it("lists current and historical PDF versions and resolves an exact name before a fragment", () => {
+		const root = createVersionedPageFixture();
+		addCatalogPdf(root, { docId: "fragment", filename: "阳光电源调研-摘要.pdf" });
+		expect(listPePdfDocuments(root).documents.map((doc) => doc.doc_id)).not.toContain("doc-sungrow");
+		expect(listPePdfDocuments(root, { includeHistorical: true }).documents.map((doc) => doc.doc_id)).toContain(
+			"doc-sungrow",
+		);
+		expect(readPePdfPages(root, { documentName: "阳光电源调研", pageStart: 1 }).document.doc_id).toBe("doc-v2");
+		expect(() => readPePdfPages(root, { documentName: "阳光电源", pageStart: 1 })).toThrow("Ambiguous");
+	});
+
+	it("reports missing, escaped, unsupported-model images instead of pretending attachment", () => {
+		const root = createPageDatasetFixture();
+		const result = readPePdfPages(root, { documentName: "阳光电源调研", pageStart: 3 });
+		expect(result.attached_page_images).toEqual([]);
+		expect(attachPePdfImages(root, result, true)).toEqual([]);
+		expect(result.omitted_page_images[0].reason).toBe("missing");
+		const textOnly = readPePdfPages(root, { documentName: "阳光电源调研", pageStart: 3 });
+		attachPePdfImages(root, textOnly, false);
+		expect(textOnly.omitted_page_images[0].reason).toBe("model_unsupported");
+		const outside = mkdtempSync(join(tmpdir(), "pdf-outside-"));
+		temporaryDirectories.push(outside);
+		writeFileSync(join(outside, "image.png"), Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+		symlinkSync(outside, join(root, "meta", "escaped"), "dir");
+		const db = new DatabaseSync(join(root, "meta", "collection.sqlite3"));
+		db.prepare("UPDATE pdf_pages SET image_paths_json=? WHERE page_number=3").run(
+			JSON.stringify(["meta/escaped/image.png"]),
+		);
+		db.close();
+		const escaped = readPePdfPages(root, { documentName: "阳光电源调研", pageStart: 3 });
+		attachPePdfImages(root, escaped, true);
+		expect(escaped.omitted_page_images[0].reason).toBe("outside_workspace");
+	});
+
+	it("attaches at most three actual images and at most ten MiB per call", () => {
+		const root = createPageDatasetFixture();
+		const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+		const db = new DatabaseSync(join(root, "meta", "collection.sqlite3"));
+		for (let n = 1; n <= 3; n++) {
+			writeFileSync(
+				join(root, "meta", `image-${n}.png`),
+				n === 1 ? Buffer.concat([png, Buffer.alloc(9 * 1024 * 1024)]) : png,
+			);
+			db.prepare("UPDATE pdf_pages SET image_paths_json=? WHERE page_number=?").run(
+				JSON.stringify([`meta/image-${n}.png`]),
+				n,
+			);
+		}
+		writeFileSync(join(root, "meta", "image-2.png"), Buffer.concat([png, Buffer.alloc(2 * 1024 * 1024)]));
+		db.close();
+		const result = readPePdfPages(root, {
+			documentName: "阳光电源调研",
+			pageStart: 1,
+			pageEnd: 3,
+			includeImages: "always",
+		});
+		expect(attachPePdfImages(root, result, true).filter((block) => block.type === "image")).toHaveLength(2);
+		expect(result.omitted_page_images).toMatchObject([{ page_number: 2, reason: "byte_limit" }]);
+		const capped = readPePdfPages(root, { documentName: "阳光电源调研", pageStart: 3, includeImages: "always" });
+		capped.omitted_page_images = Array.from({ length: 4 }, (_, i) => ({
+			...capped.omitted_page_images[0],
+			page_number: i + 1,
+		}));
+		expect(attachPePdfImages(root, capped, true).filter((block) => block.type === "image")).toHaveLength(3);
+		expect(capped.omitted_page_images[0].reason).toBe("attachment_limit");
+		expect(
+			readPePdfPages(root, { documentName: "阳光电源调研", pageStart: 3, includeImages: "never" })
+				.omitted_page_images,
+		).toEqual([]);
+	});
 	it("discovers only current active PDFs and reads an explicit historical version without changing its citations", async () => {
 		const root = createVersionedPageFixture();
 		addCatalogPdf(root, { docId: "archived", filename: "Archived.pdf", lifecycleState: "archived" });
 		addCatalogPdf(root, { docId: "deleted", filename: "Deleted.pdf", deletedAt: "2026-09-07" });
 		for (const query of ["AIDC", "AI"]) {
 			const result = searchPePdfPages(root, { queries: [query] });
-			expect(result.results.map((hit) => hit.doc_id)).toEqual(["doc-v2"]);
-			expect(result.results[0]).toMatchObject({ version_no: 2, evidence_id: "page:page-doc-v2" });
+			expect(result.documents.map((hit) => hit.doc_id)).toEqual(["doc-v2"]);
+			expect(result.documents[0]).toMatchObject({ version_no: 2 });
+			expect(result.documents[0].pages[0]).toMatchObject({ evidence_id: "page:page-doc-v2" });
 		}
 		expect(readPePdfPages(root, { documentName: "阳光电源调研", pageStart: 1 }).document).toMatchObject({
 			doc_id: "doc-v2",
@@ -261,7 +370,7 @@ describe("PE page-level PDF retrieval", () => {
 		const database = new DatabaseSync(join(root, "meta", "collection.sqlite3"));
 		database.exec("UPDATE documents SET status='queued' WHERE doc_id='doc-v2'");
 		database.close();
-		expect(searchPePdfPages(root, { queries: ["AIDC", "AI"] }).results).toEqual([]);
+		expect(searchPePdfPages(root, { queries: ["AIDC", "AI"] }).documents).toEqual([]);
 		expect(() => readPePdfPages(root, { documentName: "阳光电源调研.pdf", pageStart: 1 })).toThrow("not indexed");
 		expect(readPePdfPages(root, { docId: "doc-sungrow", pageStart: 1 }).document.doc_id).toBe("doc-sungrow");
 	});
@@ -317,22 +426,23 @@ describe("PE page-level PDF retrieval", () => {
 
 	it("searches complete pages without hardcoded synonym expansion", () => {
 		const root = createPageDatasetFixture();
-		const result = searchPePdfPages(root, { queries: ["储能单位盈利", "AIDC"], topK: 5 });
+		const result = searchPePdfPages(root, { queries: ["储能单位盈利", "AIDC"], maxPages: 5 });
 
 		expect(result.dataset_id).toBe("dataset-new");
-		expect(result.results).toEqual(
+		expect(result.documents[0].pages).toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({
 					evidence_id: "page:page-profit",
-					filename: "阳光电源调研.pdf",
 					page_number: 2,
 					citation: "阳光电源调研.pdf p.2",
 					markdown_citation: "[阳光电源调研.pdf p.2](#pe-source?evidence_id=page%3Apage-profit)",
-					excerpt: expect.stringContaining("每瓦时0.3至0.4元"),
+					lines: expect.arrayContaining([
+						expect.objectContaining({ text: expect.stringContaining("每瓦时0.3至0.4元") }),
+					]),
 				}),
 			]),
 		);
-		expect(result.hint).toContain("does not inject domain synonyms");
+		expect(result.hint).toContain("without domain synonyms");
 	});
 
 	it("supports short literal terms and an exact human-readable document filter", () => {
@@ -342,8 +452,8 @@ describe("PE page-level PDF retrieval", () => {
 			documentName: "阳光电源调研",
 		});
 
-		expect(result.results).toHaveLength(1);
-		expect(result.results[0]).toMatchObject({
+		expect(result.documents[0].pages).toHaveLength(1);
+		expect(result.documents[0].pages[0]).toMatchObject({
 			evidence_id: "page:page-risk",
 			page_number: 3,
 			text_quality: "needs_ocr",
@@ -386,7 +496,7 @@ describe("PE page-level PDF retrieval", () => {
 
 		const result = searchPePdfPages(root, { queries: ["储能"] });
 		expect(result.dataset_id).toBe("dataset-new");
-		expect(result.results).toEqual([]);
+		expect(result.documents).toEqual([]);
 	});
 
 	it("accepts page evidence in Research Notes and Memo Citation Gate", async () => {

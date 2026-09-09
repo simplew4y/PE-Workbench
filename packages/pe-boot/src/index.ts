@@ -6,6 +6,8 @@ export {
 	PE_PIPELINE_SCHEMA_VERSION,
 	rollbackPeTransaction,
 } from "./collection-schema.ts";
+export { type CardType, type ConsensusCardsOptions, listPeConsensusCards } from "./consensus.ts";
+export { portablePeFilename } from "./document-filenames.ts";
 export {
 	type PeDocumentOptions,
 	PeSourceError,
@@ -22,12 +24,14 @@ export {
 } from "./evidence.ts";
 export { excelParserRevision, excelPython, validatePeExcelUpload } from "./excel-processing.ts";
 export * from "./source.ts";
-export { buildPeSystemPrompt, toolsList } from "./system-prompt.ts";
+export { buildPeSystemPrompt, buildToolsList } from "./system-prompt.ts";
 export { peDocumentOpenTool } from "./tools/document-open.ts";
 export { getPeExcelRange, peExcelRangeTool } from "./tools/excel-range.ts";
+export { isPeConsensusEnabled } from "./tools/feature-flags.ts";
 export { peFormulaTraceTool, tracePeFormula } from "./tools/formula-trace.ts";
 export { registerPeTools } from "./tools/index.ts";
 export { peModelValidateTool, validatePeModel } from "./tools/model-validate.ts";
+export { listPePdfDocuments, pePdfListTool } from "./tools/pdf-list.ts";
 export { pePdfReadTool, readPePdfPages } from "./tools/pdf-read.ts";
 export { pePdfSearchTool, searchPePdfPages } from "./tools/pdf-search.ts";
 export { peValuationDateTool, resolvePeValuationDate } from "./tools/valuation-date.ts";

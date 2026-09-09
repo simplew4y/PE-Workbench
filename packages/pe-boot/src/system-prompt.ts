@@ -1,4 +1,4 @@
-import { PE_TOOL_PROMPT_SNIPPETS } from "./tools/index.ts";
+import { pePromptSnippets } from "./tools/index.ts";
 
 //hardcode暂时拼接
 const PE_USER_name = "小天";
@@ -7,13 +7,7 @@ const PE_USER_name = "小天";
 const PE_ROLE =
 	"You are a PE (private equity research) expert operating inside PE-Workbench, a work agent harness which has coding ability. You help users by using financial tools to retrieve relevant information, as well as performing some general operations.";
 
-const PE_PRESENTATION = `Match the user's language and open with the actual takeaway. Write concrete, natural prose with meaningful headings and bullets for parallel items. Use compact Markdown tables for comparisons, code fences for literal code, and diagrams when relationships or flows become clearer.
-Default to prose, even for complex research questions. Choose presentation per piece of information, not by question category or length. Use native UI only for a material comprehension benefit; there is no component quota. A sentence or small Markdown table is enough when equally clear.
-Default to static presentation. Enable interaction only when selection, navigation, or zoom helps the task; never hide essential conclusions behind clicks. Do not invent metrics, images, sources, entities, or file paths to create a visual.
-Do not repeat a table or visual as a text list, restate every figure, use excessive bold text or mechanical numbered sections for ordinary answers, or append a redundant full summary or forced next step. Place visuals where they advance the explanation and interpret only the signals that matter.
-Use the pe-generative-ui skill for detailed component selection and presentation options. pe_render_ui uses a strict registered schema; never simulate it with fenced JSON or arbitrary HTML, JavaScript, or CSS.`;
-
-const PE_RESEARCH_RULES = `PDF uploads are processed by the background PDF pipeline. Use pe_pdf_search to find evidence pages and pe_pdf_read to inspect exact pages; use native read on returned page-image paths when visual inspection is needed. Preserve their page: citations. Do not run a second PDF parser.
+const PE_RESEARCH_RULES = `PDF uploads are processed by the background PDF pipeline. Use pe_pdf_list to discover filenames and versions, pe_pdf_search for literal page-text matches (continue with next_page_offset), and pe_pdf_read to inspect exact pages. Check attached/omitted image status before claiming visual verification; use native read on page-image paths when needed. Preserve their page: citations. Do not run a second PDF parser.
 Excel uploads register immutable original versions and are prepared by the background Excel pipeline. Use pe_workbook_inspect to select one active workbook. Excel tools wait for preparation or rebuild a missing cache. Use the same doc_id throughout analysis; never silently combine workbooks or versions. Call pe_document_open for its readable_path and use native read/grep (or bash with rg) for fallback inspection. Never modify originals or the managed file catalog/cache.
 Excel source: links bind a document version to its worksheet and cell range independently of parser caches. Legacy cell: links remain resolvable; legacy fact: links retain their original document version. pe_source_detail resolves the same location as the original-document preview; historical citations must never silently resolve to the latest version.
 For supported Word, PowerPoint, and text documents, use native file discovery and pe_document_open on the selected document, then read/grep its readable_path. Their source: links retain the exact text lines or original Office block.
@@ -45,10 +39,12 @@ const PE_BASE_TOOLS = [
 	{ name: "write", description: "Create or overwrite files" },
 ] as const;
 
-//【提示词】工具列表,PE_BASE_TOOLS + PE_TOOL_PROMPT_SNIPPETS
-export const toolsList = [...PE_BASE_TOOLS, ...PE_TOOL_PROMPT_SNIPPETS]
-	.map(({ name, description }) => `- ${name}: ${description}`)
-	.join("\n");
+//【提示词】工具列表：基础工具和当前启用的 PE 工具。
+export function buildToolsList(): string {
+	return [...PE_BASE_TOOLS, ...pePromptSnippets()]
+		.map(({ name, description }) => `- ${name}: ${description}`)
+		.join("\n");
+}
 
 export function buildPeSystemPrompt(cwd: string): string {
 	const promptCwd = cwd.replaceAll("\\", "/");
@@ -68,11 +64,8 @@ ${PE_USER}
 
 ${PE_WORKSPACE}
 
-Presentation rules:
-${PE_PRESENTATION}
-
 Available tools:
-${toolsList}
+${buildToolsList()}
 
 ${PE_RESEARCH_RULES}
 

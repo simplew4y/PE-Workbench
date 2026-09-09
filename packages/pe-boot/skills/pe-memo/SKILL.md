@@ -43,7 +43,7 @@ generated/memo/
 ## Create workflow
 
 1. Identify one stable canonical topic, a client-facing title, the requested scope, and the questions the Memo must answer.
-2. For PDF evidence, use `pe_pdf_search` with literal Chinese, English, abbreviation, or synonym variants when terminology is uncertain. For Excel, select one active workbook with `pe_workbook_inspect` and use `pe_excel_range` for exact financial cells. Use `pe_document_open` and native `read`/`grep` for the selected workbook text view or supported Office/text documents.
+2. Discover PDF filenames with `pe_pdf_list`; use `pe_pdf_search` with literal term variants and follow `next_page_offset` when more matches are needed. For Excel, select one active workbook with `pe_workbook_inspect` and use `pe_excel_range` for exact financial cells. Use `pe_document_open` and native `read`/`grep` for the selected workbook text view or supported Office/text documents.
 3. Verify decisive, numerical, conflicting, table, metric, and chart evidence before using it. Use `pe_pdf_read` for PDF pages, including neighboring pages when a statement crosses a boundary; use `pe_source_detail` for exact Excel ranges or Office/text locations. Follow the pe-valuation-model-explainer Skill for valuation outputs, dates, formula traces, and model validation.
 4. Separate sourced facts, interpretations, counterevidence, risks, and open questions. Preserve exact dates, periods, currencies, units, and scenarios.
 5. Build `memo_claims` as the complete desired Memo. Each item is one claim with a section, plain text, status, and exact evidence IDs. Do not put citation syntax in `text`.

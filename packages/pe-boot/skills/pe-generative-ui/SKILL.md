@@ -81,6 +81,7 @@ Use Markdown only for quick factual answers, definitions, short reasoning, code,
 ## Tool contract
 
 - Pass `version: 1`.
+- Pass `component` directly as a JSON object, for example `"component": {"kind": "relationship_map", ...}`. Never pass a JSON-encoded string such as `"component": "{\"kind\": \"relationship_map\", ...}"`, and never stringify the component before calling `pe_render_ui`.
 - Use a stable, short `surface_id` when more than one surface may appear.
 - Values for `financial_trend` must be numbers, and every series must align with the categories.
 - `metric_comparison.rows[].values` must align with the columns.

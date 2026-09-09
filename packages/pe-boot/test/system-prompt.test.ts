@@ -1,7 +1,32 @@
-import { describe, expect, it } from "vitest";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildPeSystemPrompt } from "../src/system-prompt.ts";
+import { isPeConsensusEnabled } from "../src/tools/feature-flags.ts";
+import { registerPeTools } from "../src/tools/index.ts";
+
+afterEach(() => vi.unstubAllEnvs());
 
 describe("PE system prompt", () => {
+	it.each([undefined, "", "0", "true", "1", " 1 "])(
+		"keeps consensus registration and prompt visibility aligned for flag %s",
+		(value) => {
+			vi.stubEnv("PE_CONSENSUS_ENABLED", value);
+			const enabled = value?.trim() === "1";
+			const registered: string[] = [];
+			const extension = {
+				registerTool(tool: { name: string }) {
+					registered.push(tool.name);
+				},
+				on() {},
+			} as unknown as ExtensionAPI;
+			registerPeTools(extension);
+			expect(isPeConsensusEnabled()).toBe(enabled);
+			expect(registered.includes("pe_consensus_cards")).toBe(enabled);
+			expect(buildPeSystemPrompt("/workspace").includes("- pe_consensus_cards:")).toBe(enabled);
+			expect(registered).toEqual(expect.arrayContaining(["pe_pdf_list", "pe_pdf_search", "pe_excel_range"]));
+		},
+	);
+
 	it("keeps the PE role and fixed project workspace contract", () => {
 		const prompt = buildPeSystemPrompt("C:\\research\\project");
 		expect(prompt).toContain("You are a PE (private equity research) expert");

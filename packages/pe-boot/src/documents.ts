@@ -16,6 +16,7 @@ import {
 	openPeCollectionDatabase,
 	rollbackPeTransaction,
 } from "./collection-schema.ts";
+import { portablePeFilename } from "./document-filenames.ts";
 import { type PreparedWorkbook, prepareWorkbook, validatePeExcelUpload, verifyPeOriginal } from "./excel-processing.ts";
 import { DOCUMENT_EXTENSIONS } from "./source.ts";
 import {
@@ -77,8 +78,7 @@ export function registerPeDocuments(
 ): { documents: SqlRow[]; fileCount: number } {
 	const root = projectRoot(cwd);
 	const inputs = files.map(({ name, bytes }) => {
-		// Preserve legal full-width punctuation in names stored on disk and shown to users.
-		name = name.normalize("NFC").trim();
+		name = portablePeFilename(name);
 		const extension = extname(name).toLowerCase();
 		if (basename(name) !== name || /[\\/\x00-\x1f<>:"|?*]/u.test(name) || !DOCUMENT_EXTENSIONS.has(extension))
 			throw new PeSourceError(400, `Unsupported document filename: ${name}`);
