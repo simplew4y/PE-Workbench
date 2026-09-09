@@ -323,6 +323,19 @@ export const peRenderUiParameters = Type.Object({
 
 type RenderUiParams = Static<typeof peRenderUiParameters>;
 
+function prepareRenderUiArguments(args: unknown): RenderUiParams {
+	if (!args || typeof args !== "object" || Array.isArray(args)) return args as RenderUiParams;
+	const input = args as Record<string, unknown>;
+	if (typeof input.component !== "string") return args as RenderUiParams;
+
+	try {
+		const component: unknown = JSON.parse(input.component);
+		return { ...input, component } as RenderUiParams;
+	} catch {
+		return args as RenderUiParams;
+	}
+}
+
 export function validateRenderUiParams(params: RenderUiParams): void {
 	const component = params.component;
 	if (component.kind === "research_brief") {
@@ -378,6 +391,7 @@ export const peRenderUiTool = defineTool({
 	description: PE_RENDER_UI_PROMPT_SNIPPET,
 	promptSnippet: PE_RENDER_UI_PROMPT_SNIPPET,
 	parameters: peRenderUiParameters,
+	prepareArguments: prepareRenderUiArguments,
 	async execute(_toolCallId, params, signal) {
 		signal?.throwIfAborted();
 		validateRenderUiParams(params);

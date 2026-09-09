@@ -1,5 +1,7 @@
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { Value } from "typebox/value";
 import { describe, expect, it } from "vitest";
-import { validateRenderUiParams } from "../src/tools/render-ui.ts";
+import { peRenderUiParameters, peRenderUiTool, validateRenderUiParams } from "../src/tools/render-ui.ts";
 
 describe("PE generative UI tool", () => {
 	it("accepts an aligned financial trend", () => {
@@ -15,6 +17,33 @@ describe("PE generative UI tool", () => {
 				},
 			}),
 		).not.toThrow();
+	});
+
+	it("normalizes a JSON-encoded component before schema validation", async () => {
+		const component = {
+			kind: "kpi_strip" as const,
+			title: "经营摘要",
+			metrics: [
+				{ label: "收入", value: "100 亿元" },
+				{ label: "利润", value: "10 亿元" },
+			],
+		};
+		const rawArguments = { version: 1 as const, component: JSON.stringify(component) };
+
+		expect(Value.Check(peRenderUiParameters, rawArguments)).toBe(false);
+		const prepared = peRenderUiTool.prepareArguments!(rawArguments);
+		expect(prepared).toEqual({ version: 1, component });
+		expect(Value.Check(peRenderUiParameters, prepared)).toBe(true);
+		expect(() => validateRenderUiParams(prepared)).not.toThrow();
+
+		const result = await peRenderUiTool.execute("tool-call", prepared, undefined, undefined, {} as ExtensionContext);
+		expect(result.details?.component).toEqual(component);
+	});
+
+	it("does not bypass schema validation for malformed component strings", () => {
+		const rawArguments = { version: 1 as const, component: "{not valid JSON}" };
+		expect(peRenderUiTool.prepareArguments!(rawArguments)).toBe(rawArguments);
+		expect(Value.Check(peRenderUiParameters, rawArguments)).toBe(false);
 	});
 
 	it("rejects semantically invalid chart and relationship data", () => {
