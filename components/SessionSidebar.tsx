@@ -10,6 +10,7 @@ import { workspaceKeyOf } from "@/lib/workspace-memory";
 import { useI18n } from "@/hooks/useI18n";
 import { PeResearchUpload } from "./PeResearchUpload";
 import { PeProjectDocuments } from "./PeProjectDocuments";
+import { PeConsensusPanel } from "./PeConsensusPanel";
 import { PeProjectCreateDialog } from "./PeProjectCreateDialog";
 import { PeProjectDeleteDialog } from "./PeProjectDeleteDialog";
 
@@ -952,6 +953,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           refreshKey={documentRefreshKey}
           onOpenFile={onOpenFile}
         />
+
+        <PeConsensusPanel project={selectedRegisteredProject} />
 
       </div>
 
