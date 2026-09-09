@@ -212,6 +212,8 @@ export function PeProjectDocuments({ project, refreshKey = 0, onOpenFile }: Prop
                 : new Intl.DateTimeFormat(locale, { month: "short", day: "numeric" }).format(uploadedAt),
             ].filter((item): item is string => Boolean(item));
             let statusLabel = t("projectDocuments.statusCompleted");
+            const coverMetadata = [document.brokerage, document.documentDate, document.rating, document.targetPrice]
+              .filter((item): item is string => Boolean(item));
             if (document.needsOcrPageCount > 0) {
               statusLabel = t("projectDocuments.statusNeedsOcr", { count: document.needsOcrPageCount });
             } else if (document.status === "queued") {
@@ -228,8 +230,18 @@ export function PeProjectDocuments({ project, refreshKey = 0, onOpenFile }: Prop
                 <div style={{ display: "flex", alignItems: "flex-start", gap: 7 }}>
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div title={document.filename} style={{ color: "var(--text)", fontSize: 11, lineHeight: 1.35, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {document.filename}
+                      {document.title ?? document.filename}
                     </div>
+                    {document.title && (
+                      <div title={document.filename} style={{ marginTop: 1, color: "var(--text-dim)", fontSize: 9.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {document.filename}
+                      </div>
+                    )}
+                    {coverMetadata.length > 0 && (
+                      <div title={coverMetadata.join(" · ")} style={{ marginTop: 2, fontSize: 9.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {coverMetadata.join(" · ")}
+                      </div>
+                    )}
                     <div style={{ marginTop: 2, color: "var(--text-dim)", fontSize: 9.5, lineHeight: 1.3 }}>
                       {metadata.join(" · ")}
                     </div>

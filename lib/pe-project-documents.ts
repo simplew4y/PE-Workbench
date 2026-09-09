@@ -27,6 +27,11 @@ interface DocumentRow {
   page_count: number;
   document_markdown_path: string;
   warnings_json: string;
+  title: string | null;
+  brokerage: string | null;
+  document_date: string | null;
+  rating: string | null;
+  target_price: string | null;
   created_at: string;
   updated_at: string;
   needs_ocr_page_count: number;
@@ -160,6 +165,7 @@ export function listPeProjectDocuments(
         d.page_count,
         d.document_markdown_path, d.readable_text_path,
         d.warnings_json,
+        d.title, d.brokerage, d.document_date, d.rating, d.target_price,
         d.created_at,
         d.updated_at,
         EXISTS(SELECT 1 FROM processing_jobs j WHERE j.doc_id = d.doc_id
@@ -186,6 +192,13 @@ export function listPeProjectDocuments(
       const needsOcrPageCount = Number(row.needs_ocr_page_count) || 0;
       documents.push({
         filename: row.original_filename,
+        ...(row.file_type === "pdf" ? {
+          title: row.title?.trim() || undefined,
+          brokerage: row.brokerage?.trim() || undefined,
+          documentDate: row.document_date?.trim() || undefined,
+          rating: row.rating?.trim() || undefined,
+          targetPrice: row.target_price?.trim() || undefined,
+        } : {}),
         fileType: row.file_type,
         ...(row.file_type !== "pdf" || row.registration_kind === "catalog" ? {
           docId: row.doc_id, fileType: row.file_type, versionNo: Number(row.version_no), isCurrent: row.is_current === 1,

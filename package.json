@@ -26,6 +26,10 @@
     "public",
     "dist/pe-ingest",
     "services/session-attachments",
+    "services/pe-analysis",
+    "!services/pe-analysis/**/__pycache__",
+    "!services/pe-analysis/**/*.pyc",
+    "!services/pe-analysis/test_*.py",
     "next.config.ts",
     "package.json"
   ],

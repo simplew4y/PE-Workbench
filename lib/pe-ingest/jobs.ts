@@ -14,6 +14,7 @@ import type { PeIngestJob, PeIngestStatus } from "./contracts.ts";
 import type { PeProjectPaths } from "./paths.ts";
 import { savePeIngestJobToDatabase } from "./repository.ts";
 import { assertPeCollectionDataset, openPeCollectionDatabase, rollbackPeTransaction } from "./schema.ts";
+import { markPeAnalysisFailed } from "./analysis.ts";
 
 export const PE_INGEST_ACTIVE_STATUSES = new Set<PeIngestStatus>(["queued", "running"]);
 export const PE_INGEST_SUCCESS_STATUSES = new Set<PeIngestStatus>([
@@ -93,6 +94,11 @@ export function failPeIngestJob(paths: PeProjectPaths, job: PeIngestJob, message
   })));
   job.result.failedCount += pending.length;
   job.status = "failed";
+  if (job.stage === "analysis") {
+    job.result.analysis = { status: "failed", errors: [message] };
+    try { markPeAnalysisFailed(paths.collectionPath, paths.datasetId, message); }
+    catch { /* Preserve the worker failure even when the collection is unavailable. */ }
+  }
   job.message = message;
   job.finishedAt = new Date().toISOString();
   updatePeIngestJob(paths, job);

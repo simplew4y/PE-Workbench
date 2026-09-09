@@ -15,6 +15,7 @@
   },
   "include": [
     "lib/pe-ingest/contracts.ts",
+    "lib/pe-ingest/analysis.ts",
     "lib/pe-ingest/jobs.ts",
     "lib/pe-ingest/paths.ts",
     "lib/pe-ingest/repository.ts",

@@ -11,6 +11,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { portablePeFilename } from "@earendil-works/pe-boot";
 
 interface PeProjectReference {
   datasetId: string;
@@ -51,8 +52,7 @@ function assertSafeSegment(segment: string): void {
 }
 
 export function normalizePeDocumentFilename(value: string): string {
-  // Compatibility normalization turns valid punctuation such as ： into a forbidden ASCII colon.
-  const filename = value.normalize("NFC").trim();
+  const filename = portablePeFilename(value);
   const parsed = path.parse(filename);
   if (
     !filename

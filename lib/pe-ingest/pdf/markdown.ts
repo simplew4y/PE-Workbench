@@ -4,15 +4,40 @@ import {
   type PePdfDocumentMetadata,
   type PePdfPageArtifact,
 } from "../contracts.ts";
+import { EXHIBIT_CAPTION_PATTERN } from "./roles.ts";
+
+const MAX_HEADER_EXHIBITS = 3;
+const MAX_HEADER_EXHIBIT_CHARS = 120;
 
 function commentValue(value: string): string {
   return value.replace(/--/gu, "-").replace(/[\r\n]+/gu, " ").trim();
 }
 
-function pageExhibit(page: PePdfPageArtifact): string {
-  return page.text.split(/\r?\n/u).find((line) => (
-    /^(?:(?:图|表)\s*\d+|(?:Exhibit|Figure|Table)\s*\d+)/iu.test(line.trim())
-  ))?.trim() ?? "";
+/** Exhibit captions on the page, e.g. "EXHIBIT 3: Revenue mix", for the deterministic page header. */
+export function pePdfPageExhibits(text: string): string[] {
+  return [...text.matchAll(EXHIBIT_CAPTION_PATTERN)]
+    .map((match) => match[0].trim().slice(0, MAX_HEADER_EXHIBIT_CHARS))
+    .slice(0, MAX_HEADER_EXHIBITS);
+}
+
+/**
+ * One deterministic line placed before page text in retrieval results and Markdown:
+ * `document · brokerage · date · p.N/total · role · exhibit captions`.
+ */
+export function pePdfPageHeader(
+  originalFilename: string,
+  metadata: Pick<PePdfDocumentMetadata, "brokerage" | "documentDate">,
+  page: Pick<PePdfPageArtifact, "pageNumber" | "role" | "text">,
+  pageCount: number,
+): string {
+  return [
+    originalFilename,
+    metadata.brokerage,
+    metadata.documentDate,
+    `p.${page.pageNumber}/${pageCount}`,
+    page.role,
+    pePdfPageExhibits(page.text).join("; "),
+  ].filter(Boolean).join(" · ");
 }
 
 export function renderPePdfMarkdown(
@@ -21,13 +46,7 @@ export function renderPePdfMarkdown(
   pages: PePdfPageArtifact[],
 ): string {
   const sections = pages.map((page) => {
-    const header = [
-      originalFilename,
-      metadata.brokerage,
-      metadata.documentDate,
-      `p.${page.pageNumber}/${pages.length}`,
-      pageExhibit(page),
-    ].filter(Boolean).join(" · ");
+    const header = page.pageHeader || pePdfPageHeader(originalFilename, metadata, page, pages.length);
     const body = page.text.trim() || "[本页无可提取文字，需 OCR；请查看页面图片。]";
     return [
       `<!-- page: ${page.pageNumber} -->`,

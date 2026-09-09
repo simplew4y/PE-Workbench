@@ -1,3 +1,5 @@
+import type { PeAnalysisProgress, PeAnalysisResult } from "./analysis.ts";
+
 export const PE_PIPELINE_SCHEMA_VERSION = 4;
 export const PE_PDF_PARSER_NAME = "pdfjs-dist";
 export const PE_PDF_PARSER_VERSION = "6.3.289";
@@ -46,6 +48,7 @@ export interface PeIngestJobResult {
   files: PeIngestFileResult[];
   createdCount: number;
   failedCount: number;
+  analysis?: PeAnalysisResult;
 }
 
 export interface PeIngestJob {
@@ -59,6 +62,8 @@ export interface PeIngestJob {
   finishedAt?: string;
   workerPid?: number;
   heartbeatAt?: string;
+  stage?: "ingesting" | "analysis";
+  analysisProgress?: PeAnalysisProgress;
   result: PeIngestJobResult;
   warnings: string[];
 }
@@ -111,6 +116,7 @@ export interface PePdfRoleSignals {
   matchedKeywords: string[];
   numericLineRatio: number;
   tableLineRatio: number;
+  disclosureDensity: number;
   embeddedImageCount: number;
   largeEmbeddedImageCount: number;
   drawingOperatorCount: number;

@@ -12,6 +12,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { preparePeDocument } from "@earendil-works/pe-boot";
 import type { PeIngestFileResult, PeIngestJob } from "./contracts.ts";
+import { runPeClaimAnalysis } from "./analysis.ts";
 import { failPeIngestJob, readPeIngestJobFile, updatePeIngestJob } from "./jobs.ts";
 import {
   ensureDirectoryWithin,
@@ -82,6 +83,7 @@ export async function runPeIngestJob(jobFile: string): Promise<PeIngestJob> {
   process.once("SIGTERM", onTerm);
   process.once("SIGINT", onInterrupt);
   job.status = "running";
+  job.stage = "ingesting";
   job.workerPid = process.pid;
   job.heartbeatAt = new Date().toISOString();
   job.startedAt = new Date().toISOString();
@@ -180,6 +182,36 @@ export async function runPeIngestJob(jobFile: string): Promise<PeIngestJob> {
       updatePeIngestJob(paths, job);
     }
 
+    if (job.result.createdCount > 0) {
+      job.stage = "analysis";
+      job.message = "文档解析完成，正在分析机构观点与共识分歧。";
+      updatePeIngestJob(paths, job);
+      try {
+        job.result.analysis = await runPeClaimAnalysis({
+          collectionPath: paths.collectionPath,
+          datasetId: paths.datasetId,
+          docIds: job.result.files.filter((file) => file.status === "created").flatMap((file) => file.docId ? [file.docId] : []),
+          companyName: path.basename(paths.projectPath),
+          ingestedAt: job.startedAt,
+          signal: controller.signal,
+          onProgress: (event) => {
+            job.analysisProgress = event;
+            job.message = event.stage === "questions" ? "正在归并分析问题。"
+              : event.stage === "consensus" ? "正在汇总项目样本共识与分歧。"
+              : `正在抽取机构观点${event.document ? `（文档 ${event.document}/${event.documents}）` : ""}${event.window ? `（窗口 ${event.window}/${event.windows}）` : ""}。`;
+            updatePeIngestJob(paths, job);
+          },
+        });
+        if (["failed", "partial"].includes(job.result.analysis.status)) {
+          job.warnings.push("观点分析未完整完成；已入库文档可正常使用，旧的完整共识结果保留。");
+        }
+      } catch (error) {
+        controller.signal.throwIfAborted();
+        const message = failureMessage(error);
+        job.result.analysis = { status: "failed", errors: [message] };
+        job.warnings.push(`观点分析失败，文档入库不受影响：${message}`);
+      }
+    }
     try {
       updatePeProjectRegistry(paths);
     } catch (error) {
