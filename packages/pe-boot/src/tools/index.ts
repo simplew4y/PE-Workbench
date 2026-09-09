@@ -25,6 +25,7 @@ const memoSkillPath = join(toolsDirectory, "../../skills/pe-memo/SKILL.md");
 const researchNoteSkillPath = join(toolsDirectory, "../../skills/pe-research-note/SKILL.md");
 const generativeUiSkillPath = join(toolsDirectory, "../../skills/pe-generative-ui/SKILL.md");
 const valuationModelExplainerSkillPath = join(toolsDirectory, "../../skills/valuation-model-explainer/SKILL.md");
+const consensusDivergenceSkillPath = join(toolsDirectory, "../../skills/pe-consensus-divergence/SKILL.md");
 
 //系统提示词只注入pe核心检索工具相关的提示词，其他的不注入
 export const PE_TOOL_PROMPT_SNIPPETS = [
@@ -78,7 +79,7 @@ export function registerPeTools(pi: ExtensionAPI): void {
 	pi.registerTool(peRenderUiTool);
 	if (isPeConsensusEnabled()) pi.registerTool(peConsensusCardsTool);
 	pi.on("resources_discover", () => ({
-		skillPaths: [memoSkillPath, researchNoteSkillPath, valuationModelExplainerSkillPath, generativeUiSkillPath],
+		skillPaths: [memoSkillPath, researchNoteSkillPath, valuationModelExplainerSkillPath, generativeUiSkillPath, consensusDivergenceSkillPath],
 	}));
 }
 
