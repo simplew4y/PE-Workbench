@@ -1,0 +1,36 @@
+services:
+  pe-worker:
+    image: pe-workbench-worker:local
+    init: true
+    restart: unless-stopped
+    user: "1000:1000"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    cpus: 2
+    mem_limit: 4g
+    environment:
+      PE_WORKER_CAPABILITY: ${PE_WORKER_CAPABILITY:?set a per-user worker capability}
+    labels:
+      com.capoo.pe.worker: "true"
+      com.capoo.pe.user-id: ${PE_USER_ID:?set the authenticated user UUID}
+      com.capoo.pe.data-namespace: ${PE_DATA_NAMESPACE:?set the user data namespace UUID}
+    volumes:
+      - type: bind
+        source: ${PE_USER_HOME:?set the absolute per-user home directory}
+        target: /home/pi
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=256m
+      - /workspace/PE-Workbench-pi-web/.next/cache:rw,noexec,nosuid,nodev,size=256m
+    ports:
+      - "127.0.0.1::30141"
+    networks:
+      - pe-worker-internal
+
+networks:
+  pe-worker-internal:
+    name: ${PE_WORKER_NETWORK:?set the per-user Docker network name}
+    driver: bridge

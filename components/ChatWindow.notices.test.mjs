@@ -13,3 +13,15 @@ test("renders temporary notices once at the top center of the chat column", () =
     /position: "absolute",\s*top: 12,\s*left: 0,\s*right: isMobile \? 0 : CHAT_MINIMAP_WIDTH,[\s\S]*?justifyContent: "center",[\s\S]*?<NoticeShelf notices=\{notices\} floating \/>/,
   );
 });
+
+test("uses the application surface tokens for compact temporary notices", () => {
+  const noticeSource = source.slice(
+    source.indexOf("function NoticeShelf"),
+    source.indexOf("type ExtensionDialogRequest"),
+  );
+  assert.match(noticeSource, /minHeight: 42/);
+  assert.match(noticeSource, /background: "color-mix\(in srgb, var\(--bg-panel\)/);
+  assert.match(noticeSource, /color: "var\(--text\)"/);
+  assert.match(noticeSource, /fontSize: 13/);
+  assert.doesNotMatch(noticeSource, /fontSize: 18/);
+});

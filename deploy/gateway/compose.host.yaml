@@ -1,0 +1,25 @@
+services:
+  gateway:
+    build:
+      context: ../../..
+      dockerfile: PE-Workbench-pi-web/deploy/gateway/Dockerfile
+      args:
+        WORKER_IMAGE: pe-workbench-worker:local
+    image: pe-workbench-gateway:local
+    container_name: pe-workbench-gateway
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      - ${PE_GATEWAY_ENV_FILE:-gateway.env}
+    environment:
+      PE_DOCKER_COMMAND: docker
+      PE_WORKER_STORAGE: bind
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/lib/pe-workbench/gateway:/var/lib/pe-workbench/gateway
+      - /srv/pe-workbench/users:/srv/pe-workbench/users
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=128m
+      - /workspace/PE-Workbench-pi-web/.next/cache:rw,noexec,nosuid,nodev,size=128m
+    security_opt:
+      - no-new-privileges:true

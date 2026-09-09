@@ -1,5 +1,6 @@
 import type { AssistantContentBlock, AssistantMessage, ThinkingContent, ToolCallContent } from "./types";
 import { isGenerativeUiToolCall } from "./generative-ui/tool.ts";
+import { humanizePeModelError } from "./pe-model-errors.ts";
 
 interface DisplayOptions {
   isStreaming?: boolean;
@@ -21,7 +22,7 @@ export function getAssistantErrorMessage(
   options: DisplayOptions = {},
 ): string | null {
   if (options.isStreaming || message.stopReason !== "error") return null;
-  return message.errorMessage?.trim() || "Unknown provider error";
+  return humanizePeModelError(message.errorMessage?.trim()) || "Unknown provider error";
 }
 
 function isFinalAnswerBlock(block: AssistantContentBlock): boolean {

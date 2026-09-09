@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
-import { statSync, type Stats } from "fs";
+import { realpathSync, statSync, type Stats } from "fs";
 import { homedir } from "os";
 import { isAbsolute, resolve } from "path";
 import { allowFileRoot } from "@/lib/file-access";
 import { projectIdentityKey } from "@/lib/project-identity";
 import { resolveProject } from "@/lib/worktree";
+import { isPeUserPathAllowed } from "@/lib/pe-multi-user-paths";
 
 function normalizeCwd(cwd: string): string {
   if (cwd === "~") return homedir();
@@ -24,6 +25,9 @@ export async function POST(req: Request) {
     }
 
     const normalizedCwd = normalizeCwd(cwd);
+    if (!isPeUserPathAllowed(normalizedCwd)) {
+      return NextResponse.json({ error: "Path is outside the current PE user workspace" }, { status: 403 });
+    }
     let stat: Stats;
     try {
       stat = statSync(normalizedCwd);
@@ -35,11 +39,16 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: `Path is not a directory: ${cwd}` }, { status: 400 });
     }
 
-    allowFileRoot(normalizedCwd);
-    const project = await resolveProject(normalizedCwd);
+    const realCwd = realpathSync(normalizedCwd);
+
+    allowFileRoot(realCwd);
+    const project = await resolveProject(realCwd);
+    if (!isPeUserPathAllowed(project.projectRoot)) {
+      return NextResponse.json({ error: "Project root is outside the current PE user workspace" }, { status: 403 });
+    }
     return NextResponse.json({
       success: true,
-      cwd: normalizedCwd,
+      cwd: realCwd,
       projectRoot: project.projectRoot,
       projectKey: projectIdentityKey(project.projectRoot),
     });

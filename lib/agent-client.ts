@@ -38,12 +38,13 @@ export async function sendAgentCommand<T = unknown>(
     success?: boolean;
     data?: T;
     error?: string;
+    message?: string;
     code?: string;
     accepted?: boolean;
   };
   if (!res.ok || body.error) {
     throw new AgentCommandError(
-      body.error ?? `HTTP ${res.status}`,
+      body.error ?? body.message ?? `HTTP ${res.status}`,
       res.status,
       body.code,
       body.accepted,

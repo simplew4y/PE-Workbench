@@ -1,6 +1,6 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { buildPeSystemPrompt, registerPeTools } from "@earendil-works/pe-boot";
-import { createAgentSessionFromServices, createAgentSessionServices, getAgentDir, initTheme, SessionManager, SettingsManager, Theme } from "@earendil-works/pi-coding-agent";
+import { createAgentSessionFromServices, createAgentSessionServices, getAgentDir, initTheme, SessionManager, SettingsManager, Theme, type ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import { KeybindingsManager as TuiKeybindingsManager, TUI_KEYBINDINGS } from "@earendil-works/pi-tui";
 import { randomUUID } from "crypto";
 import { existsSync, realpathSync, writeFileSync } from "fs";
@@ -115,6 +115,9 @@ export interface RpcSessionStartOptions {
   toolNames?: string[];
   initialModel?: { provider: string; modelId: string };
   thinkingLevel?: ThinkingLevel;
+  extensionFactories?: ExtensionFactory[];
+  persistInitialModel?: boolean;
+  userName?: string;
 }
 
 const CODING_TOOL_NAMES = ["read", "bash", "edit", "write", "grep", "find", "ls"];
@@ -1585,7 +1588,7 @@ export async function startRpcSession(
   cwd: string | undefined,
   options: RpcSessionStartOptions = {},
 ): Promise<{ session: AgentSessionWrapper; realSessionId: string }> {
-  const { toolNames, initialModel, thinkingLevel } = options;
+  const { toolNames, initialModel, thinkingLevel, extensionFactories = [], persistInitialModel = true, userName } = options;
   const registry = getRegistry();
   const locks = getLocks();
 
@@ -1634,8 +1637,9 @@ export async function startRpcSession(
       agentDir,
       settingsManager,
       resourceLoaderOptions: {
-        systemPrompt: buildPeSystemPrompt(sessionCwd),
+        systemPrompt: buildPeSystemPrompt(sessionCwd, userName),
         extensionFactories: [
+          ...extensionFactories,
           registerPeTools,
           createProjectCommandBashExtension({
             cwd: sessionCwd,
@@ -1674,7 +1678,7 @@ export async function startRpcSession(
     const persistedPreferences = await persistExplicitStartupPreferences(
       services.settingsManager,
       {
-        ...(initialModel ? { model: initialModel } : {}),
+        ...(persistInitialModel && initialModel ? { model: initialModel } : {}),
         ...(thinkingLevel ? { thinkingLevel } : {}),
       },
       {

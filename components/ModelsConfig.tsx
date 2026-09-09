@@ -1,10 +1,12 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { AlertTriangle } from "lucide-react";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useI18n } from "@/hooks/useI18n";
 import type { ModelCatalogPreset, ModelCatalogRecommendation } from "@/lib/model-catalog";
 import type { DiscoveredModel } from "@/lib/model-discovery";
+import { PE_MODEL_SERVICE_CHANGED_EVENT } from "@/lib/pe-ui-events";
 import {
   hasModelCostDraftValue,
   modelCostToDraft,
@@ -1891,6 +1893,166 @@ function AddProviderPicker({
 
 // ── Main component ────────────────────────────────────────────────────────────
 
+interface PePlatformModel {
+  id: string;
+  display_name?: string;
+  provider?: string;
+  input_price_cny_per_million?: string;
+  output_price_cny_per_million?: string;
+  max_output_tokens?: number;
+  context_window?: number;
+}
+
+interface PeModelServiceState {
+  source: "platform" | "custom";
+  platform: {
+    available: boolean;
+    balance_cny: string;
+    models: PePlatformModel[];
+    default_model: string | null;
+    selected_model: string | null;
+    error: string | null;
+  };
+  custom: { configured: boolean | null };
+}
+
+function ModelSourceTabs({
+  value,
+  onChange,
+}: {
+  value: "platform" | "custom";
+  onChange: (value: "platform" | "custom") => void;
+}) {
+  return (
+    <div style={{ display: "flex", gap: 6, padding: "10px 18px", borderBottom: "1px solid var(--border)", background: "var(--bg-panel)" }}>
+      {(["platform", "custom"] as const).map((source) => (
+        <button
+          key={source}
+          type="button"
+          onClick={() => onChange(source)}
+          style={{
+            minWidth: 112,
+            padding: "7px 14px",
+            border: "1px solid var(--border)",
+            borderRadius: 7,
+            background: value === source ? "var(--accent)" : "var(--bg)",
+            color: value === source ? "#fff" : "var(--text-muted)",
+            cursor: "pointer",
+            fontSize: 13,
+            fontWeight: value === source ? 600 : 400,
+          }}
+        >
+          {source === "platform" ? "平台模型" : "自定义模型"}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function PlatformModelsDialog({
+  state,
+  selectedModel,
+  saving,
+  error,
+  onClose,
+  onSelect,
+  onShowCustom,
+  onSave,
+}: {
+  state: PeModelServiceState;
+  selectedModel: string;
+  saving: boolean;
+  error: string | null;
+  onClose: () => void;
+  onSelect: (model: string) => void;
+  onShowCustom: () => void;
+  onSave: () => void;
+}) {
+  const isMobile = useIsMobile();
+  const platformBalance = Number(state.platform.balance_cny);
+  const hasPlatformBalance = !Number.isFinite(platformBalance) || platformBalance > 0;
+  return (
+    <div
+      style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center" }}
+      onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}
+    >
+      <div style={{ width: isMobile ? "calc(100vw - 16px)" : 760, maxWidth: "calc(100vw - 16px)", height: isMobile ? "calc(100dvh - 16px)" : "72vh", maxHeight: "calc(100dvh - 16px)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 10, display: "flex", flexDirection: "column", boxShadow: "0 8px 32px rgba(0,0,0,0.18)", overflow: "hidden" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 18px", borderBottom: "1px solid var(--border)" }}>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}>模型设置</div>
+            <div style={{ marginTop: 3, fontSize: 11, color: "var(--text-muted)" }}>平台模型由管理员统一配置，使用时按平台规则计费</div>
+          </div>
+          <button type="button" onClick={onClose} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 20, lineHeight: 1, padding: "2px 6px" }}>×</button>
+        </div>
+        <ModelSourceTabs value="platform" onChange={(source) => { if (source === "custom") onShowCustom(); }} />
+        <div style={{ flex: 1, overflowY: "auto", padding: 20 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: 14, marginBottom: 14, border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg-panel)" }}>
+            <div>
+              <div style={{ fontSize: 12, color: "var(--text-muted)" }}>平台余额</div>
+              <div style={{ marginTop: 4, fontSize: 22, fontWeight: 700, color: "var(--text)" }}>¥{state.platform.balance_cny}</div>
+            </div>
+            <div style={{ fontSize: 12, color: state.platform.available ? "#16a34a" : "#ef4444" }}>
+              {state.platform.available ? `已开放 ${state.platform.models.length} 个模型` : "平台模型不可用"}
+            </div>
+          </div>
+          {!state.platform.available && (
+            <div style={{ padding: 14, borderRadius: 8, background: "rgba(239,68,68,0.09)", color: "#ef4444", fontSize: 13 }}>
+              {state.platform.error || "管理员尚未配置可用的平台模型"}
+            </div>
+          )}
+          {state.platform.available && !hasPlatformBalance && (
+            <div role="alert" style={{ display: "flex", gap: 10, marginBottom: 14, padding: 12, border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg-panel)", color: "var(--text)", fontSize: 12, lineHeight: 1.6 }}>
+              <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 1, color: "var(--accent)" }} aria-hidden="true" />
+              <span>
+                <strong style={{ display: "block", fontSize: 13 }}>平台余额不足</strong>
+                <span style={{ color: "var(--text-muted)" }}>请联系管理员充值，或切换到“自定义模型”并使用你自己的 API Key。</span>
+              </span>
+            </div>
+          )}
+          {state.platform.available && state.platform.models.length === 0 && (
+            <div style={{ padding: 28, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>管理员尚未开放平台模型</div>
+          )}
+          <div style={{ display: "grid", gap: 10 }}>
+            {state.platform.models.map((model) => {
+              const selected = selectedModel === model.id;
+              return (
+                <label
+                  key={model.id}
+                  style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: 11, padding: 14, border: `1px solid ${selected ? "var(--accent)" : "var(--border)"}`, borderRadius: 8, background: selected ? "var(--bg-selected)" : "var(--bg-panel)", cursor: "pointer" }}
+                >
+                  <input type="radio" name="platform-model" value={model.id} checked={selected} onChange={() => onSelect(model.id)} style={{ marginTop: 3, accentColor: "var(--accent)" }} />
+                  <span>
+                    <span style={{ display: "flex", alignItems: "center", gap: 7, color: "var(--text)", fontSize: 14, fontWeight: 600 }}>
+                      {model.display_name || model.id}
+                      {model.id === state.platform.default_model && <span style={{ padding: "2px 5px", borderRadius: 4, background: "rgba(22,163,74,0.12)", color: "#16a34a", fontSize: 10 }}>平台默认</span>}
+                    </span>
+                    <span style={{ display: "block", marginTop: 4, color: "var(--text-muted)", fontSize: 11 }}>{model.provider || "platform"} · {model.id}</span>
+                    <span style={{ display: "block", marginTop: 7, color: "var(--text-dim)", fontSize: 11 }}>
+                      输入 ¥{model.input_price_cny_per_million ?? "-"}/百万 tokens · 输出 ¥{model.output_price_cny_per_million ?? "-"}/百万 tokens
+                    </span>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 10, padding: "10px 18px", borderTop: "1px solid var(--border)" }}>
+          {error && <span style={{ flex: 1, color: "#ef4444", fontSize: 12 }}>{error}</span>}
+          <button type="button" onClick={onClose} style={{ padding: "6px 14px", background: "none", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text-muted)", cursor: "pointer", fontSize: 13 }}>取消</button>
+          <button
+            type="button"
+            disabled={saving || !state.platform.available || !selectedModel || !hasPlatformBalance}
+            onClick={onSave}
+            style={{ padding: "6px 16px", minWidth: 110, background: "var(--accent)", border: "none", borderRadius: 6, color: "#fff", cursor: saving || !hasPlatformBalance ? "default" : "pointer", opacity: saving || !state.platform.available || !selectedModel || !hasPlatformBalance ? 0.5 : 1, fontSize: 13, fontWeight: 600 }}
+          >
+            {saving ? "保存中…" : !hasPlatformBalance ? "余额不足" : "使用此模型"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ModelsConfig({ onClose }: { onClose: () => void }) {
   const isMobile = useIsMobile();
   const { t } = useI18n();
@@ -1903,6 +2065,11 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
   const [oauthProviders, setOauthProviders] = useState<OAuthProvider[]>([]);
   const [apiKeyProviders, setApiKeyProviders] = useState<ApiKeyProvider[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [modelService, setModelService] = useState<PeModelServiceState | null>(null);
+  const [sourceView, setSourceView] = useState<"platform" | "custom">("custom");
+  const [platformModel, setPlatformModel] = useState("");
+  const [serviceSaving, setServiceSaving] = useState(false);
+  const [serviceError, setServiceError] = useState<string | null>(null);
 
   const loadOAuthProviders = useCallback(() => {
     fetch("/api/auth/providers")
@@ -1944,6 +2111,49 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
       .finally(() => setLoading(false));
     refreshAuthProviders();
   }, [refreshAuthProviders]);
+
+  useEffect(() => {
+    let active = true;
+    void fetch("/api/runtime-mode", { cache: "no-store" })
+      .then((response) => response.json() as Promise<{ multi_user?: boolean }>)
+      .then(async (runtimeMode) => {
+        if (!runtimeMode.multi_user) return null;
+        const response = await fetch("/api/model-service", { cache: "no-store" });
+        const data = await response.json() as PeModelServiceState & { message?: string };
+        if (!response.ok) throw new Error(data.message || `HTTP ${response.status}`);
+        return data;
+      })
+      .then((state) => {
+        if (!active || !state) return;
+        setModelService(state);
+        setSourceView(state.source);
+        setPlatformModel(state.platform.selected_model || state.platform.default_model || state.platform.models[0]?.id || "");
+      })
+      .catch((error) => {
+        if (active) setServiceError(error instanceof Error ? error.message : String(error));
+      });
+    return () => { active = false; };
+  }, []);
+
+  const savePeModelSource = useCallback(async (
+    source: "platform" | "custom",
+    model?: string,
+  ): Promise<PeModelServiceState> => {
+    const response = await fetch("/api/model-service", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source, ...(model ? { model } : {}) }),
+    });
+    const data = await response.json() as PeModelServiceState & { message?: string };
+    if (!response.ok) throw new Error(data.message || `HTTP ${response.status}`);
+    setModelService(data);
+    setSourceView(data.source);
+    setPlatformModel(data.platform.selected_model || data.platform.default_model || data.platform.models[0]?.id || "");
+    window.dispatchEvent(new CustomEvent(PE_MODEL_SERVICE_CHANGED_EVENT, {
+      detail: { source: data.source, balanceCny: data.platform.balance_cny },
+    }));
+    return data;
+  }, []);
 
   const addCustomProvider = useCallback(() => {
     let finalName = "new-provider";
@@ -2043,14 +2253,19 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
         body: JSON.stringify(config),
       });
       const d = await res.json() as { success?: boolean; error?: string };
-      if (!res.ok || d.error) setSaveError(d.error ?? `HTTP ${res.status}`);
-      else { setSavedOk(true); setTimeout(() => setSavedOk(false), 2000); }
+      if (!res.ok || d.error) {
+        setSaveError(d.error ?? `HTTP ${res.status}`);
+      } else {
+        if (modelService) await savePeModelSource("custom");
+        setSavedOk(true);
+        setTimeout(() => setSavedOk(false), 2000);
+      }
     } catch (e) {
       setSaveError(String(e));
     } finally {
       setSaving(false);
     }
-  }, [config]);
+  }, [config, modelService, savePeModelSource]);
 
   const providers = Object.entries(config.providers ?? {});
   const activeOAuth = oauthProviders.filter((p) => p.loggedIn);
@@ -2099,6 +2314,34 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
     );
   })();
 
+  if (modelService && sourceView === "platform") {
+    return (
+      <PlatformModelsDialog
+        state={modelService}
+        selectedModel={platformModel}
+        saving={serviceSaving}
+        error={serviceError}
+        onClose={onClose}
+        onSelect={(model) => {
+          setPlatformModel(model);
+          setServiceError(null);
+        }}
+        onShowCustom={() => {
+          setSourceView("custom");
+          setServiceError(null);
+        }}
+        onSave={() => {
+          setServiceSaving(true);
+          setServiceError(null);
+          void savePeModelSource("platform", platformModel)
+            .then(() => onClose())
+            .catch((error) => setServiceError(error instanceof Error ? error.message : String(error)))
+            .finally(() => setServiceSaving(false));
+        }}
+      />
+    );
+  }
+
   return (
     <>
     <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center" }}
@@ -2113,6 +2356,23 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
           </div>
           <button onClick={onClose} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 20, lineHeight: 1, padding: "2px 6px" }}>×</button>
         </div>
+
+        {modelService && (
+          <ModelSourceTabs
+            value="custom"
+            onChange={(source) => {
+              if (source === "platform") {
+                setSourceView("platform");
+                setServiceError(null);
+              }
+            }}
+          />
+        )}
+        {serviceError && !modelService && (
+          <div style={{ padding: "8px 18px", borderBottom: "1px solid var(--border)", color: "#ef4444", fontSize: 12 }}>
+            平台模型信息加载失败：{serviceError}
+          </div>
+        )}
 
         {/* Body */}
         <div style={{ flex: 1, display: "flex", flexDirection: isMobile ? "column" : "row", overflow: "hidden" }}>

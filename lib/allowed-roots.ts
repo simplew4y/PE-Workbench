@@ -1,4 +1,5 @@
 import { toSlashPath } from "./paths";
+import { assertPeUserPathAllowed } from "./pe-multi-user-paths";
 
 // In-memory roots that should be browsable in addition to roots derived from
 // persisted sessions. Stored on globalThis so Next.js hot-reload keeps them.
@@ -25,6 +26,7 @@ export function getAdditionalAllowedRoots(): Set<string> {
 
 export function allowFileRoot(root: string): void {
   if (!root) return;
+  assertPeUserPathAllowed(root);
   const normalizedRoot = normalizeSlashes(root);
   getAdditionalAllowedRoots().add(normalizedRoot);
   globalThis.__piAllowedRootsCache?.roots.add(normalizedRoot);

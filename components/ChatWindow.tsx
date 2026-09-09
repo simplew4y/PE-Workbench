@@ -886,11 +886,11 @@ function NoticeShelf({ notices, floating = false }: { notices: NoticeItem[]; flo
     >
       {notices.map((notice, index) => {
         const color = notice.type === "error"
-          ? "#ef4444"
+          ? "#f87171"
           : notice.type === "warning"
-            ? "#d97706"
+            ? "#f59e0b"
             : notice.type === "success"
-              ? "#10b981"
+              ? "#34d399"
               : "var(--accent)";
         return (
           <div
@@ -899,28 +899,28 @@ function NoticeShelf({ notices, floating = false }: { notices: NoticeItem[]; flo
             style={{
               display: "flex",
               alignItems: "center",
-              gap: 10,
-              minHeight: 60,
-              height: 60,
-              maxHeight: 60,
+              gap: 9,
+              minHeight: 42,
+              maxHeight: 88,
               marginBottom: index === notices.length - 1 ? 0 : 6,
               overflow: "hidden",
-              borderRadius: 14,
-              border: "1px solid color-mix(in srgb, var(--border) 70%, transparent)",
-              background: "var(--bg)",
-              color: "var(--text-muted)",
+              borderRadius: 8,
+              border: `1px solid color-mix(in srgb, ${color} 22%, var(--border))`,
+              borderLeft: `3px solid ${color}`,
+              background: "color-mix(in srgb, var(--bg-panel) 94%, var(--bg))",
+              color: "var(--text)",
               width: "fit-content",
-              maxWidth: "min(100%, 620px)",
+              maxWidth: "min(calc(100% - 20px), 520px)",
               boxShadow: floating
-                ? "0 1px 2px rgba(15,23,42,0.05), 0 10px 28px -14px rgba(15,23,42,0.24)"
-                : "0 1px 2px rgba(15,23,42,0.04), 0 8px 24px -12px rgba(15,23,42,0.10)",
-              fontSize: 18,
-              lineHeight: 1.45,
+                ? "0 10px 28px -16px rgba(0,0,0,0.45)"
+                : "0 8px 22px -16px rgba(0,0,0,0.28)",
+              fontSize: 13,
+              lineHeight: 1.4,
               transformOrigin: "top center",
               animation: notice.exiting
                 ? "notice-shelf-out 0.18s ease-in forwards"
                 : "notice-shelf-in 0.18s ease-out both",
-              padding: "0 12px",
+              padding: "9px 11px",
             }}
           >
             <span
@@ -932,7 +932,7 @@ function NoticeShelf({ notices, floating = false }: { notices: NoticeItem[]; flo
                 flexShrink: 0,
               }}
             />
-            <span style={{ padding: "14px 0", minWidth: 0, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            <span style={{ minWidth: 0, maxWidth: "100%", overflow: "hidden", display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 3 }}>
               {notice.message}
             </span>
           </div>

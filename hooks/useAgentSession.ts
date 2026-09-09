@@ -13,7 +13,7 @@ import type {
 } from "@/lib/types";
 import { isBlockingExtensionUiRequest } from "@/lib/browser-notifications";
 import { normalizeToolCalls } from "@/lib/normalize";
-import { isPromptRejectedError, sendAgentCommand } from "@/lib/agent-client";
+import { AgentCommandError, isPromptRejectedError, sendAgentCommand } from "@/lib/agent-client";
 import { clearDraft, rekeyDraft, restoreDraftSubmission } from "@/lib/draft-store";
 import { getPreferredToolPreset, setPreferredToolPreset } from "@/lib/tool-preset-preference";
 import { getToolNamesForPreset, type ToolEntry, type ToolPreset } from "@/lib/tool-presets";
@@ -22,6 +22,12 @@ import type { SessionStatsInfo } from "@/lib/pi-types";
 import { userMessageKey } from "@/lib/prompt-recovery";
 import { AgentEventConnection } from "@/lib/agent-event-connection";
 import { getToolExecutionProgress } from "@/lib/tool-execution-progress";
+import { ensurePePromptAvailable } from "@/lib/pe-account-client";
+import {
+  humanizePeModelError,
+  isPeInsufficientBalanceError,
+} from "@/lib/pe-model-errors";
+import { PE_OPEN_MODELS_EVENT } from "@/lib/pe-ui-events";
 import {
   CHAT_SCROLL_REATTACH_TOLERANCE,
   CHAT_SCROLL_TAIL_TOLERANCE,
@@ -542,12 +548,23 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   const loadTools = useCallback(async (sid: string) => {
     try {
+      // Loading a running session's tool selection is read-only. Do not ask the
+      // gateway to hydrate platform credentials when the user already has a
+      // known balance block; that would turn routine page startup into a 402.
+      try {
+        await ensurePePromptAvailable();
+      } catch (preflightError) {
+        if (isPeInsufficientBalanceError(preflightError)) return;
+      }
       const tools = await sendAgentCommand<ToolEntry[]>(sid, { type: "get_tools" });
       if (tools) {
         const { getPresetFromTools } = await import("@/lib/tool-presets");
         setToolPresetState(getPresetFromTools(tools));
       }
     } catch (e) {
+      // A balance change can race the preflight. It is an expected account
+      // state already surfaced by the account toast, not a console exception.
+      if (e instanceof AgentCommandError && e.status === 402) return;
       console.error("Failed to load tools:", e);
     }
   }, [setToolPresetState]);
@@ -612,7 +629,15 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       sessionIdRef.current = realId;
       if (result.model && newSessionModelOverrideRef.current === selectedModel) {
         setPendingModel(result.model);
-        if (!selectedModel) setNewSessionDefaultModel(result.model);
+        if (selectedModel) {
+          // The server response is canonical. Keeping the optimistic selection
+          // here can make the composer claim DeepSeek while the session actually
+          // started with a fallback model.
+          newSessionModelOverrideRef.current = result.model;
+          setNewSessionModel(result.model);
+        } else {
+          setNewSessionDefaultModel(result.model);
+        }
       }
       if (
         result.thinkingLevel
@@ -1102,7 +1127,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         }
         break;
       case "prompt_error":
-        addNotice({ type: "error", message: (event.errorMessage as string | undefined) ?? "Command failed" });
+        addNotice({
+          type: "error",
+          message: humanizePeModelError(
+            (event.errorMessage as string | undefined) ?? "Command failed",
+          ),
+        });
         break;
       case "extension_error":
         addNotice({
@@ -1223,7 +1253,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         });
         break;
       case "auto_retry_start":
-        setRetryInfo({ attempt: event.attempt as number, maxAttempts: event.maxAttempts as number, errorMessage: event.errorMessage as string | undefined });
+        setRetryInfo({
+          attempt: event.attempt as number,
+          maxAttempts: event.maxAttempts as number,
+          errorMessage: event.errorMessage
+            ? humanizePeModelError(event.errorMessage)
+            : undefined,
+        });
         break;
       case "auto_retry_end":
         setRetryInfo(null);
@@ -1273,6 +1309,20 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       return;
     }
 
+    if (!isSlashCommandPrompt) {
+      try {
+        await ensurePePromptAvailable();
+      } catch (preflightError) {
+        const errorNotice = humanizePeModelError(preflightError);
+        addNotice({ type: "error", message: errorNotice });
+        restoreSubmission(message, images, composerDraftKey, documents);
+        if (isPeInsufficientBalanceError(preflightError)) {
+          window.dispatchEvent(new CustomEvent(PE_OPEN_MODELS_EVENT));
+        }
+        return;
+      }
+    }
+
     const promptRunId = promptRunIdRef.current + 1;
     cancelEventStreamGrace();
     rpcPromptPendingRef.current = true;
@@ -1307,11 +1357,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
         if (!sid) throw new Error("Unable to create a session for the prompt");
         sentSessionId = sid;
-        if (selectedModel) {
-          setPendingModel(selectedModel);
-          if (existingSid) {
-            await sendAgentCommand(sid, { type: "set_model", provider: selectedModel.provider, modelId: selectedModel.modelId });
-          }
+        if (selectedModel && existingSid) {
+          await sendAgentCommand(sid, { type: "set_model", provider: selectedModel.provider, modelId: selectedModel.modelId });
         }
         await ensureEventsConnected(sid);
         promptRequestStarted = true;
@@ -1355,7 +1402,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           ? prev
           : [...prev.slice(0, optimisticIndex), ...prev.slice(optimisticIndex + 1)];
       });
-      addNotice({ type: "error", message: e instanceof Error ? e.message : String(e) });
+      addNotice({ type: "error", message: humanizePeModelError(e) });
       restoreSubmission(message, images, composerDraftKey, documents);
       optimisticUserMessageKeyRef.current = null;
       // Rejection only describes this submission. Another tab or an event we
