@@ -61,6 +61,7 @@ describe("PE Research Note tool", () => {
 		const result = loadSkillsFromDir({ dir: join(packageDirectory, "skills"), source: "test" });
 		expect(result.diagnostics).toEqual([]);
 		expect(result.skills.map((skill) => skill.name)).toEqual([
+			"pe-consensus-divergence",
 			"pe-generative-ui",
 			"pe-memo",
 			"pe-research-note",

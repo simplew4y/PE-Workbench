@@ -13,16 +13,20 @@ describe("PE system prompt", () => {
 			vi.stubEnv("PE_CONSENSUS_ENABLED", value);
 			const enabled = value?.trim() === "1";
 			const registered: string[] = [];
+			let discover: (() => { skillPaths: string[] }) | undefined;
 			const extension = {
 				registerTool(tool: { name: string }) {
 					registered.push(tool.name);
 				},
-				on() {},
+				on(event: string, handler: () => { skillPaths: string[] }) {
+					if (event === "resources_discover") discover = handler;
+				},
 			} as unknown as ExtensionAPI;
 			registerPeTools(extension);
 			expect(isPeConsensusEnabled()).toBe(enabled);
 			expect(registered.includes("pe_consensus_cards")).toBe(enabled);
 			expect(buildPeSystemPrompt("/workspace").includes("- pe_consensus_cards:")).toBe(enabled);
+			expect(discover?.().skillPaths.some((path) => path.includes("pe-consensus-divergence"))).toBe(enabled);
 			expect(registered).toEqual(expect.arrayContaining(["pe_pdf_list", "pe_pdf_search", "pe_excel_range"]));
 		},
 	);
@@ -66,9 +70,8 @@ describe("PE system prompt", () => {
 		for (const section of ["模型逻辑框架", "核心驱动因素", "盈利预测与敏感性分析", "模型核心风险点"]) {
 			expect(prompt).toContain(section);
 		}
-		expect(prompt).toContain("Default to prose, even for complex research questions");
-		expect(prompt).toContain("there is no component quota");
-		expect(prompt).toContain("never hide essential conclusions behind clicks");
+		expect(prompt).toContain("No UI quota: complex questions can remain prose");
+		expect(prompt).toContain("interaction is optional and task-driven");
 		expect(prompt).toContain("not limited to 3-5 lines or 250 Chinese characters");
 		expect(prompt).toContain("answer narrow questions directly");
 		expect(prompt).toContain("verified inputs, the applicable formula, consistent units");

@@ -40,6 +40,7 @@ const PE_BASE_TOOLS = [
 ] as const;
 
 //【提示词】工具列表：基础工具和当前启用的 PE 工具。
+// 计算放在函数里，这样按开关关闭的工具不会出现在提示词中。
 export function buildToolsList(): string {
 	return [...PE_BASE_TOOLS, ...pePromptSnippets()]
 		.map(({ name, description }) => `- ${name}: ${description}`)

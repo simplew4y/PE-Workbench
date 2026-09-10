@@ -28,8 +28,9 @@ const memoSkillPath = join(toolsDirectory, "../../skills/pe-memo/SKILL.md");
 const researchNoteSkillPath = join(toolsDirectory, "../../skills/pe-research-note/SKILL.md");
 const generativeUiSkillPath = join(toolsDirectory, "../../skills/pe-generative-ui/SKILL.md");
 const valuationSkillPath = join(toolsDirectory, "../../skills/pe-valuation-model-explainer/SKILL.md");
+const consensusSkillPath = join(toolsDirectory, "../../skills/pe-consensus-divergence/SKILL.md");
 
-//系统提示词只注入pe核心检索工具相关的提示词，其他的不注入
+// 系统提示词列出常驻能力；Memo、Research Note 的生成流程留在对应 Skill 中。
 export const PE_TOOL_PROMPT_SNIPPETS = [
 	// 旧版 Chunk 检索保留在源码中便于追溯，但不再写入系统提示词。
 	// { name: "pe_dataset_search", description: PE_DATASET_SEARCH_PROMPT_SNIPPET },
@@ -78,7 +79,14 @@ export function registerPeTools(pi: ExtensionAPI): void {
 	pi.registerTool(peResearchNoteSaveTool);
 	pi.registerTool(peRenderUiTool);
 	pi.on("resources_discover", () => ({
-		skillPaths: [memoSkillPath, researchNoteSkillPath, generativeUiSkillPath, valuationSkillPath],
+		// 关闭共识时也隐藏 Skill，避免提示模型调用未注册的工具。
+		skillPaths: [
+			memoSkillPath,
+			researchNoteSkillPath,
+			generativeUiSkillPath,
+			valuationSkillPath,
+			...(isPeConsensusEnabled() ? [consensusSkillPath] : []),
+		],
 	}));
 }
 
