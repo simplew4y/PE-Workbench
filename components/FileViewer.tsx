@@ -16,6 +16,7 @@ import {
   isAudioPath,
   isDocumentPreviewPath,
   isImagePath,
+  type TextPreviewPage,
 } from "@/lib/file-types";
 import { encodeFilePathForApi, getFileDirectory, getFileName, getRelativeFilePath } from "@/lib/file-paths";
 import { resolveLocalFileHref } from "@/lib/file-links";
@@ -53,6 +54,7 @@ interface FileData {
   content: string;
   language: string;
   size: number;
+  textPage?: TextPreviewPage;
 }
 
 const DISPLAY_MODE_LABELS: Record<DisplayMode, string> = {
@@ -974,6 +976,9 @@ function TextFileViewer({
   const { isDark } = useTheme();
   const { t } = useI18n();
   const [data, setData] = useState<FileData | null>(null);
+  const isPagedText = (data?.textPage?.pageCount ?? 1) > 1;
+  const textPageRef = useRef(initialState?.textPage ?? 0);
+  const [pageLoading, setPageLoading] = useState(false);
   const [gitDiff, setGitDiff] = useState<GitFileDiffResponse | null>(null);
   const [gitDiffLoading, setGitDiffLoading] = useState(false);
   const [gitDiffResolved, setGitDiffResolved] = useState(false);
@@ -1000,6 +1005,7 @@ function TextFileViewer({
     wrapLines: initialWrapLines,
     scrollTop: initialScrollTop,
     scrollLeft: initialScrollLeft,
+    textPage: textPageRef.current,
   });
   const onStateChangeRef = useRef(onStateChange);
   const [selectedLineRange, setSelectedLineRange] = useState<SelectedLineRange | null>(null);
@@ -1025,9 +1031,11 @@ function TextFileViewer({
       wrapLines: initialWrapLines,
       scrollTop: initialScrollTop,
       scrollLeft: initialScrollLeft,
+      textPage: initialState?.textPage ?? 0,
     };
 
     viewerStateRef.current = nextState;
+    textPageRef.current = nextState.textPage ?? 0;
     scrollRestorePendingRef.current = true;
     autoDiffAppliedRef.current = false;
     setDisplayMode(requestedInitialDisplayMode);
@@ -1043,11 +1051,12 @@ function TextFileViewer({
     initialWrapLines,
     initialScrollTop,
     initialScrollLeft,
+    initialState?.textPage,
   ]);
 
   const fetchContent = useCallback((filePath: string) => {
     const requestId = ++contentRequestRef.current;
-    return fetch(getFileApiUrl(filePath, "read", sourceSessionId))
+    return fetch(getFileApiUrl(filePath, "read", sourceSessionId, { page: textPageRef.current }))
       .then((r) => r.json())
       .then((d: FileData & { error?: string }) => {
         if (requestId !== contentRequestRef.current) return null;
@@ -1056,6 +1065,8 @@ function TextFileViewer({
           return null;
         }
         setError(null);
+        textPageRef.current = d.textPage?.page ?? 0;
+        viewerStateRef.current.textPage = textPageRef.current;
         setData(d);
         return d;
       })
@@ -1065,6 +1076,19 @@ function TextFileViewer({
         return null;
       });
   }, [sourceSessionId]);
+
+  const changeTextPage = async (page: number) => {
+    textPageRef.current = page;
+    setPageLoading(true);
+    const next = await fetchContent(filePath);
+    if (next && contentRef.current) {
+      contentRef.current.scrollTop = 0;
+      contentRef.current.scrollLeft = 0;
+      viewerStateRef.current.scrollTop = 0;
+      viewerStateRef.current.scrollLeft = 0;
+    }
+    setPageLoading(false);
+  };
 
   const fetchGitDiff = useCallback(async (targetPath: string) => {
     const requestId = ++gitDiffRequestRef.current;
@@ -1161,13 +1185,18 @@ function TextFileViewer({
     // mode already; the source tab stays one click away. A restored choice or
     // explicit mode hint always wins over this default.
     if (
-      defaultPreviewEligibleRef.current
+      !isPagedText
+      && defaultPreviewEligibleRef.current
       && (data?.language === "markdown" || data?.language === "html")
     ) {
       defaultPreviewEligibleRef.current = false;
       updateDisplayMode("preview");
     }
-  }, [data?.language, updateDisplayMode]);
+  }, [data?.language, isPagedText, updateDisplayMode]);
+
+  useEffect(() => {
+    if (isPagedText && displayMode === "preview") updateDisplayMode("source");
+  }, [displayMode, isPagedText, updateDisplayMode]);
 
   const hasGitDiff = gitDiff?.supported === true && typeof gitDiff.patch === "string";
   const isDeletedDiff = hasGitDiff && gitDiff.status === "deleted";
@@ -1186,13 +1215,13 @@ function TextFileViewer({
   }, [requestedInitialDisplayMode, hasGitDiff, updateDisplayMode]);
 
   const markdownPreview = useMemo(
-    () => (data?.language === "markdown" ? normalizeDisplayMath(data.content) : ""),
-    [data],
+    () => (!isPagedText && data?.language === "markdown" ? normalizeDisplayMath(data.content) : ""),
+    [data, isPagedText],
   );
 
   const frontmatter = useMemo(
-    () => (data?.language === "markdown" ? parseFrontmatter(data.content) : null),
-    [data],
+    () => (!isPagedText && data?.language === "markdown" ? parseFrontmatter(data.content) : null),
+    [data, isPagedText],
   );
 
   useEffect(() => {
@@ -1287,7 +1316,7 @@ function TextFileViewer({
   const content = data?.content ?? "";
   const isHtml = language === "html";
   const isMarkdown = language === "markdown";
-  const hasPreview = isHtml || isMarkdown;
+  const hasPreview = !isPagedText && (isHtml || isMarkdown);
   const markdownDirectory = getFileDirectory(filePath);
   const lines = content.split("\n");
   const effectiveDisplayMode = isDeletedDiff ? "diff" : displayMode;
@@ -1417,6 +1446,24 @@ function TextFileViewer({
       </div>
 
       {/* Content area */}
+      {isPagedText && data?.textPage && (
+        <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-[var(--border)] px-3 py-2 text-xs text-[var(--text-muted)]">
+          <span>{t("files.textPreviewPage", { page: data.textPage.page + 1, count: data.textPage.pageCount })}</span>
+          <span>{t("files.largeTextPreview")}</span>
+          <div className="ml-auto flex gap-2">
+            <button type="button" disabled={pageLoading || data.textPage.page === 0}
+              className="rounded border border-[var(--border)] px-2 py-1 disabled:opacity-40"
+              onClick={() => void changeTextPage((data.textPage?.page ?? 0) - 1)}>
+              {t("files.previousPage")}
+            </button>
+            <button type="button" disabled={pageLoading || data.textPage.page + 1 >= data.textPage.pageCount}
+              className="rounded border border-[var(--border)] px-2 py-1 disabled:opacity-40"
+              onClick={() => void changeTextPage((data.textPage?.page ?? 0) + 1)}>
+              {t("files.nextPage")}
+            </button>
+          </div>
+        </div>
+      )}
       <div
         ref={contentRef}
         className="file-viewer-content"
@@ -1428,6 +1475,10 @@ function TextFileViewer({
       >
         {effectiveDisplayMode === "diff" && hasGitDiff ? (
           <DiffView patch={gitDiff.patch!} />
+        ) : isPagedText ? (
+          <pre style={{ ...FILE_CODE_STYLE, margin: 0, padding: "12px 16px", whiteSpace: wrapLines ? "pre-wrap" : "pre", overflowWrap: wrapLines ? "anywhere" : "normal" }}>
+            {content}
+          </pre>
         ) : isHtml && effectiveDisplayMode === "preview" ? (
           <iframe
             srcDoc={content}

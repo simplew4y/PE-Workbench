@@ -1,0 +1,29 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "declaration": false,
+    "incremental": false,
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "noEmit": false,
+    "outDir": "dist/pe-ingest",
+    "rootDir": "lib/pe-ingest",
+    "rewriteRelativeImportExtensions": true,
+    "sourceMap": false,
+    "target": "ES2022"
+  },
+  "include": [
+    "lib/pe-ingest/contracts.ts",
+    "lib/pe-ingest/analysis.ts",
+    "lib/pe-ingest/jobs.ts",
+    "lib/pe-ingest/paths.ts",
+    "lib/pe-ingest/repository.ts",
+    "lib/pe-ingest/schema.ts",
+    "lib/pe-ingest/worker.mts",
+    "lib/pe-ingest/pdf/*.ts"
+  ],
+  "exclude": [
+    "lib/pe-ingest/**/*.test.mjs"
+  ]
+}

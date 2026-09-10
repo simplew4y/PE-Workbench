@@ -17,6 +17,15 @@ function record(value: unknown, field: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+function parseStringifiedComponent(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return value;
+  }
+}
+
 function text(value: unknown, field: string, optional = false): string | undefined {
   if (value === undefined && optional) return undefined;
   if (typeof value !== "string" || !value.trim() || value.length > MAX_TEXT) throw new Error(`${field} must be a non-empty string`);
@@ -323,7 +332,7 @@ export function parseGenerativeUiSurface(value: unknown): GenerativeUiParseResul
     const surface: GenerativeUiSurface = {
       version: 1,
       surface_id: text(input.surface_id, "surface_id", true),
-      component: parseComponent(input.component),
+      component: parseComponent(parseStringifiedComponent(input.component)),
       ...(input.presentation === undefined ? {} : { presentation: parsePresentation(input.presentation) }),
     };
     return { success: true, surface };

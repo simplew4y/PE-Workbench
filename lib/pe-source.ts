@@ -1,3 +1,5 @@
+import { parseSourceId } from "@earendil-works/pe-boot/source";
+
 export const PE_SOURCE_HASH = "#pe-source";
 
 export interface PeSourceReference {
@@ -10,7 +12,13 @@ export interface PeSourceCell {
   col_index: number;
   display_value?: string;
   raw_value?: string;
+  numeric_value?: number;
   formula?: string;
+  cached_value?: string;
+  number_format?: string;
+  formula_type?: string;
+  formula_cache_status?: string;
+  is_formula?: boolean;
   row_label?: string;
   col_label?: string;
   period?: string;
@@ -26,9 +34,14 @@ export interface PeExcelGridWindow {
 
 interface PeSourceBase {
   dataset_id: string;
+  doc_id: string;
+  version_no?: number;
   evidence_id: string;
   citation: string;
   filename: string;
+  markdown_citation?: string;
+  truncated?: boolean;
+  warnings?: string[];
 }
 
 export interface PePdfSource extends PeSourceBase {
@@ -72,7 +85,7 @@ export function parsePeSourceHref(href: string | undefined): PeSourceReference |
   }
   if (!suffix.startsWith("?")) return null;
   const evidenceId = new URLSearchParams(suffix.slice(1)).get("evidence_id")?.trim();
-  if (!evidenceId || !/^(?:chunk|fact|cell):[^\s:]+$/u.test(evidenceId)) return null;
+  if (!evidenceId || (!/^(?:page|chunk|fact|cell):[^\s:]+$/u.test(evidenceId) && !parseSourceId(evidenceId))) return null;
   return { evidenceId };
 }
 

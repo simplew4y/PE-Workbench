@@ -11,7 +11,6 @@ import {
 import {
   DOCX_PREVIEW_MAX_BYTES,
   IMAGE_PREVIEW_MAX_BYTES,
-  TEXT_PREVIEW_MAX_BYTES,
   documentPreviewKind,
   getAudioMime,
   getDocumentMime,
@@ -28,6 +27,7 @@ import {
 } from "@/lib/file-upload";
 import { parseFormDataWithinLimit, RequestBodyTooLargeError } from "@/lib/bounded-form-data";
 import { samePath } from "@/lib/paths";
+import { BinaryTextPreviewError, parseTextPreviewPage, readTextFilePreview } from "@/lib/text-file-preview";
 
 const IGNORED_NAMES = new Set([
   "node_modules", ".git", ".next", "dist", "build", "__pycache__",
@@ -472,12 +472,11 @@ export async function GET(
       if (documentMime) {
         return streamFile(filePath, stat, documentMime, request.headers.get("range"));
       }
-      if (stat.size > TEXT_PREVIEW_MAX_BYTES) {
-        return NextResponse.json({ error: "File too large for preview (>256KB)" }, { status: 413 });
-      }
-      const content = fs.readFileSync(filePath, "utf-8");
+      const page = parseTextPreviewPage(request.nextUrl.searchParams.get("page"));
+      if (page === null) return NextResponse.json({ error: "Invalid text preview page" }, { status: 400 });
+      const preview = await readTextFilePreview(filePath, page);
       const language = getLanguage(filePath);
-      return NextResponse.json({ content, language, size: stat.size });
+      return NextResponse.json({ ...preview, language });
     }
 
     if (type === "download") {
@@ -635,6 +634,9 @@ export async function GET(
 
     return NextResponse.json({ entries, path: filePath });
   } catch (error) {
+    if (error instanceof BinaryTextPreviewError) {
+      return NextResponse.json({ error: error.message }, { status: 415 });
+    }
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }
 }

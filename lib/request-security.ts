@@ -37,9 +37,34 @@ function configuredHostnamesFromEnvironment(): string[] {
   ].filter((value): value is string => Boolean(value?.trim()));
 }
 
+function configuredOriginsFromEnvironment(): string[] {
+  return process.env.PI_WEB_ALLOWED_ORIGINS?.split(",")
+    .filter((value): value is string => Boolean(value?.trim()))
+    ?? [];
+}
+
 function canonicalOrigin(value: string): string | null {
   try {
     return new URL(value).origin;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeConfiguredOrigin(value: string): string | null {
+  try {
+    const parsed = new URL(value.trim());
+    if (
+      (parsed.protocol !== "http:" && parsed.protocol !== "https:")
+      || parsed.username
+      || parsed.password
+      || parsed.pathname !== "/"
+      || parsed.search
+      || parsed.hash
+    ) {
+      return null;
+    }
+    return parsed.origin;
   } catch {
     return null;
   }
@@ -88,14 +113,28 @@ export function isApiRequestHostAllowed(
 }
 
 /** Reject browser cross-site API requests while preserving non-browser clients. */
-export function isApiRequestOriginAllowed(request: Request): boolean {
+export function isApiRequestOriginAllowed(
+  request: Request,
+  configuredOrigins = configuredOriginsFromEnvironment(),
+): boolean {
   const origin = request.headers.get("origin");
   const fetchSite = request.headers.get("sec-fetch-site");
   if (fetchSite === "cross-site") return false;
   if (!origin) return true;
 
   const requestOrigin = getRequestOrigin(request);
-  return requestOrigin !== null && canonicalOrigin(origin) === requestOrigin;
+  const browserOrigin = canonicalOrigin(origin);
+  if (requestOrigin !== null && browserOrigin === requestOrigin) return true;
+  if (!browserOrigin) return false;
+
+  const requestHost = request.headers.get("host");
+  const requestHostname = requestHost ? hostnameFromAuthority(requestHost) : null;
+  const browserHostname = normalizeHostname(new URL(browserOrigin).hostname);
+  if (!requestHostname || browserHostname !== requestHostname) return false;
+
+  return configuredOrigins.some(
+    (configured) => normalizeConfiguredOrigin(configured) === browserOrigin,
+  );
 }
 
 export function shouldCheckApiRequestOrigin(request: Request): boolean {
@@ -105,10 +144,12 @@ export function shouldCheckApiRequestOrigin(request: Request): boolean {
 export function isApiRequestAllowed(
   request: Request,
   configuredHostnames = configuredHostnamesFromEnvironment(),
+  configuredOrigins = configuredOriginsFromEnvironment(),
 ): boolean {
   if (!isApiRequestHostAllowed(request, configuredHostnames)) return false;
   if (isUserInitiatedSessionExportNavigation(request)) return true;
-  return !shouldCheckApiRequestOrigin(request) || isApiRequestOriginAllowed(request);
+  return !shouldCheckApiRequestOrigin(request)
+    || isApiRequestOriginAllowed(request, configuredOrigins);
 }
 
 export function hasJsonContentType(request: Request): boolean {
