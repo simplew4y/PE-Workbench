@@ -115,8 +115,14 @@ def _first_message_content(raw: str) -> str:
     choices = payload.get("choices")
     if not isinstance(choices, list) or not choices:
         raise LlmUnavailableError("model response contains no choices")
-    message = choices[0].get("message") if isinstance(choices[0], dict) else None
+    choice = choices[0] if isinstance(choices[0], dict) else {}
+    message = choice.get("message")
     content = message.get("content") if isinstance(message, dict) else None
+    if choice.get("finish_reason") == "length":
+        raise LlmUnavailableError(
+            "model response was truncated because max_tokens was exhausted; "
+            "disable thinking or increase PE_INGEST_CLAIM_MAX_OUTPUT_TOKENS"
+        )
     if not isinstance(content, str) or not content.strip():
         raise LlmUnavailableError("model response contains no message content")
     return content

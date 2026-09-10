@@ -105,11 +105,16 @@ PE_INGEST_ANALYSIS_TIMEOUT_SECONDS=1800
 PE_INGEST_SCAN_WINDOW_CHARS=20000
 PE_INGEST_SCAN_MAX_WINDOWS=12
 
+# 可选：观点抽取单次最大输出，默认 16000，最高 100000。
+# 思考模型的 reasoning 也可能占用供应商的输出上限；结构化抽取建议关闭 thinking。
+PE_INGEST_CLAIM_MAX_OUTPUT_TOKENS=16000
+
 # 可选的供应商参数，JSON 对象；不得覆盖 model/messages 等核心请求字段。
-# PE_INGEST_LLM_EXTRA_BODY={"enable_thinking":false}
+# DeepSeek V4 示例：PE_INGEST_LLM_EXTRA_BODY={"thinking":{"type":"disabled"},"response_format":{"type":"json_object"}}
+# DashScope Qwen 示例：PE_INGEST_LLM_EXTRA_BODY={"enable_thinking":false}
 ```
 
-未设置模型名时沿用 `private-fund-default`。开启共识并填写真实模型配置后，分析会把 PDF 页文本发送到指定服务，并可能产生费用；本次测试仅使用本地模拟服务，没有调用真实模型。
+未设置模型名时沿用 `private-fund-default`。开启共识并填写真实模型配置后，分析会把 PDF 页文本发送到指定服务，并可能产生费用；自动化测试应使用本地模拟服务。
 
 ## 正确性边界
 

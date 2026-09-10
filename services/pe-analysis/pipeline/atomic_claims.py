@@ -69,7 +69,7 @@ DEFAULT_MAX_WINDOWS = 12
 MAX_CLAIMS_PER_WINDOW = 40
 MAX_PROPOSALS_PER_WINDOW = 12
 MIN_QUOTE_CHARS = 6
-MAX_OUTPUT_TOKENS = 6_000
+DEFAULT_MAX_OUTPUT_TOKENS = 16_000
 
 STANCE_BULLISH = "bullish"
 STANCE_BEARISH = "bearish"
@@ -822,7 +822,10 @@ def scan_document(
                     doc_subtype=doc_subtype,
                     rule_hint=rule_hint,
                 ),
-                max_tokens=MAX_OUTPUT_TOKENS,
+                max_tokens=min(
+                    _int_env("PE_INGEST_CLAIM_MAX_OUTPUT_TOKENS", DEFAULT_MAX_OUTPUT_TOKENS),
+                    100_000,
+                ),
                 temperature=0.0,
             )
             payload = extract_json_object(raw)
