@@ -100,11 +100,11 @@ export class PeGatewayModelService {
     };
   }
 
-  async platformRuntime(session: GatewaySession, user: PeBackendUser): Promise<PePlatformRuntime | null> {
+  async platformRuntime(session: GatewaySession, user: PeBackendUser, proposed?: PeModelServiceState): Promise<PePlatformRuntime | null> {
     // Model sources are an explicit security and billing boundary. A custom
     // selection must never request a platform token or silently fall back.
-    if (this.sourceForUser(user.id) === "custom") return null;
-    const state = await this.state(session, user);
+    if ((proposed?.source ?? this.sourceForUser(user.id)) === "custom") return null;
+    const state = proposed ?? await this.state(session, user);
     const balance = Number(state.platform.balanceCny);
     if (Number.isFinite(balance) && balance <= 0) {
       throw new PeModelServiceError(

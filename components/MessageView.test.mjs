@@ -48,6 +48,32 @@ test("keeps streamed tool input out of collapsed markup while counting it", () =
   assert.equal(getTokenEstimateText(block), block.rawInput);
 });
 
+test("shows complete platform usage with CNY pricing", () => {
+  const html = renderMessage({
+    role: "assistant",
+    provider: "pe-platform",
+    model: "deepseek-v4-flash",
+    content: [{ type: "text", text: "Done" }],
+    usage: {
+      input: 1_000,
+      output: 200,
+      reasoning: 80,
+      cacheRead: 300,
+      cacheWrite: 0,
+      totalTokens: 1_500,
+      cost: { input: 0.01, output: 0.01, cacheRead: 0.003, cacheWrite: 0, total: 0.023 },
+    },
+  });
+
+  assert.match(html, /1,000 in/);
+  assert.match(html, /80 reasoning/);
+  assert.match(html, /300 cache R/);
+  assert.match(html, /0 cache W/);
+  assert.match(html, /1,500 total/);
+  assert.match(html, /¥0\.0230/);
+  assert.doesNotMatch(html, /\$0\.0230/);
+});
+
 test("renders pe_render_ui as a native standalone surface instead of tool chrome", () => {
   const html = renderMessage({
     role: "assistant",

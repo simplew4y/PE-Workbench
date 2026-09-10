@@ -1904,6 +1904,8 @@ interface PePlatformModel {
 }
 
 interface PeModelServiceState {
+  applied_model?: { provider: string; modelId: string } | null;
+  session_id?: string | null;
   source: "platform" | "custom";
   platform: {
     available: boolean;
@@ -2020,10 +2022,11 @@ function PlatformModelsDialog({
                   key={model.id}
                   style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: 11, padding: 14, border: `1px solid ${selected ? "var(--accent)" : "var(--border)"}`, borderRadius: 8, background: selected ? "var(--bg-selected)" : "var(--bg-panel)", cursor: "pointer" }}
                 >
-                  <input type="radio" name="platform-model" value={model.id} checked={selected} onChange={() => onSelect(model.id)} style={{ marginTop: 3, accentColor: "var(--accent)" }} />
+                  <input type="radio" name="platform-model" value={model.id} checked={selected} disabled={saving} onChange={() => onSelect(model.id)} style={{ marginTop: 3, accentColor: "var(--accent)" }} />
                   <span>
                     <span style={{ display: "flex", alignItems: "center", gap: 7, color: "var(--text)", fontSize: 14, fontWeight: 600 }}>
                       {model.display_name || model.id}
+                      {state.source === "platform" && model.id === state.platform.selected_model && <span style={{ color: "var(--accent)", fontSize: 11 }}>已保存</span>}
                       {model.id === state.platform.default_model && <span style={{ padding: "2px 5px", borderRadius: 4, background: "rgba(22,163,74,0.12)", color: "#16a34a", fontSize: 10 }}>平台默认</span>}
                     </span>
                     <span style={{ display: "block", marginTop: 4, color: "var(--text-muted)", fontSize: 11 }}>{model.provider || "platform"} · {model.id}</span>
@@ -2037,6 +2040,7 @@ function PlatformModelsDialog({
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 10, padding: "10px 18px", borderTop: "1px solid var(--border)" }}>
+          {!error && <span style={{ flex: 1, color: "var(--text-muted)", fontSize: 12 }}>保存后应用到当前会话，并作为新会话默认模型</span>}
           {error && <span style={{ flex: 1, color: "#ef4444", fontSize: 12 }}>{error}</span>}
           <button type="button" onClick={onClose} style={{ padding: "6px 14px", background: "none", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text-muted)", cursor: "pointer", fontSize: 13 }}>取消</button>
           <button
@@ -2045,7 +2049,7 @@ function PlatformModelsDialog({
             onClick={onSave}
             style={{ padding: "6px 16px", minWidth: 110, background: "var(--accent)", border: "none", borderRadius: 6, color: "#fff", cursor: saving || !hasPlatformBalance ? "default" : "pointer", opacity: saving || !state.platform.available || !selectedModel || !hasPlatformBalance ? 0.5 : 1, fontSize: 13, fontWeight: 600 }}
           >
-            {saving ? "保存中…" : !hasPlatformBalance ? "余额不足" : "使用此模型"}
+            {saving ? "正在应用…" : !hasPlatformBalance ? "余额不足" : "保存并使用"}
           </button>
         </div>
       </div>
@@ -2053,7 +2057,7 @@ function PlatformModelsDialog({
   );
 }
 
-export function ModelsConfig({ onClose }: { onClose: () => void }) {
+export function ModelsConfig({ onClose, getSessionId }: { onClose: () => void; getSessionId?: () => Promise<string | null> }) {
   const isMobile = useIsMobile();
   const { t } = useI18n();
   const [config, setConfig] = useState<ModelsJson>({ providers: {} });
@@ -2139,10 +2143,11 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
     source: "platform" | "custom",
     model?: string,
   ): Promise<PeModelServiceState> => {
+    const sessionId = await getSessionId?.();
     const response = await fetch("/api/model-service", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ source, ...(model ? { model } : {}) }),
+      body: JSON.stringify({ source, ...(model ? { model } : {}), ...(sessionId ? { sessionId } : {}) }),
     });
     const data = await response.json() as PeModelServiceState & { message?: string };
     if (!response.ok) throw new Error(data.message || `HTTP ${response.status}`);
@@ -2150,10 +2155,16 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
     setSourceView(data.source);
     setPlatformModel(data.platform.selected_model || data.platform.default_model || data.platform.models[0]?.id || "");
     window.dispatchEvent(new CustomEvent(PE_MODEL_SERVICE_CHANGED_EVENT, {
-      detail: { source: data.source, balanceCny: data.platform.balance_cny },
+      detail: {
+        source: data.source,
+        balanceCny: data.platform.balance_cny,
+        selectedModel: data.platform.selected_model,
+        sessionId: data.session_id,
+        appliedModel: data.applied_model,
+      },
     }));
     return data;
-  }, []);
+  }, [getSessionId]);
 
   const addCustomProvider = useCallback(() => {
     let finalName = "new-provider";
@@ -2321,12 +2332,13 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
         selectedModel={platformModel}
         saving={serviceSaving}
         error={serviceError}
-        onClose={onClose}
+        onClose={() => { if (!serviceSaving) onClose(); }}
         onSelect={(model) => {
           setPlatformModel(model);
           setServiceError(null);
         }}
         onShowCustom={() => {
+          if (serviceSaving) return;
           setSourceView("custom");
           setServiceError(null);
         }}

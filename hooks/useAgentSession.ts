@@ -27,7 +27,7 @@ import {
   humanizePeModelError,
   isPeInsufficientBalanceError,
 } from "@/lib/pe-model-errors";
-import { PE_OPEN_MODELS_EVENT } from "@/lib/pe-ui-events";
+import { PE_OPEN_MODELS_EVENT, PE_MODEL_SERVICE_CHANGED_EVENT, type PeModelServiceChangedEventDetail } from "@/lib/pe-ui-events";
 import {
   CHAT_SCROLL_REATTACH_TOLERANCE,
   CHAT_SCROLL_TAIL_TOLERANCE,
@@ -154,6 +154,7 @@ export interface UseAgentSessionOptions {
   onSystemPromptChange?: (prompt: string | null) => void;
   /** Registers an action that lazily starts the session and returns its system prompt. */
   onSystemPromptLoaderChange?: (loader: (() => Promise<void>) | null) => void;
+  onModelSessionTargetChange?: (target: (() => Promise<string | null>) | null) => void;
   onSessionStatsPanelOpen?: () => void;
   setToolPreset?: (preset: ToolPreset) => void;
 }
@@ -271,7 +272,7 @@ type SlashCommandsResponse = {
 export function useAgentSession(opts: UseAgentSessionOptions) {
   const {
     session, sessionRunning, newSessionCwd, newSessionDraftKey, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked,
-    modelsRefreshKey, onBranchDataChange, onSystemPromptChange, onSystemPromptLoaderChange, onSessionStatsPanelOpen,
+    modelsRefreshKey, onBranchDataChange, onSystemPromptChange, onSystemPromptLoaderChange, onModelSessionTargetChange, onSessionStatsPanelOpen,
   } = opts;
 
   const isNew = session === null && newSessionCwd !== null;
@@ -427,11 +428,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   }, [newSessionDraftKey, opts.chatInputRef, resolveComposerDraftKey]);
 
   const sessionStats = useMemo(() => {
-    if (sessionStatsOverride) {
-      return { ...sessionStatsOverride, totalActiveMs: data?.totalActiveMs };
-    }
-    const tokens = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
+    const tokens = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, total: 0 };
     let cost = 0;
+    let platformCostCny = 0;
+    let hasPlatformMessages = false;
+    let hasCustomMessages = false;
     let userMessages = 0;
     let assistantMessages = 0;
     let toolResults = 0;
@@ -441,16 +442,39 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       if (msg.role === "toolResult") toolResults += 1;
       if (msg.role !== "assistant") continue;
       assistantMessages += 1;
-      const u = (msg as import("@/lib/types").AssistantMessage).usage;
-      toolCalls += (msg as import("@/lib/types").AssistantMessage).content.filter((c) => c.type === "toolCall").length;
+      const assistant = msg as import("@/lib/types").AssistantMessage;
+      if (assistant.provider === "pe-platform") hasPlatformMessages = true;
+      else hasCustomMessages = true;
+      const u = assistant.usage;
+      toolCalls += assistant.content.filter((c) => c.type === "toolCall").length;
       if (!u) continue;
       tokens.input += u.input ?? 0;
       tokens.output += u.output ?? 0;
       tokens.cacheRead += u.cacheRead ?? 0;
       tokens.cacheWrite += u.cacheWrite ?? 0;
-      cost += u.cost?.total ?? 0;
+      tokens.reasoning += u.reasoning ?? 0;
+      if (assistant.provider === "pe-platform") {
+        platformCostCny += u.cost?.total ?? 0;
+      } else {
+        cost += u.cost?.total ?? 0;
+      }
     }
     tokens.total = tokens.input + tokens.output + tokens.cacheRead + tokens.cacheWrite;
+    if (sessionStatsOverride) {
+      // Pi's RPC total is currency-agnostic. It is safe to use the complete
+      // total (including compaction summaries) when a session contains one
+      // billing currency; mixed-provider sessions retain the transcript split.
+      const overrideCost = sessionStatsOverride.cost ?? 0;
+      const resolvedCost = hasCustomMessages && !hasPlatformMessages ? overrideCost : cost;
+      const resolvedPlatformCost = hasPlatformMessages && !hasCustomMessages ? overrideCost : platformCostCny;
+      return {
+        ...sessionStatsOverride,
+        tokens: { ...sessionStatsOverride.tokens, reasoning: tokens.reasoning },
+        cost: resolvedCost,
+        platformCostCny: resolvedPlatformCost,
+        totalActiveMs: data?.totalActiveMs,
+      };
+    }
     if (tokens.total === 0 && messages.length === 0) return null;
     return {
       sessionFile: data?.filePath || undefined,
@@ -463,6 +487,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       totalMessages: messages.length,
       tokens,
       cost,
+      platformCostCny,
       totalActiveMs: data?.totalActiveMs,
       ...(contextUsage ? { contextUsage } : {}),
     } satisfies SessionStatsInfo;
@@ -1598,6 +1623,40 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, [isNew, newSessionCwd, session?.cwd]);
 
+  // Saving account model settings is an explicit switch. Ordinary list refreshes
+  // still preserve the session's selection (including manual composer choices).
+  useEffect(() => {
+    let active = true;
+    const onModelSettingsSaved = (event: Event) => {
+      const detail = (event as CustomEvent<PeModelServiceChangedEventDetail>).detail;
+      if (!detail) return;
+      void (async () => {
+        const sid = sessionIdRef.current;
+        if (isNew && !detail.sessionId) {
+          newSessionModelOverrideRef.current = null;
+          setNewSessionModel(null);
+          setPendingModel(null);
+        } else if (sid && sid === detail.sessionId && detail.appliedModel) {
+          if (isNew) {
+            newSessionModelOverrideRef.current = detail.appliedModel;
+            setNewSessionModel(detail.appliedModel);
+            setPendingModel(detail.appliedModel);
+          }
+          setCurrentModelOverride(detail.appliedModel);
+          await loadSession(sid, false, true);
+        }
+        if (active) await loadModels();
+      })().catch((error) => {
+        if (active) addNotice({ type: "error", message: `模型设置同步失败：${error instanceof Error ? error.message : String(error)}` });
+      });
+    };
+    window.addEventListener(PE_MODEL_SERVICE_CHANGED_EVENT, onModelSettingsSaved);
+    return () => {
+      active = false;
+      window.removeEventListener(PE_MODEL_SERVICE_CHANGED_EVENT, onModelSettingsSaved);
+    };
+  }, [isNew, loadSession, loadModels, addNotice]);
+
   const handleBuiltinSlashCommand = useCallback(async (text: string): Promise<BuiltinSlashCommandResult> => {
     if (!text.startsWith("/")) return { handled: false };
     const match = text.match(/^\/([^\s]+)(?:\s+([\s\S]*))?$/);
@@ -1902,6 +1961,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     onSystemPromptLoaderChange?.(loadSystemPrompt);
     return () => onSystemPromptLoaderChange?.(null);
   }, [loadSystemPrompt, onSystemPromptLoaderChange]);
+
+  useEffect(() => {
+    // Include a tools-created provisional session; never start a new one just
+    // to save preferences. Wait for an already in-flight creation first.
+    onModelSessionTargetChange?.(async () => sessionIdRef.current ?? await ensuringNewSessionRef.current ?? null);
+    return () => onModelSessionTargetChange?.(null);
+  }, [onModelSessionTargetChange]);
 
   useEffect(() => {
     if (!onBranchDataChange) return;

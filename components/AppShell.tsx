@@ -105,6 +105,13 @@ export function AppShell() {
   const [sessionKey, setSessionKey] = useState(0);
   const [explorerRefreshKey, setExplorerRefreshKey] = useState(0);
   const [modelsConfigOpen, setModelsConfigOpen] = useState(false);
+  const modelSessionTargetRef = useRef<(() => Promise<string | null>) | null>(null);
+  const handleModelSessionTargetChange = useCallback((target: (() => Promise<string | null>) | null) => {
+    modelSessionTargetRef.current = target;
+  }, []);
+  const getModelSessionId = useCallback(async () => {
+    return modelSessionTargetRef.current ? await modelSessionTargetRef.current() : selectedSession?.id ?? null;
+  }, [selectedSession?.id]);
   const [modelsRefreshKey, setModelsRefreshKey] = useState(0);
   const [skillsConfigOpen, setSkillsConfigOpen] = useState(false);
   const [pluginsConfigOpen, setPluginsConfigOpen] = useState(false);
@@ -1343,12 +1350,16 @@ export function AppShell() {
 
     const tokens = sessionStats?.tokens;
     const cost = sessionStats?.cost ?? 0;
+    const platformCostCny = sessionStats?.platformCostCny ?? 0;
     const formatCompact = (value: number) => value >= 1_000_000
       ? `${(value / 1_000_000).toFixed(1)}M`
       : value >= 1000
         ? `${(value / 1000).toFixed(0)}k`
         : String(value);
-    const costText = cost > 0 ? (cost >= 0.01 ? `$${cost.toFixed(2)}` : `<$0.01`) : null;
+    const costTexts = [
+      ...(platformCostCny > 0 ? [platformCostCny >= 0.01 ? `¥${platformCostCny.toFixed(2)}` : `<¥0.01`] : []),
+      ...(cost > 0 ? [cost >= 0.01 ? `$${cost.toFixed(2)}` : `<$0.01`] : []),
+    ];
 
     let contextColor = "var(--text-muted)";
     let desktopContextText: string | null = null;
@@ -1369,7 +1380,9 @@ export function AppShell() {
       tooltipParts.push(`out: ${tokens.output.toLocaleString(locale)}`);
       tooltipParts.push(`cache read: ${tokens.cacheRead.toLocaleString(locale)}`);
       tooltipParts.push(`cache write: ${tokens.cacheWrite.toLocaleString(locale)}`);
-      if (cost > 0) tooltipParts.push(`cost: $${cost.toFixed(4)}`);
+      if ((tokens.reasoning ?? 0) > 0) tooltipParts.push(`reasoning: ${tokens.reasoning!.toLocaleString(locale)}`);
+      if (platformCostCny > 0) tooltipParts.push(`platform charge: ¥${platformCostCny.toFixed(4)}`);
+      if (cost > 0) tooltipParts.push(`custom model cost: $${cost.toFixed(4)}`);
     }
     if (contextUsage?.contextWindow) {
       const percent = contextUsage.percent;
@@ -1379,7 +1392,7 @@ export function AppShell() {
     const covered = mobile && mobileToolbarMoreOpen;
     const hasMobileValues = Boolean(
       (tokens && (tokens.input > 0 || tokens.output > 0))
-      || costText
+      || costTexts.length > 0
       || mobileContextText,
     );
 
@@ -1440,11 +1453,11 @@ export function AppShell() {
                 {formatCompact(tokens.output)}
               </span>
             )}
-            {costText && (
-              <span className="mobile-session-stat-cost" style={{ color: "var(--text)", fontWeight: 500, flexShrink: 0 }}>
+            {costTexts.map((costText) => (
+              <span key={costText} className="mobile-session-stat-cost" style={{ color: "var(--text)", fontWeight: 500, flexShrink: 0 }}>
                 {costText}
               </span>
-            )}
+            ))}
             {mobileContextText && (
               <span style={{ color: contextColor, flexShrink: 0 }}>
                 {mobileContextText}
@@ -1482,11 +1495,11 @@ export function AppShell() {
                 {formatCompact(tokens.cacheRead)}
               </span>
             )}
-            {costText && (
-              <span style={{ display: "flex", alignItems: "center", color: "var(--text)", fontWeight: 500 }}>
+            {costTexts.map((costText) => (
+              <span key={costText} style={{ display: "flex", alignItems: "center", color: "var(--text)", fontWeight: 500 }}>
                 {costText}
               </span>
-            )}
+            ))}
             {desktopContextText && (
               <span style={{ display: "flex", alignItems: "center", gap: 4, color: contextColor }}>
                 <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -1914,14 +1927,16 @@ export function AppShell() {
                     const tokenRows = [
                        [translate("session.input"), sessionStats.tokens.input.toLocaleString(locale)],
                        [translate("session.output"), sessionStats.tokens.output.toLocaleString(locale)],
-                       ...(sessionStats.tokens.cacheRead > 0 ? [[translate("session.cacheRead"), sessionStats.tokens.cacheRead.toLocaleString(locale)]] : []),
-                       ...(sessionStats.tokens.cacheWrite > 0 ? [[translate("session.cacheWrite"), sessionStats.tokens.cacheWrite.toLocaleString(locale)]] : []),
+                       ...(sessionStats.tokens.reasoning !== undefined ? [[translate("session.reasoning"), sessionStats.tokens.reasoning.toLocaleString(locale)]] : []),
+                       [translate("session.cacheRead"), sessionStats.tokens.cacheRead.toLocaleString(locale)],
+                       [translate("session.cacheWrite"), sessionStats.tokens.cacheWrite.toLocaleString(locale)],
                        [translate("session.total"), sessionStats.tokens.total.toLocaleString(locale)],
                     ];
                     const ctx = contextUsage ?? sessionStats.contextUsage;
                     const formatCompact = (n: number) => n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(0)}k` : String(n);
                     const extraTokenRows = [
                        ...(sessionStats.cost > 0 ? [[translate("session.cost"), `$${sessionStats.cost.toFixed(4)}`]] : []),
+                       ...((sessionStats.platformCostCny ?? 0) > 0 ? [[translate("session.platformCost"), `¥${sessionStats.platformCostCny!.toFixed(4)}`]] : []),
                        ...(ctx?.contextWindow ? [[translate("session.context"), `${ctx.percent !== null ? `${ctx.percent.toFixed(1)}%` : "?"} / ${formatCompact(ctx.contextWindow)}`]] : []),
                        // Cache hit rate = cache reads / (input + cache writes + cache reads) — the denominator covers all input-class tokens.
                        ...(sessionStats.tokens.cacheRead + sessionStats.tokens.cacheWrite > 0 && sessionStats.tokens.cacheRead + sessionStats.tokens.cacheWrite + sessionStats.tokens.input > 0
@@ -2074,6 +2089,7 @@ export function AppShell() {
               onBranchDataChange={handleBranchDataChange}
               onSystemPromptChange={handleSystemPromptChange}
               onSystemPromptLoaderChange={handleSystemPromptLoaderChange}
+              onModelSessionTargetChange={handleModelSessionTargetChange}
               onSessionStatsChange={handleSessionStatsChange}
               onSessionStatsPanelOpen={openSessionStatsPanel}
               onContextUsageChange={handleContextUsageChange}
@@ -2228,7 +2244,7 @@ export function AppShell() {
         </div>
       </div>
     </div>
-    {modelsConfigOpen && <ModelsConfig onClose={() => { setModelsConfigOpen(false); setModelsRefreshKey((k) => k + 1); }} />}
+    {modelsConfigOpen && <ModelsConfig getSessionId={getModelSessionId} onClose={() => { setModelsConfigOpen(false); setModelsRefreshKey((k) => k + 1); }} />}
     {projectTrustDialogOpen && projectTrustCwd && (
       <ProjectTrustDialog
         cwd={projectTrustCwd}

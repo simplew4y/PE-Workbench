@@ -1,5 +1,6 @@
 import type {
   AgentSessionEvent,
+  ProviderConfig,
   BashOperations,
   SessionManager,
   SettingsManager,
@@ -7,6 +8,7 @@ import type {
   Theme,
 } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage as PiAgentMessage } from "@earendil-works/pi-agent-core";
+import type { Api, Model } from "@earendil-works/pi-ai";
 
 export interface ContextUsage {
   percent: number | null;
@@ -46,9 +48,13 @@ export interface SessionStatsInfo {
     output: number;
     cacheRead: number;
     cacheWrite: number;
+    reasoning?: number;
     total: number;
   };
+  /** Estimated custom-provider cost in USD. */
   cost: number;
+  /** Estimated PE platform charge in CNY. */
+  platformCostCny?: number;
   contextUsage?: ContextUsage;
   /** Estimated active time across all entries in the session file. */
   totalActiveMs?: number;
@@ -129,6 +135,9 @@ export interface AgentSessionLike {
   readonly autoRetryEnabled: boolean;
   readonly model: ModelLike | undefined;
   readonly modelRuntime: {
+    registerProvider: (provider: string, config: ProviderConfig) => void;
+    unregisterProvider: (provider: string) => void;
+    getAvailable: () => Promise<readonly Model<Api>[]>;
     getModel: (provider: string, modelId: string) => ModelLike | undefined;
     refresh: (options?: { allowNetwork?: boolean }) => Promise<unknown>;
   };

@@ -1,5 +1,5 @@
 import { cookies } from "next/headers";
-import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
+import type { ProviderConfig } from "@earendil-works/pi-coding-agent";
 import { getPeGatewayRuntime } from "./pe-gateway/runtime";
 import { isPeMultiUserMode } from "./pe-multi-user-paths";
 import type { RpcSessionStartOptions } from "./rpc-manager";
@@ -9,8 +9,22 @@ import type { PeBackendUser } from "./pe-gateway/backend-client";
 interface PublicPlatformModel {
   id: string;
   display_name?: string;
-  max_output_tokens?: number;
-  context_window?: number;
+  max_output_tokens: number;
+  context_window: number;
+  input_price_cny_per_million: number;
+  output_price_cny_per_million: number;
+}
+
+function numericField(value: unknown, field: string, modelId: string, minimum: number): number {
+  const parsed = typeof value === "number"
+    ? value
+    : typeof value === "string" && value.trim()
+      ? Number(value)
+      : Number.NaN;
+  if (!Number.isFinite(parsed) || parsed < minimum) {
+    throw new Error(`Platform model "${modelId}" has invalid ${field}`);
+  }
+  return parsed;
 }
 
 function publicModels(models: unknown[]): PublicPlatformModel[] {
@@ -18,11 +32,14 @@ function publicModels(models: unknown[]): PublicPlatformModel[] {
     if (!model || typeof model !== "object" || Array.isArray(model)) return [];
     const value = model as Record<string, unknown>;
     if (typeof value.id !== "string" || !value.id.trim()) return [];
+    const id = value.id.trim();
     return [{
-      id: value.id.trim(),
+      id,
       ...(typeof value.display_name === "string" ? { display_name: value.display_name } : {}),
-      ...(typeof value.max_output_tokens === "number" ? { max_output_tokens: value.max_output_tokens } : {}),
-      ...(typeof value.context_window === "number" ? { context_window: value.context_window } : {}),
+      max_output_tokens: numericField(value.max_output_tokens, "max_output_tokens", id, 1),
+      context_window: numericField(value.context_window, "context_window", id, 1),
+      input_price_cny_per_million: numericField(value.input_price_cny_per_million, "input price", id, 0),
+      output_price_cny_per_million: numericField(value.output_price_cny_per_million, "output price", id, 0),
     }];
   });
 }
@@ -49,7 +66,7 @@ export async function getPePlatformRuntimeForRequest(): Promise<PePlatformRuntim
   return context.gateway.models.platformRuntime(context.session, context.user);
 }
 
-function platformRpcOptions(
+export function platformRpcOptions(
   userName: string,
   platform: PePlatformRuntime | null,
 ): RpcSessionStartOptions {
@@ -59,29 +76,37 @@ function platformRpcOptions(
     throw new Error("Selected platform model is unavailable");
   }
 
-  const registerPlatformProvider: ExtensionFactory = (pi) => {
-    pi.registerProvider("pe-platform", {
-      name: "PE 平台模型",
-      baseUrl: platform.access.gatewayBaseUrl,
-      apiKey: platform.access.accessToken,
-      api: "openai-completions",
-      authHeader: true,
-      models: models.map((model) => ({
-        id: model.id,
-        name: model.display_name || model.id,
-        reasoning: false,
-        input: ["text"],
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-        contextWindow: model.context_window ?? 128_000,
-        maxTokens: model.max_output_tokens ?? 16_384,
-      })),
-    });
+  const platformProvider: ProviderConfig = {
+    name: "PE 平台模型",
+    baseUrl: platform.access.gatewayBaseUrl,
+    apiKey: platform.access.accessToken,
+    api: "openai-completions",
+    authHeader: true,
+    models: models.map((model) => ({
+      id: model.id,
+      name: model.display_name || model.id,
+      reasoning: false,
+      input: ["text"],
+      // Pi's cost unit is deliberately currency-agnostic. Platform model
+      // prices are CNY per million tokens and the web UI labels them as CNY.
+      // The backend currently bills all prompt tokens at the input rate, so
+      // cache reads/writes use that same rate to keep the local transcript
+      // estimate consistent with the server charge.
+      cost: {
+        input: model.input_price_cny_per_million,
+        output: model.output_price_cny_per_million,
+        cacheRead: model.input_price_cny_per_million,
+        cacheWrite: model.input_price_cny_per_million,
+      },
+      contextWindow: model.context_window,
+      maxTokens: model.max_output_tokens,
+    })),
   };
 
   return {
     userName,
     initialModel: { provider: "pe-platform", modelId: platform.selectedModel },
-    extensionFactories: [registerPlatformProvider],
+    platformProvider,
     persistInitialModel: false,
   };
 }

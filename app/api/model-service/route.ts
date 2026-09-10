@@ -10,6 +10,10 @@ import {
   unauthenticated,
 } from "@/lib/pe-gateway/route-helpers";
 import type { ModelSource } from "@/lib/pe-gateway/session-store";
+import { getRpcSession, startRpcSession, ModelSelectionError } from "@/lib/rpc-manager";
+import { resolveSessionPath } from "@/lib/session-reader";
+import { platformRpcOptions } from "@/lib/pe-platform-runtime";
+import { PeModelServiceError } from "@/lib/pe-gateway/model-service";
 
 export const runtime = "nodejs";
 
@@ -64,6 +68,10 @@ export async function PUT(request: NextRequest) {
     const context = await authenticatedState(request);
     if (context.response) return context.response;
     const current = await context.gateway.models.state(context.session!, context.user!);
+    const proposed = { ...current, source: body.source as ModelSource, platform: { ...current.platform } };
+    if (body.sessionId !== undefined && (typeof body.sessionId !== "string" || !body.sessionId.trim())) {
+      throw new PeRequestError(400, "invalid_session_id", "会话 ID 无效");
+    }
     if (body.source === "platform") {
       if (!current.platform.available) {
         throw new PeRequestError(
@@ -78,15 +86,36 @@ export async function PUT(request: NextRequest) {
       if (!requestedModel) {
         throw new PeRequestError(409, "platform_models_empty", "管理员尚未开放平台模型");
       }
-      try {
-        context.gateway.models.setPlatformModel(context.user!.id, requestedModel, current.platform);
-      } catch {
+      if (!current.platform.models.some((item) => item && typeof item === "object" && "id" in item && item.id === requestedModel)) {
         throw new PeRequestError(400, "invalid_platform_model", "所选平台模型不存在或已停用");
       }
+      proposed.platform.selectedModel = requestedModel;
     }
-    context.gateway.models.setSource(context.user!.id, body.source as ModelSource);
-    return noStoreJson(publicState(await context.gateway.models.state(context.session!, context.user!)));
+    const commit = () => {
+      if (proposed.source === "platform" && proposed.platform.selectedModel) {
+        context.gateway.models.setPlatformModel(context.user!.id, proposed.platform.selectedModel, current.platform);
+      }
+      context.gateway.models.setSource(context.user!.id, proposed.source);
+    };
+    let appliedModel: { provider: string; modelId: string } | null = null;
+    if (typeof body.sessionId === "string") {
+      let agent = getRpcSession(body.sessionId);
+      if (agent?.isRunning()) throw new ModelSelectionError("当前会话正在运行，请等待回复或压缩完成后再切换模型");
+      const path = agent?.isAlive() ? null : await resolveSessionPath(body.sessionId);
+      if (!agent?.isAlive() && !path) throw new PeRequestError(404, "session_not_found", "会话不存在");
+      const platform = await context.gateway.models.platformRuntime(context.session!, context.user!, proposed);
+      const userName = context.user!.nickName?.trim() || context.user!.email.split("@", 1)[0] || "用户";
+      const options = platformRpcOptions(userName, platform);
+      if (!agent?.isAlive()) agent = (await startRpcSession(body.sessionId, path!, undefined, options)).session;
+      appliedModel = await agent.applyModelSource(options, commit);
+    } else {
+      commit();
+    }
+    return noStoreJson({ ...publicState(proposed), applied_model: appliedModel, session_id: body.sessionId ?? null });
   } catch (error) {
+    if (error instanceof ModelSelectionError || error instanceof PeModelServiceError) {
+      return noStoreJson({ code: error.code, message: error.message }, { status: error.status });
+    }
     return gatewayError(error);
   }
 }

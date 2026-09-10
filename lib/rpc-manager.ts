@@ -1,4 +1,5 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { ProviderConfig } from "@earendil-works/pi-coding-agent";
 import { buildPeSystemPrompt, registerPeTools } from "@earendil-works/pe-boot";
 import { createAgentSessionFromServices, createAgentSessionServices, getAgentDir, initTheme, SessionManager, SettingsManager, Theme, type ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import { KeybindingsManager as TuiKeybindingsManager, TUI_KEYBINDINGS } from "@earendil-works/pi-tui";
@@ -112,12 +113,22 @@ const IDLE_RESET_EVENT_TYPES = new Set([
 ]);
 
 export interface RpcSessionStartOptions {
+  platformProvider?: ProviderConfig;
   toolNames?: string[];
   initialModel?: { provider: string; modelId: string };
   thinkingLevel?: ThinkingLevel;
   extensionFactories?: ExtensionFactory[];
   persistInitialModel?: boolean;
   userName?: string;
+}
+
+export class ModelSelectionError extends Error {
+  readonly status = 409;
+  readonly code = "session_model_change_failed";
+}
+
+interface PlatformProviderState {
+  current?: ProviderConfig;
 }
 
 const CODING_TOOL_NAMES = ["read", "bash", "edit", "write", "grep", "find", "ls"];
@@ -189,7 +200,61 @@ export class AgentSessionWrapper {
   private shutdownPromise: Promise<void> | null = null;
   private _alive = true;
 
-  constructor(public readonly inner: AgentSessionLike) {}
+  private changingModel = false;
+
+  constructor(
+    public readonly inner: AgentSessionLike,
+    private readonly platformProviderState: PlatformProviderState = {},
+  ) {}
+
+  /** Apply an explicit account setting to this session, including a new provider. */
+  async applyModelSource(options: RpcSessionStartOptions, commit: () => void = () => {}) {
+    if (!this._alive || this.changingModel || this.isRunning() || this.inner.pendingMessageCount > 0) {
+      throw new ModelSelectionError("当前会话正在运行，请等待回复或压缩完成后再切换模型");
+    }
+    this.changingModel = true;
+    const previousProvider = this.platformProviderState.current;
+    const previousModel = this.inner.model;
+    try {
+      await this.waitForExtensionsBound();
+      if (this.isRunning()) throw new ModelSelectionError("当前会话正在运行，请完成后再切换模型");
+      if (options.platformProvider) {
+        this.inner.modelRuntime.registerProvider("pe-platform", options.platformProvider);
+      }
+      await this.inner.modelRuntime.refresh({ allowNetwork: false });
+      let model;
+      if (options.platformProvider && options.initialModel) {
+        model = this.inner.modelRuntime.getModel("pe-platform", options.initialModel.modelId);
+      } else {
+        const runtime = this.inner.modelRuntime;
+        const scope = await resolveVisibleModels({
+          getAvailable: async () => (await runtime.getAvailable()).filter((item) => item.provider !== "pe-platform"),
+        }, this.inner.settingsManager.getEnabledModels());
+        const current = scope.visible.find((item) => item.provider === previousModel?.provider && item.id === previousModel?.id);
+        const defaultProvider = this.inner.settingsManager.getDefaultProvider();
+        const defaultModelId = this.inner.settingsManager.getDefaultModel();
+        model = current ?? selectInitialModelScope(scope, {
+          ...(defaultProvider && defaultModelId ? { defaultModel: { provider: defaultProvider, modelId: defaultModelId } } : {}),
+        }).model ?? scope.visible[0];
+      }
+      if (!model) throw new ModelSelectionError("没有可用模型，请先配置模型和 API Key");
+      await this.inner.setModel(model);
+      this.platformProviderState.current = options.platformProvider;
+      if (!options.platformProvider) this.inner.modelRuntime.unregisterProvider("pe-platform");
+      commit();
+      invalidateModelsCache();
+      invalidateSessionListCache();
+      return { provider: model.provider, modelId: model.id };
+    } catch (error) {
+      this.platformProviderState.current = previousProvider;
+      if (previousProvider) this.inner.modelRuntime.registerProvider("pe-platform", previousProvider);
+      else this.inner.modelRuntime.unregisterProvider("pe-platform");
+      if (previousModel && this.inner.model !== previousModel) await this.inner.setModel(previousModel);
+      throw error;
+    } finally {
+      this.changingModel = false;
+    }
+  }
 
   get sessionId(): string {
     return this.inner.sessionId;
@@ -408,6 +473,9 @@ export class AgentSessionWrapper {
     this.resetIdleTimer();
     const type = command.type as string;
     if (this.shouldWaitForExtensions(type)) await this.waitForExtensionsBound();
+    if (this.changingModel && !type.startsWith("get_") && !type.startsWith("abort")) {
+      throw new ModelSelectionError("正在切换模型，请稍后重试");
+    }
 
     if (type === "prompt" || type === "steer" || type === "follow_up") {
       const imageError = validateAgentImages(command.images);
@@ -436,6 +504,7 @@ export class AgentSessionWrapper {
         // this submission starts a run or joins its streaming queue.
         const releaseAdmission = await this.acquirePromptAdmission();
         try {
+          if (this.changingModel) throw new ModelSelectionError("正在切换模型，请稍后重试");
           if (this.inner.isBashRunning) {
             throw new Error("Cannot send a prompt while a shell command is running");
           }
@@ -1589,6 +1658,9 @@ export async function startRpcSession(
   options: RpcSessionStartOptions = {},
 ): Promise<{ session: AgentSessionWrapper; realSessionId: string }> {
   const { toolNames, initialModel, thinkingLevel, extensionFactories = [], persistInitialModel = true, userName } = options;
+  // Resource reloads read the latest setting instead of restoring a stale
+  // platform token/provider captured when this session was first opened.
+  const platformProviderState: PlatformProviderState = { current: options.platformProvider };
   const registry = getRegistry();
   const locks = getLocks();
 
@@ -1640,6 +1712,9 @@ export async function startRpcSession(
         systemPrompt: buildPeSystemPrompt(sessionCwd, userName),
         extensionFactories: [
           ...extensionFactories,
+          (pi) => {
+            if (platformProviderState.current) pi.registerProvider("pe-platform", platformProviderState.current);
+          },
           registerPeTools,
           createProjectCommandBashExtension({
             cwd: sessionCwd,
@@ -1698,7 +1773,7 @@ export async function startRpcSession(
       inner.setActiveToolsByName(withExtensionTools(inner, toolNames));
     }
 
-    const wrapper = new AgentSessionWrapper(inner);
+    const wrapper = new AgentSessionWrapper(inner, platformProviderState);
     // When all tools are disabled, clear the system prompt entirely.
     // pi's buildSystemPrompt always produces a non-empty prompt even with no tools;
     // keep this forced after extension resource discovery and reloads as well.

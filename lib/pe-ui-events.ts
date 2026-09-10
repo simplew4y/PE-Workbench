@@ -11,4 +11,7 @@ export interface PeOpenConfigEventDetail {
 export interface PeModelServiceChangedEventDetail {
   source: "platform" | "custom";
   balanceCny: string;
+  selectedModel?: string | null;
+  sessionId?: string | null;
+  appliedModel?: { provider: string; modelId: string } | null;
 }
