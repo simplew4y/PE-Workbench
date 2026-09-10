@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from contextlib import closing
 from dataclasses import replace
+from datetime import date
 from unittest.mock import patch
 
 from analyze_collection import analyze_collection
@@ -17,7 +18,9 @@ from pipeline.analysis_checklist import (
 from pipeline.atomic_claims import (
     EvidenceItem, _dedupe, relink_revision_chains, validate_claim,
 )
-from pipeline.consensus_cards import build_cards, write_narratives
+from pipeline.consensus_cards import (
+    _latest_per_issuer, _load_claims, _numeric_stats, build_cards, template_narrative, write_narratives,
+)
 from pipeline.state import collection_fingerprint
 from pipeline.value_normalization import normalize_period, normalize_value
 
@@ -205,6 +208,78 @@ class PageAnalysisTest(unittest.TestCase):
         self.conn.execute("DELETE FROM documents")
         self.conn.commit()
         self.assertEqual(self.run_analysis()["status"], "completed")
+
+    def test_dispersion_uses_one_comparable_sample_and_handles_small_samples(self):
+        self.run_analysis()
+        original = _load_claims(self.conn, "dataset")[0]
+        claims = [replace(original, issuer_key=str(i), value_canonical=value, scope_note="")
+                  for i, value in enumerate([100, 110, 120, 150])]
+        incompatible = replace(original, issuer_key="foreign", value_canonical=999, currency="USD")
+        stats, comparable = _numeric_stats([*claims, incompatible])
+        self.assertEqual(len(comparable), 4)
+        self.assertEqual(stats["median"], 115)
+        self.assertEqual(stats["mean"], 120)
+        self.assertEqual(stats["iqr"], 20)
+        self.assertEqual(stats["mad"], 10)
+        self.assertEqual(stats["excluded_unit_mismatch"], 1)
+        self.assertEqual(_numeric_stats([]), ({}, []))
+        self.assertEqual(_numeric_stats([replace(original, value_canonical=float("inf"))]), ({}, []))
+        one, _ = _numeric_stats(claims[:1])
+        self.assertEqual((one["iqr"], one["mad"]), (0, 0))
+        persisted = json.loads(self.conn.execute("SELECT stats_json FROM consensus_cards").fetchone()[0])
+        self.assertEqual((persisted["iqr"], persisted["mad"]), (0, 0))
+
+    def test_latest_vote_is_stable_and_counts_an_institution_once(self):
+        self.add_doc("two", "HTSC_new.pdf", ["2026年收入预计120亿元，需求增长。"])
+        self.run_analysis()
+        claims = _load_claims(self.conn, "dataset")
+        old = replace(claims[0], claim_id="a", created_at="2026-09-09T00:00:00Z")
+        latest = replace(old, claim_id="b", created_at="2026-09-10T00:00:00Z")
+        self.assertEqual(_latest_per_issuer([latest, old]), _latest_per_issuer([old, latest]))
+        self.assertEqual(list(_latest_per_issuer([old, latest]).values()), [latest])
+        cards = build_cards(self.conn, "dataset")
+        self.assertEqual(cards[0].issuer_count, 1)
+        self.assertEqual(cards[0].stats["sample"]["included_count"], 1)
+        self.assertEqual(len(cards[0].stats["sample"]["claim_ids"]), 1)
+        self.assertEqual(cards[0].stats["sample"]["stance_ratios"]["bullish"], 1)
+
+    def test_missing_verified_views_are_not_counted_as_opposition(self):
+        self.add_doc("silent", "CITIC.pdf", ["行业讨论，未提供收入预测。"])
+        self.run_analysis()
+        card = build_cards(self.conn, "dataset")[0]
+        self.assertEqual((card.issuer_count, card.coverage_total), (1, 2))
+        self.assertEqual(card.stance_counts["bearish"], 0)
+        self.assertEqual([item["issuer_name"] for item in card.stats["sample"]["not_mentioned"]], ["中信证券"])
+        self.conn.execute("UPDATE documents SET deleted_at='2026-09-10' WHERE doc_id='silent'")
+        card = build_cards(self.conn, "dataset")[0]
+        self.assertEqual(card.coverage_total, 1)
+        self.assertEqual(card.stats["sample"]["not_mentioned"], [])
+
+    def test_future_views_are_excluded_and_qualitative_cards_keep_stance_narratives(self):
+        self.add_doc("two", "CITIC.pdf", ["2026年收入预计120亿元，需求增长。"])
+        self.run_analysis()
+        self.conn.execute("UPDATE atomic_claims SET as_of_date='2026-10-01' WHERE doc_id='two'")
+        card = build_cards(self.conn, "dataset", as_of=date(2026, 9, 10))[0]
+        self.assertEqual(card.issuer_count, 1)
+        self.assertEqual(card.stats["median"], 100e8)
+        item = next(item for item in UNIVERSAL_CHECKLIST if item.claim_type == "qualitative")
+        self.conn.execute("UPDATE atomic_claims SET item_key=?,value_canonical=NULL,value_numeric=NULL,as_of_date='2026-09-01'", (item.item_key,))
+        self.conn.execute("UPDATE atomic_claims SET stance='bearish' WHERE doc_id='two'")
+        card = build_cards(self.conn, "dataset")[0]
+        self.assertEqual(card.card_type, "divergence")
+        self.assertNotIn("median", card.stats)
+        self.assertIn("1 家偏正面、1 家偏负面", template_narrative(card)["consensus_line"])
+
+    def test_company_only_card_does_not_claim_institution_coverage(self):
+        self.conn.execute("DELETE FROM pdf_pages")
+        self.conn.execute("DELETE FROM documents")
+        self.add_doc("company", "Company.pdf", ["2026年收入预计200亿元，公司指引。"])
+        self.run_analysis()
+        card = build_cards(self.conn, "dataset")[0]
+        self.assertEqual((card.issuer_count, card.coverage_total), (0, 0))
+        self.assertIsNotNone(card.company_view)
+        self.assertEqual(card.stats["sample"]["stance_ratios"], {"bullish": None, "bearish": None, "neutral": None})
+        self.assertIn("没有可比机构观点", template_narrative(card)["consensus_line"])
 
     def test_claim_identity_preserves_window_currency_and_scope(self):
         text = "2026年收入预计100亿元，需求增长带动。"

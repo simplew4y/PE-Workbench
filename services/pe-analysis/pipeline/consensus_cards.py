@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 import sqlite3
 import statistics
@@ -27,7 +28,7 @@ from .schema import execute_schema
 from .analysis_checklist import CLAIM_TYPE_QUANTITATIVE, ChecklistItem, active_checklist
 from .llm_client import extract_json_object
 
-CARD_BUILDER_VERSION = "pe_consensus_cards_v1"
+CARD_BUILDER_VERSION = "pe_consensus_cards_v2"
 
 RECENT_WINDOW_DAYS = 30
 CARDS_PER_NARRATIVE_CALL = 12
@@ -82,6 +83,7 @@ class ClaimView:
     revision_delta: float | None
     evidence_ids: list[str]
     evidence_quotes: list[dict[str, str]]
+    created_at: str = ""
 
     def value_display(self) -> str:
         if self.value_numeric is None:
@@ -247,6 +249,7 @@ def _load_claims(conn: sqlite3.Connection, dataset_id: str) -> list[ClaimView]:
                 revision_delta=row["revision_delta"],
                 evidence_ids=[str(v) for v in evidence_ids] if isinstance(evidence_ids, list) else [],
                 evidence_quotes=[q for q in quotes if isinstance(q, dict)] if isinstance(quotes, list) else [],
+                created_at=str(row["created_at"] or ""),
             )
         )
     return views
@@ -259,7 +262,10 @@ def _latest_per_issuer(claims: Sequence[ClaimView]) -> dict[str, ClaimView]:
     latest: dict[str, ClaimView] = {}
     for claim in claims:
         current = latest.get(claim.issuer_key)
-        if current is None or (claim.as_of_date, claim.confidence) >= (current.as_of_date, current.confidence):
+        # 同一机构只计一票；同日观点按入库时间、稳定 ID 决胜，不依赖查询返回顺序。
+        if current is None or (claim.as_of_date, claim.created_at, claim.claim_id) > (
+            current.as_of_date, current.created_at, current.claim_id
+        ):
             latest[claim.issuer_key] = claim
     return latest
 
@@ -341,20 +347,25 @@ def _recent_changes(series: Sequence[ClaimView], as_of: date, window_days: int) 
 def _numeric_stats(sample: Sequence[ClaimView]) -> tuple[dict[str, Any], list[ClaimView]]:
     """Statistics over claims sharing the majority unit, currency and stated scope."""
 
-    numeric = [c for c in sample if c.value_canonical is not None and c.canonical_unit]
+    numeric = [c for c in sample if c.value_canonical is not None
+               and math.isfinite(c.value_canonical) and c.canonical_unit]
     if not numeric:
         return {}, []
     unit_votes: dict[tuple[str, str, str], int] = {}
     for claim in numeric:
         key = (claim.canonical_unit, claim.currency, claim.scope_note.strip())
         unit_votes[key] = unit_votes.get(key, 0) + 1
-    (unit, currency, scope), _count = max(unit_votes.items(), key=lambda kv: kv[1])
+    (unit, currency, scope), _count = max(unit_votes.items(), key=lambda kv: (kv[1], kv[0]))
     same_unit = [c for c in numeric if (c.canonical_unit, c.currency) == (unit, currency)]
     comparable = [c for c in same_unit if c.scope_note.strip() == scope]
     values = [float(c.value_canonical) for c in comparable]  # type: ignore[arg-type]
     median = statistics.median(values)
     mean = statistics.fmean(values)
     low, high = min(values), max(values)
+    # 与 feature 分支的线性插值定义一致；全部统计复用同一组可比机构，不能混入口径不一致的值。
+    quartiles = statistics.quantiles(values, n=4, method="inclusive") if len(values) > 1 else [values[0]] * 3
+    iqr = quartiles[2] - quartiles[0]
+    mad = statistics.median(abs(value - median) for value in values)
     if unit in ABSOLUTE_DIVERGENCE_SPREAD:
         spread = high - low
         spread_display = f"{_fmt_number(spread)}{'pp' if unit == '%' else unit}"
@@ -374,9 +385,13 @@ def _numeric_stats(sample: Sequence[ClaimView]) -> tuple[dict[str, Any], list[Cl
         "mean": mean,
         "low": low,
         "high": high,
+        "iqr": iqr,
+        "mad": mad,
         "median_display": format_canonical(median, unit, currency),
         "mean_display": format_canonical(mean, unit, currency),
         "range_display": f"{format_canonical(low, unit, currency)} ~ {format_canonical(high, unit, currency)}",
+        "iqr_display": format_canonical(iqr, "pp" if unit == "%" else unit, currency),
+        "mad_display": format_canonical(mad, "pp" if unit == "%" else unit, currency),
         "spread": round(spread, 4),
         "spread_display": spread_display,
         "divergent": divergent,
@@ -403,7 +418,7 @@ def _build_card(
     period: str,
     measure: str,
     series: Sequence[ClaimView],
-    coverage_total: int,
+    eligible_issuers: dict[str, str],
     as_of: date,
     window_days: int,
 ) -> Card:
@@ -413,6 +428,17 @@ def _build_card(
     sample = list(latest.values())
     stance_counts = _stance_counts(sample)
     stats, comparable = _numeric_stats(sample)
+    # 无已核验观点不等于反对；立场样本与数值可比样本分别记录，沿用现有快照 JSON。
+    stats["sample"] = {
+        "eligible_count": len(eligible_issuers),
+        "included_count": len(sample),
+        "claim_ids": sorted(claim.claim_id for claim in sample),
+        "stance_ratios": {key: count / len(sample) if sample else None for key, count in stance_counts.items()},
+        "not_mentioned": [
+            {"issuer_key": key, "issuer_name": name}
+            for key, name in sorted(eligible_issuers.items()) if key not in latest
+        ],
+    }
 
     card = Card(
         card_id=_card_id(dataset_id, item.item_key, period, measure),
@@ -422,7 +448,7 @@ def _build_card(
         measure=measure,
         card_type=CARD_SINGLE_VIEW,
         issuer_count=len(comparable) if comparable else len(sample),
-        coverage_total=coverage_total,
+        coverage_total=len(eligible_issuers),
         stats=stats,
         stance_counts=stance_counts,
         recent_changes=_recent_changes(institutional, as_of, window_days),
@@ -458,7 +484,7 @@ def _build_card(
             else:
                 card.card_type = CARD_DIVERGENCE
 
-    spread_term = float(stats.get("spread", 0.0)) if stats else (
+    spread_term = float(stats.get("spread", 0.0)) if stats.get("n") else (
         1.0 if (stance_counts["bullish"] and stance_counts["bearish"]) else 0.0
     )
     card.priority = round(len(sample) * (1.0 + min(spread_term, 2.0)) + card.recent_changes["up"] + card.recent_changes["down"], 3)
@@ -477,13 +503,28 @@ def build_cards(
     as_of = as_of or datetime.now(timezone.utc).date()
     items = {item.item_key: item for item in active_checklist(conn, dataset_id)}
     claims = _load_claims(conn, dataset_id)
+    claims = [c for c in claims if (_parse_date(c.as_of_date) or date.min) <= as_of]
     usable = [c for c in claims if c.quality_status == "verified" and c.item_key in items]
     low_quality: dict[str, int] = {}
     for claim in claims:
         if claim.quality_status != "verified":
             low_quality[claim.item_key] = low_quality.get(claim.item_key, 0) + 1
 
-    coverage_total = len({c.issuer_key for c in usable if c.issuer_kind != "company"})
+    # 分母来自项目已识别的机构资料，而不是仅来自有观点的文档，否则缺失机构会被悄悄抹掉。
+    eligible_issuers = {
+        str(row["issuer_key"]): str(row["issuer_name"] or row["issuer_key"])
+        for row in conn.execute("""
+            SELECT DISTINCT i.issuer_key, i.issuer_name,
+                COALESCE(NULLIF(di.as_of_date, ''), NULLIF(di.published_date, ''), d.document_date) AS observed_date
+            FROM document_issuers di
+            JOIN documents d ON d.doc_id=di.doc_id AND d.dataset_id=di.dataset_id
+            JOIN issuers i ON i.dataset_id=di.dataset_id AND i.issuer_key=di.issuer_key
+            WHERE di.dataset_id=? AND di.status='resolved' AND i.issuer_kind!='company'
+              AND d.file_type='pdf' AND d.is_current=1 AND d.lifecycle_state='active' AND d.deleted_at IS NULL
+        """, (dataset_id,))
+        if (_parse_date(str(row["observed_date"] or "")) or date.min) <= as_of
+    }
+    usable = [c for c in usable if c.issuer_kind == "company" or c.issuer_key in eligible_issuers]
 
     groups: dict[tuple[str, str, str], list[ClaimView]] = {}
     for claim in usable:
@@ -502,7 +543,7 @@ def build_cards(
             period=period,
             measure=measure,
             series=series,
-            coverage_total=coverage_total,
+            eligible_issuers=eligible_issuers,
             as_of=as_of,
             window_days=window_days,
         )
@@ -524,11 +565,13 @@ def template_narrative(card: Card) -> dict[str, str]:
     label = _TYPE_LABEL[card.card_type]
     period = f"{card.period_canonical} " if card.period_canonical else ""
     stats = card.stats
-    if card.card_type == CARD_SINGLE_VIEW and card.sources:
+    if card.issuer_count == 0:
+        consensus = "当前没有可比机构观点，公司指引单独展示。"
+    elif card.card_type == CARD_SINGLE_VIEW and card.sources:
         only = card.bull[0] if card.bull else card.bear[0] if card.bear else None
         who = only["issuer_name"] if only else card.sources[0]["issuer_name"]
         consensus = f"仅 {who} 一家覆盖" + (f"，{only['value_display']}" if only and only.get("value_display") else "") + "。"
-    elif stats:
+    elif stats.get("n"):
         consensus = (
             f"中位数 {stats['median_display']}，区间 {stats['range_display']}，"
             f"覆盖 {card.issuer_count}/{card.coverage_total} 家机构。"
