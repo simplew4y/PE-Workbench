@@ -1,0 +1,497 @@
+import { defineTool } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
+import { preparePeDocument } from "../documents.ts";
+import { normalizeText } from "./database.ts";
+import type { ExcelCellDetail } from "./excel-cells.ts";
+import { getPeExcelRange } from "./excel-range.ts";
+import { resolvePeValuationDate } from "./valuation-date.ts";
+import { locatePeValuationOutputs } from "./valuation-output.ts";
+import {
+	compactReportCitations,
+	reportText as markdownText,
+	reportMetricLabel,
+	valuationOverviewLayout,
+} from "./valuation-report-layout.ts";
+import { type ReportSectionIssue, validateReportSectionProse } from "./valuation-report-prose.ts";
+
+export const PE_VALUATION_REPORT_PROMPT_SNIPPET =
+	"Validate source cells and render a readable valuation report with forecast-year/method comparison tables, formula explanations and compact source links; provide checked operating drivers and qualitative analysis, never invented numeric values";
+
+export interface ReportFactRequest {
+	id: string;
+	sheet_name: string;
+	cell_ref: string;
+	expected_label: string;
+	expected_period?: string;
+	expected_unit?: string;
+	display_unit?: string;
+}
+
+export interface ReportCalculation {
+	id: string;
+	operation: "growth" | "change" | "ratio" | "upside" | "product";
+	left: string;
+	right: string;
+}
+
+export interface PeValuationReportOptions {
+	docId: string;
+	datasetId?: string;
+	scope: "overview" | "focused";
+	facts: ReportFactRequest[];
+	calculations: ReportCalculation[];
+	sections: Array<{ title: string; fact_ids: string[]; analysis?: string }>;
+}
+
+interface Quantity {
+	dimension: string;
+	scale: number;
+	label: string;
+}
+
+interface ReportFact {
+	id: string;
+	cell: ExcelCellDetail;
+	quantity: Quantity;
+	base_value: number;
+	text: string;
+	table_value: string;
+}
+
+export interface PeValuationReportResult {
+	doc_id: string;
+	status: "ready" | "blocked";
+	issues: string[];
+	section_issues: ReportSectionIssue[];
+	repair_scope?: "sections";
+	rendered_report?: string;
+	facts: Array<{ id: string; cell: ExcelCellDetail; text: string }>;
+	calculations: Array<{ id: string; value: number; text: string }>;
+	validation_scope: string;
+}
+
+function quantity(unit: string): Quantity | undefined {
+	const currency = /^(EUR|USD|CNY|RMB|HKD|GBP|JPY)(m|bn|_100m|\/share)?$/u.exec(unit);
+	if (currency) {
+		const suffix = currency[2] ?? "";
+		return {
+			dimension: `${currency[1]}${suffix === "/share" ? "/share" : ""}`,
+			scale: suffix === "m" ? 1e6 : suffix === "bn" ? 1e9 : suffix === "_100m" ? 1e8 : 1,
+			label: `${suffix === "m" ? "百万" : suffix === "bn" ? "十亿" : suffix === "_100m" ? "亿" : ""}${currency[1]}${suffix === "/share" ? "/股" : ""}`,
+		};
+	}
+	if (unit === "shares_m" || unit === "shares")
+		return {
+			dimension: "shares",
+			scale: unit === "shares_m" ? 1e6 : 1,
+			label: unit === "shares_m" ? "百万股" : "股",
+		};
+	if (unit === "%") return { dimension: "ratio", scale: 1, label: "%" };
+	if (unit === "per_share") return { dimension: "unknown_currency/share", scale: 1, label: "每股金额" };
+	if (unit === "share_count_unspecified_scale") return { dimension: "unknown_share_scale", scale: 1, label: "" };
+	if (["x", "multiple", "times"].includes(unit)) return { dimension: "multiple", scale: 1, label: "倍" };
+	return undefined;
+}
+
+function formatNumber(value: number): string {
+	return new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
+}
+
+function periodOrder(period: string): { year: number; grain: string } | undefined {
+	const year = /(?:19|20)\d{2}/u.exec(period)?.[0];
+	if (!year) return undefined;
+	return {
+		year: Number(year),
+		grain: period
+			.toUpperCase()
+			.replace(/\s/gu, "")
+			.replace(/^FY/u, "")
+			.replace(/[EAF]$/u, "")
+			.replace(year, ""),
+	};
+}
+
+/** Only source values and the listed arithmetic are checked. This never recalculates Excel or verifies investment judgments. */
+export function buildPeValuationReport(cwd: string, options: PeValuationReportOptions): PeValuationReportResult {
+	const issues: string[] = [];
+	const result: PeValuationReportResult = {
+		doc_id: options.docId,
+		status: "blocked",
+		issues,
+		section_issues: [],
+		facts: [],
+		calculations: [],
+		validation_scope:
+			"Source-cell label/period/unit matching, deterministic arithmetic and located-output coverage. Stored formula caches are not recalculated. Narrative is explicitly analyst inference, not independently verified.",
+	};
+	const facts = new Map<string, ReportFact>();
+	const statements = new Map<string, string>();
+	const ids = new Set<string>();
+	for (const request of options.facts) {
+		if (!/^[a-zA-Z][a-zA-Z0-9_]{0,63}$/u.test(request.id) || ids.has(request.id)) {
+			issues.push(`Invalid or duplicate fact id: ${request.id}`);
+			continue;
+		}
+		ids.add(request.id);
+		const location = `${request.sheet_name}!${request.cell_ref}`;
+		if (!/^[A-Z]{1,3}[1-9]\d*$/u.test(request.cell_ref)) {
+			issues.push(`${location}: one exact cell is required`);
+			continue;
+		}
+		const range = getPeExcelRange(cwd, {
+			docId: options.docId,
+			datasetId: options.datasetId,
+			sheetName: request.sheet_name,
+			cellRange: request.cell_ref,
+		});
+		const cell = (range.cells as ExcelCellDetail[])[0];
+		if (!cell || cell.numeric_value === undefined || !Number.isFinite(cell.numeric_value)) {
+			issues.push(`${location}: numeric source value unavailable`);
+			continue;
+		}
+		if (cell.is_formula && cell.formula_cache_status !== "present") {
+			issues.push(`${location}: usable formula cache required`);
+			continue;
+		}
+		if (!request.expected_label.trim() || normalizeText(request.expected_label) !== normalizeText(cell.row_label)) {
+			issues.push(`${location}: metric label mismatch; source is ${cell.row_label ?? "missing"}`);
+			continue;
+		}
+		if (
+			request.expected_period !== undefined &&
+			normalizeText(request.expected_period) !== normalizeText(cell.period)
+		) {
+			issues.push(`${location}: period mismatch; source is ${cell.period ?? "missing"}`);
+			continue;
+		}
+		if (request.expected_unit !== undefined && request.expected_unit !== cell.unit) {
+			issues.push(`${location}: unit mismatch; source is ${cell.unit ?? "missing"}`);
+			continue;
+		}
+		if (cell.period_context?.status === "ambiguous" || cell.unit_context?.status === "ambiguous") {
+			issues.push(`${location}: ambiguous period or unit requires source review`);
+			continue;
+		}
+		const sourceQuantity = quantity(cell.unit ?? "");
+		const displayQuantity = quantity(request.display_unit ?? cell.unit ?? "");
+		if (!sourceQuantity || !displayQuantity || sourceQuantity.dimension !== displayQuantity.dimension) {
+			issues.push(`${location}: unresolved or incompatible unit`);
+			continue;
+		}
+		// Excel's percent format scales a stored fraction by 100. Formula text is
+		// never evidence of storage scale (it may contain a percent literal).
+		const percentIsFraction =
+			/%/u.test((cell.number_format ?? "").replace(/"[^"]*"|\\./gu, "")) ||
+			/^[-+]?\d[\d,]*(?:\.\d+)?\s*%$/u.test((cell.is_formula ? cell.cached_value : cell.raw_value)?.trim() ?? "");
+		if (sourceQuantity.dimension === "ratio" && !percentIsFraction && Math.abs(cell.numeric_value) <= 1) {
+			issues.push(`${location}: ambiguous percentage storage; inspect the source format before calculating`);
+			continue;
+		}
+		const baseValue =
+			(cell.numeric_value * sourceQuantity.scale) /
+			(sourceQuantity.dimension === "ratio" && !percentIsFraction ? 100 : 1);
+		const displayValue = sourceQuantity.dimension === "ratio" ? baseValue * 100 : baseValue / displayQuantity.scale;
+		const origin = cell.is_formula ? "模型保存值" : "模型填写值";
+		const tableValue = `${formatNumber(displayValue)}${displayQuantity.label ? ` ${displayQuantity.label}` : ""}（${origin}）。${cell.markdown_citation}`;
+		const text = `${cell.period ? `${markdownText(cell.period)} · ` : ""}${markdownText(reportMetricLabel(cell.row_label ?? location))}：${tableValue}`;
+		facts.set(request.id, {
+			id: request.id,
+			cell,
+			quantity: sourceQuantity,
+			base_value: baseValue,
+			text,
+			table_value: tableValue,
+		});
+		statements.set(request.id, text);
+		result.facts.push({ id: request.id, cell, text });
+	}
+
+	const inventory = locatePeValuationOutputs(cwd, { docId: options.docId, datasetId: options.datasetId, topK: 25 });
+	const outputLocations = new Set(
+		inventory.output_groups.flatMap((group) =>
+			group.outputs
+				.filter((output) => ["target_price", "per_share_value"].includes(output.semantic_role))
+				.map((output) => `${output.sheet_name}!${output.cell_ref}`),
+		),
+	);
+	const priceLocations = new Set(
+		inventory.cross_check_nodes
+			.filter((node) => node.role === "current_price")
+			.map((node) => `${node.sheet_name}!${node.cell_ref}`),
+	);
+	for (const calculation of options.calculations) {
+		if (ids.has(calculation.id) || !/^[a-zA-Z][a-zA-Z0-9_]{0,63}$/u.test(calculation.id)) {
+			issues.push(`Invalid or duplicate calculation id: ${calculation.id}`);
+			continue;
+		}
+		ids.add(calculation.id);
+		const left = facts.get(calculation.left);
+		const right = facts.get(calculation.right);
+		if (!left || !right) {
+			issues.push(`${calculation.id}: both inputs must be valid source facts`);
+			continue;
+		}
+		let value: number;
+		let text: string;
+		const sameDimension =
+			left.quantity.dimension === right.quantity.dimension && !left.quantity.dimension.startsWith("unknown_");
+		if (calculation.operation === "growth" || calculation.operation === "change") {
+			const before = periodOrder(left.cell.period ?? "");
+			const after = periodOrder(right.cell.period ?? "");
+			if (
+				!sameDimension ||
+				normalizeText(left.cell.row_label) !== normalizeText(right.cell.row_label) ||
+				!before ||
+				!after ||
+				before.grain !== after.grain ||
+				before.year >= after.year
+			) {
+				issues.push(`${calculation.id}: change needs the same metric, units and comparable ordered periods`);
+				continue;
+			}
+			if (calculation.operation === "growth" && left.base_value <= 0) {
+				issues.push(`${calculation.id}: growth requires a positive base`);
+				continue;
+			}
+			value =
+				calculation.operation === "growth"
+					? right.base_value / left.base_value - 1
+					: right.base_value - left.base_value;
+			const scaled =
+				calculation.operation === "growth" || left.quantity.dimension === "ratio"
+					? Math.abs(value) * 100
+					: Math.abs(value) / left.quantity.scale;
+			const unit =
+				calculation.operation === "growth"
+					? "%"
+					: left.quantity.dimension === "ratio"
+						? "个百分点"
+						: left.quantity.label;
+			text = `${markdownText(left.cell.row_label ?? "指标")}（${markdownText(left.cell.period ?? "")} → ${markdownText(right.cell.period ?? "")}）：${value > 0 ? "上升" : value < 0 ? "下降" : "不变"} ${formatNumber(scaled)} ${unit}`;
+		} else if (calculation.operation === "ratio") {
+			if (!sameDimension || !left.cell.period || left.cell.period !== right.cell.period || right.base_value === 0) {
+				issues.push(`${calculation.id}: ratio requires matching units, periods and nonzero denominator`);
+				continue;
+			}
+			value = left.base_value / right.base_value;
+			text = `${markdownText(left.cell.row_label ?? "分子")} ÷ ${markdownText(right.cell.row_label ?? "分母")}（${markdownText(left.cell.period)}）：${formatNumber(value * 100)}%`;
+		} else if (calculation.operation === "upside") {
+			if (
+				!sameDimension ||
+				!left.quantity.dimension.endsWith("/share") ||
+				right.base_value <= 0 ||
+				!outputLocations.has(`${left.cell.sheet_name}!${left.cell.cell_ref}`) ||
+				!priceLocations.has(`${right.cell.sheet_name}!${right.cell.cell_ref}`)
+			) {
+				issues.push(
+					`${calculation.id}: upside requires a located per-share output and reference price in the same currency`,
+				);
+				continue;
+			}
+			value = left.base_value / right.base_value - 1;
+			text = `${markdownText(left.cell.sheet_name)} 目标结果相对 ${markdownText(right.cell.sheet_name)}!${right.cell.cell_ref} 参考价格：${value >= 0 ? "上行" : "下行"} ${formatNumber(Math.abs(value) * 100)}%（按指定基准补充计算）`;
+		} else {
+			if (
+				!left.quantity.dimension.endsWith("/share") ||
+				right.quantity.dimension !== "multiple" ||
+				!/(?:\beps\b|earnings?\s+per\s+share|每股收益)/iu.test(left.cell.row_label ?? "") ||
+				(left.cell.period && right.cell.period && left.cell.period !== right.cell.period)
+			) {
+				issues.push(
+					`${calculation.id}: product requires EPS and a multiple for the same period, or an explicitly undated fixed multiple`,
+				);
+				continue;
+			}
+			value = left.base_value * right.base_value;
+			text = `${markdownText(left.cell.row_label ?? "每股收益")}${left.cell.period ? `（${markdownText(left.cell.period)}）` : ""}× ${markdownText(right.cell.row_label ?? "倍数")}：${formatNumber(value / left.quantity.scale)} ${left.quantity.label}`;
+		}
+		if (!Number.isFinite(value)) {
+			issues.push(`${calculation.id}: non-finite result`);
+			continue;
+		}
+		text += `（程序计算）。${left.cell.markdown_citation} ${right.cell.markdown_citation}`;
+		statements.set(calculation.id, text);
+		result.calculations.push({ id: calculation.id, value, text });
+	}
+
+	const lines: string[] = [];
+	const notes: string[] = [];
+	const appendix: string[] = [];
+	if (options.scope === "overview") {
+		if (!inventory.output_inventory_complete)
+			issues.push(
+				"Valuation output inventory is truncated; inspect individual methods before producing an overview",
+			);
+		const overview = valuationOverviewLayout(cwd, inventory);
+		lines.push(...overview.lines);
+		appendix.push(...overview.appendix);
+		if (!overview.outputCount) issues.push("No sufficiently supported valuation output is available for an overview");
+		const prices = inventory.cross_check_nodes.filter(
+			(node) =>
+				node.role === "current_price" &&
+				node.numeric_value !== undefined &&
+				Number.isFinite(node.numeric_value) &&
+				(!node.formula || node.formula_cache_status === "present"),
+		);
+		if (prices.length) lines.push("### 模型参考价格", "");
+		for (const price of prices) {
+			if (price.numeric_value === undefined || !Number.isFinite(price.numeric_value)) continue;
+			const value = formatNumber(price.numeric_value);
+			const range = getPeExcelRange(cwd, {
+				docId: options.docId,
+				datasetId: options.datasetId,
+				sheetName: price.sheet_name,
+				cellRange: price.cell_ref,
+			});
+			const source = (range.cells as ExcelCellDetail[])[0];
+			const unit = source?.unit_context?.status === "ambiguous" ? "" : quantity(source?.unit ?? "")?.label;
+			lines.push(
+				`- ${markdownText(price.sheet_name)}!${price.cell_ref}：${value}${unit ? ` ${unit}` : ""}（${price.price_kind === "cached_external" ? "外部函数保存值" : "模型参考值"}）。${price.markdown_citation}`,
+			);
+		}
+		const date = resolvePeValuationDate(cwd, {
+			docId: options.docId,
+			datasetId: options.datasetId,
+			allowMetadataFallback: false,
+		});
+		const dateCitations = date.candidates
+			.filter((candidate) => date.selected_candidate_ids.includes(candidate.candidate_id))
+			.map((candidate) => candidate.markdown_citation)
+			.filter(Boolean)
+			.join(" ");
+		lines.push("");
+		if (date.status === "verified" && date.valuation_date)
+			notes.push(`估值日期：${date.valuation_date}。${dateCitations}`, "");
+	}
+	const usedStatements = new Set<string>();
+	for (const [sectionIndex, section] of options.sections.entries()) {
+		const { analysis, issues: sectionIssues } = validateReportSectionProse(section, sectionIndex);
+		result.section_issues.push(...sectionIssues);
+		for (const issue of sectionIssues)
+			issues.push(`章节「${section.title}」的 ${issue.field}：${issue.excerpt} — ${issue.repair}`);
+		for (const id of section.fact_ids) {
+			if (!statements.has(id)) issues.push(`Section ${section.title}: unknown or invalid fact ${id}`);
+		}
+		if (analysis && !section.fact_ids.some((id) => statements.has(id))) {
+			issues.push(
+				`Section ${section.title}: analyst interpretation requires at least one checked fact or calculation`,
+			);
+			continue;
+		}
+		if (sectionIssues.length) continue;
+		if (!section.fact_ids.length && !analysis) continue;
+		lines.push(`## ${markdownText(section.title)}`, "");
+		const sectionFacts = section.fact_ids.filter((id) => facts.has(id) && !usedStatements.has(id));
+		if (sectionFacts.length > 1) {
+			lines.push("| 指标 | 期间 | 模型数值 |", "| --- | --- | ---: |");
+			for (const id of sectionFacts) {
+				const fact = facts.get(id);
+				if (!fact || usedStatements.has(id)) continue;
+				lines.push(
+					`| ${markdownText(reportMetricLabel(fact.cell.row_label ?? fact.cell.cell_ref))} | ${markdownText(fact.cell.period ?? "")} | ${fact.table_value} |`,
+				);
+				usedStatements.add(id);
+			}
+			lines.push("");
+		}
+		for (const id of section.fact_ids) {
+			const text = statements.get(id);
+			if (!text) continue;
+			if (usedStatements.has(id)) continue;
+			usedStatements.add(id);
+			lines.push(`- ${text}`);
+		}
+		if (analysis) lines.push("", `分析推断：${markdownText(analysis)}`);
+		lines.push("");
+	}
+	if (
+		options.scope === "focused" &&
+		!options.sections.some((section) => section.fact_ids.some((id) => statements.has(id)))
+	)
+		issues.push("A focused report must include at least one checked fact or calculation");
+	if (issues.length && issues.length === result.section_issues.length) result.repair_scope = "sections";
+	if (!issues.length) {
+		result.status = "ready";
+		result.rendered_report = compactReportCitations([...lines, ...notes, ...appendix].join("\n").trim());
+	}
+	return result;
+}
+
+export const peValuationReportTool = defineTool({
+	name: "pe_valuation_report",
+	label: "PE Valuation Report",
+	promptSnippet: PE_VALUATION_REPORT_PROMPT_SNIPPET,
+	description:
+		"Build the final valuation report from exact source cells. Numeric statements, conversions and observed financial trends are rendered by code. An overview groups results by source method and forecast period, explains supported formulas, and places historical periods in an appendix. Source links remain clickable with compact labels. Provide sections covering the key operating drivers and model assumptions with qualitative interpretation, not just a parameter list. Use neutral headings; qualitative analyst inference must reference checked facts. Explicit conditional impact paths and risks are allowed; numbers, observed financial trends and citations belong in facts/calculations. Omit unconfirmed metadata and missing-information commentary from the report. Keep unknown units internally and never convert or compare them as confirmed units. On repair_scope=sections, use section_issues to revise only the affected prose and call this tool again, preserving the checked facts/calculations; no workbook reread is needed for prose-only errors. Other blocked results require source correction. Once ready, return rendered_report verbatim.",
+	parameters: Type.Object({
+		doc_id: Type.String({ minLength: 1 }),
+		dataset_id: Type.Optional(Type.String()),
+		scope: Type.Union([Type.Literal("overview"), Type.Literal("focused")]),
+		facts: Type.Array(
+			Type.Object({
+				id: Type.String({ pattern: "^[a-zA-Z][a-zA-Z0-9_]{0,63}$" }),
+				sheet_name: Type.String({ minLength: 1 }),
+				cell_ref: Type.String({ pattern: "^[A-Z]{1,3}[1-9][0-9]*$" }),
+				expected_label: Type.String({
+					minLength: 1,
+					description: "Exact source row label, including earnings/share-count basis.",
+				}),
+				expected_period: Type.Optional(
+					Type.String({
+						description: "Exact financial period from the source header. Never infer valuation date from this.",
+					}),
+				),
+				expected_unit: Type.Optional(Type.String()),
+				display_unit: Type.Optional(
+					Type.String({ description: "Canonical compatible unit, e.g. EURm, EUR_100m, EUR/share, shares_m, %." }),
+				),
+			}),
+			{ maxItems: 40 },
+		),
+		calculations: Type.Array(
+			Type.Object({
+				id: Type.String(),
+				operation: Type.Union([
+					Type.Literal("growth"),
+					Type.Literal("change"),
+					Type.Literal("ratio"),
+					Type.Literal("upside"),
+					Type.Literal("product"),
+				]),
+				left: Type.String({ description: "Numerator/earlier-period/target/EPS fact id." }),
+				right: Type.String({ description: "Denominator/later-period/reference price/multiple fact id." }),
+			}),
+			{ maxItems: 30 },
+		),
+		sections: Type.Array(
+			Type.Object({
+				title: Type.String({ minLength: 1, maxLength: 100 }),
+				fact_ids: Type.Array(Type.String(), { maxItems: 40 }),
+				analysis: Type.Optional(
+					Type.String({
+						maxLength: 3000,
+						description:
+							"Qualitative inference tied to fact_ids. Use facts/calculations for numbers, years, observed financial trends and citations, including Chinese numerals. Explicit conditional risks are allowed, e.g. 若盈利下降，估值可能承压. Do not disguise unchecked factual claims as hypotheses.",
+					}),
+				),
+			}),
+			{ minItems: 1, maxItems: 8 },
+		),
+	}),
+	async execute(_id, params, signal, _onUpdate, ctx) {
+		await preparePeDocument(ctx.cwd, { docId: params.doc_id, datasetId: params.dataset_id }, signal);
+		const result = buildPeValuationReport(ctx.cwd, {
+			docId: params.doc_id,
+			datasetId: params.dataset_id,
+			scope: params.scope,
+			facts: params.facts,
+			calculations: params.calculations,
+			sections: params.sections,
+		});
+		return {
+			content: [{ type: "text", text: JSON.stringify(result) }],
+			details: result,
+			isError: result.status === "blocked",
+		};
+	},
+});

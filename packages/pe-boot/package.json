@@ -8,19 +8,26 @@
 	"exports": {
 		".": {
 			"types": "./dist/index.d.ts",
-			"import": "./dist/index.js"
-		}
+			"import": "./dist/index.js",
+			"default": "./dist/index.js"
+		},
+		"./documents": { "types": "./dist/documents.d.ts", "import": "./dist/documents.js", "default": "./dist/documents.js" },
+		"./schema": { "types": "./dist/collection-schema.d.ts", "import": "./dist/collection-schema.js", "default": "./dist/collection-schema.js" },
+		"./source": { "types": "./dist/source.d.ts", "import": "./dist/source.js", "default": "./dist/source.js" },
+		"./evidence": { "types": "./dist/evidence.d.ts", "import": "./dist/evidence.js", "default": "./dist/evidence.js" }
 	},
 	"bin": {
 		"pe-boot": "dist/cli.js"
 	},
 	"files": [
 		"dist",
-		"skills"
+		"skills",
+		"python"
 	],
 	"scripts": {
 		"clean": "shx rm -rf dist",
 		"build": "tsgo -p tsconfig.build.json && shx chmod +x dist/cli.js",
+		"setup:python": "node python/setup.mjs",
 		"test": "vitest --run",
 		"prepublishOnly": "npm run clean && npm run build"
 	},

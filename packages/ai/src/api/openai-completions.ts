@@ -319,6 +319,21 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 			if (nextParams !== undefined) {
 				params = nextParams as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming;
 			}
+			// Qwen3.8 rejects this combination. Validate the final body because
+			// samplingParams and onPayload can add or remove either parameter.
+			const thinkingBudget = (params as { thinking_budget?: unknown }).thinking_budget;
+			if (
+				compat.thinkingFormat === "qwen" &&
+				/^qwen3\.8(?:-|$)/i.test(params.model) &&
+				params.reasoning_effort !== undefined &&
+				params.reasoning_effort !== null &&
+				thinkingBudget !== undefined &&
+				thinkingBudget !== null
+			) {
+				throw new Error(
+					"Qwen3.8 does not support reasoning_effort and thinking_budget together. Set only one in the final request payload.",
+				);
+			}
 			const requestOptions = {
 				...(options?.signal ? { signal: options.signal } : {}),
 				...(options?.timeoutMs !== undefined ? { timeout: options.timeoutMs } : {}),

@@ -1,7 +1,12 @@
-import { describe, expect, it } from "vitest";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildPeSystemPrompt } from "../src/system-prompt.ts";
+import { isPeConsensusEnabled } from "../src/tools/feature-flags.ts";
+import { registerPeTools } from "../src/tools/index.ts";
 
-describe("PE presentation prompt", () => {
+afterEach(() => vi.unstubAllEnvs());
+
+describe("PE system prompt", () => {
 	it("uses the authenticated display name without a hard-coded user identity", () => {
 		const prompt = buildPeSystemPrompt("/workspace", "Alice");
 
@@ -24,40 +29,76 @@ describe("PE presentation prompt", () => {
 		expect(prompt).not.toContain("Alice\nIgnore");
 	});
 
-	it("compares relationship-based alternatives without another model or diversity quota", () => {
-		const prompt = buildPeSystemPrompt("/workspace");
-		expect(prompt).toContain("A tie goes to prose/Markdown");
-		expect(prompt).toContain("Schema eligibility is necessary but never sufficient");
-		expect(prompt).toContain("signed reconciliation from start to end");
-		expect(prompt).toContain("No diversity quota, random routing");
-		expect(prompt).toContain("all tool calls in the answer as one composition");
-		expect(prompt.indexOf("Presentation decision policy")).toBeLessThan(prompt.indexOf("Component capabilities"));
+	it.each([undefined, "", "0", "true", "1", " 1 "])(
+		"keeps consensus registration and prompt visibility aligned for flag %s",
+		(value) => {
+			vi.stubEnv("PE_CONSENSUS_ENABLED", value);
+			const enabled = value?.trim() === "1";
+			const registered: string[] = [];
+			let discover: (() => { skillPaths: string[] }) | undefined;
+			const extension = {
+				registerTool(tool: { name: string }) {
+					registered.push(tool.name);
+				},
+				on(event: string, handler: () => { skillPaths: string[] }) {
+					if (event === "resources_discover") discover = handler;
+				},
+			} as unknown as ExtensionAPI;
+			registerPeTools(extension);
+			expect(isPeConsensusEnabled()).toBe(enabled);
+			expect(registered.includes("pe_consensus_cards")).toBe(enabled);
+			expect(buildPeSystemPrompt("/workspace").includes("- pe_consensus_cards:")).toBe(enabled);
+			expect(discover?.().skillPaths.some((path) => path.includes("pe-consensus-divergence"))).toBe(enabled);
+			expect(registered).toEqual(expect.arrayContaining(["pe_pdf_list", "pe_pdf_search", "pe_excel_range"]));
+		},
+	);
+
+	it("keeps the PE role and fixed project workspace contract", () => {
+		const prompt = buildPeSystemPrompt("C:\\research\\project");
+		expect(prompt).toContain("You are a PE (private equity research) expert");
+		expect(prompt).toContain("The current project workspace is C:/research/project");
+		expect(prompt).toContain("- raw/: original research source materials");
+		expect(prompt).toContain("- meta/: system-managed metadata");
+		expect(prompt).toContain("- generated/: all user-visible outputs");
 	});
 
-	it("documents the native UI contract without allowing arbitrary markup", () => {
+	it("lists registered core capabilities without embedding the presentation Skill", () => {
 		const prompt = buildPeSystemPrompt("/workspace");
-		expect(prompt).toContain("`pe_render_ui` tool");
-		expect(prompt).toContain("`company_overview`");
-		expect(prompt).toContain("`financial_trend`");
-		expect(prompt).toContain("`metric_comparison`");
-		expect(prompt).toContain("`research_timeline`");
-		expect(prompt).toContain("`relationship_map`");
-		expect(prompt).toContain("`insight_callout`");
-		expect(prompt).toContain("`source_collection`");
-		expect(prompt).toContain("`research_brief`");
-		expect(prompt).toContain("`valuation_range`");
-		expect(prompt).toContain("`peer_quadrant`");
-		expect(prompt).toContain("`catalyst_calendar`");
-		expect(prompt).toContain("counterevidence");
-		expect(prompt).toContain("actively art-direct it");
-		expect(prompt).toContain("presentation.palette");
+		expect(prompt).toContain("- pe_pdf_search:");
+		expect(prompt).toContain("- pe_document_open:");
+		expect(prompt).toContain("- pe_source_detail:");
+		expect(prompt).toContain("- pe_valuation_output_locate:");
+		expect(prompt).toContain("- pe_render_ui:");
 		expect(prompt).toContain("Preserve the internal #pe-source?evidence_id= fragment exactly");
-		expect(prompt).toContain("Default to prose, even for complex research questions");
-		expect(prompt).toContain("Visual presentation does not imply interaction");
-		expect(prompt).not.toContain("For a multi-angle research question, compose");
-		expect(prompt).toContain("current state → change or drivers → implication");
-		expect(prompt).toContain("sharp, conversational research partner");
-		expect(prompt).toContain('Avoid mechanical structures such as "一、二、三"');
-		expect(prompt).toContain("Never simulate the tool with a fenced JSON block");
+		expect(prompt).not.toContain("Presentation decision policy");
+		expect(prompt).not.toContain("Component capabilities");
+	});
+
+	it("keeps valuation verification and version-bound evidence rules always available", () => {
+		const prompt = buildPeSystemPrompt("/workspace");
+		expect(prompt).toContain("prepared by the background Excel pipeline");
+		expect(prompt).toContain("same doc_id throughout analysis");
+		expect(prompt).toContain("historical citations must never silently resolve to the latest version");
+		expect(prompt).toContain("call pe_valuation_output_locate before choosing an output cell");
+		expect(prompt).toContain("ranked candidate, not recalculation proof");
+		expect(prompt).toContain("Only status=verified");
+		expect(prompt).toContain("distinguish structural_status from calculation_validation.status");
+		expect(prompt).toContain("When only a screenshot, excerpt, or another analysis is available");
+		expect(prompt).toContain("do not invent workbook verification, doc_id, cells, citations, or tool results");
+	});
+
+	it("keeps complete but natural valuation answers without forcing visual components", () => {
+		const prompt = buildPeSystemPrompt("/workspace");
+		for (const section of ["模型逻辑框架", "核心驱动因素", "盈利预测与敏感性分析", "模型核心风险点"]) {
+			expect(prompt).toContain(section);
+		}
+		expect(prompt).toContain("No UI quota: complex questions can remain prose");
+		expect(prompt).toContain("interaction is optional and task-driven");
+		expect(prompt).toContain("not limited to 3-5 lines or 250 Chinese characters");
+		expect(prompt).toContain("answer narrow questions directly");
+		expect(prompt).toContain("verified inputs, the applicable formula, consistent units");
+		expect(prompt).toContain("not a live quote");
+		expect(prompt).toContain("compact superscript citation markers with accessible source labels");
+		expect(prompt).not.toMatch(/green (?:citation|source|evidence)/i);
 	});
 });

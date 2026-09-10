@@ -2,6 +2,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, realpathSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
+import { resolvePeEvidenceSources, sourceLocationRow } from "../evidence.ts";
+import { type PeSourcePayload, parseSourceId } from "../source.ts";
 import {
 	evidenceLocator,
 	numberValue,
@@ -40,6 +42,7 @@ export interface SavePeMemoOptions {
 }
 
 interface EvidenceReference {
+	doc_id: string;
 	evidence_id: string;
 	citation: string;
 	filename: string;
@@ -270,16 +273,55 @@ function activeDocumentPredicate(): string {
 	return "d.deleted_at IS NULL AND COALESCE(d.is_current, 1) = 1 AND COALESCE(d.lifecycle_state, 'active') = 'active'";
 }
 
-function resolveEvidence(database: DatabaseSync, datasetId: string, evidenceId: string): EvidenceReference | undefined {
+function resolveEvidence(
+	database: DatabaseSync,
+	datasetId: string,
+	evidenceId: string,
+	sources: ReadonlyMap<string, PeSourcePayload>,
+): EvidenceReference | undefined {
+	const source = sources.get(evidenceId);
+	if (source) {
+		const reference = parseSourceId(evidenceId);
+		return {
+			doc_id: source.doc_id,
+			evidence_id: evidenceId,
+			citation: source.citation,
+			filename: source.filename,
+			locator:
+				source.kind === "excel"
+					? { sheet_name: source.sheet_name, cell_range: source.cell_range }
+					: source.kind === "pdf"
+						? { page_start: source.page_start, page_end: source.page_end }
+						: reference
+							? evidenceLocator(sourceLocationRow(reference))
+							: {},
+		};
+	}
+	// Managed citations must not fall back to stale cache rows after a hash or recovery failure.
+	if (
+		evidenceId.startsWith("source:") ||
+		(/^(page|cell|fact):/u.test(evidenceId) &&
+			(database.prepare("PRAGMA table_info(documents)").all() as SqlRow[]).some((row) => row.name === "stored_path"))
+	)
+		return undefined;
 	const separator = evidenceId.indexOf(":");
 	if (separator <= 0 || separator === evidenceId.length - 1) return undefined;
 	const kind = evidenceId.slice(0, separator);
 	const rawId = evidenceId.slice(separator + 1);
 	let row: SqlRow | undefined;
-	if (kind === "chunk") {
+	if (kind === "page" && tableExists(database, "pdf_pages")) {
 		row = database
 			.prepare(
-				`SELECT c.chunk_id, c.title_path, d.original_filename, d.source_relpath,
+				`SELECT d.doc_id, d.original_filename, p.page_number AS page_start, p.page_number AS page_end
+				 FROM pdf_pages p
+				 JOIN documents d ON d.doc_id=p.doc_id
+				 WHERE d.dataset_id=? AND p.page_id=?`,
+			)
+			.get(datasetId, rawId) as SqlRow | undefined;
+	} else if (kind === "chunk" && tableExists(database, "chunks")) {
+		row = database
+			.prepare(
+				`SELECT d.doc_id, c.chunk_id, c.title_path, d.original_filename, d.source_relpath,
 				        l.page_start, l.page_end, l.sheet_name, l.cell_range, l.heading_path
 				 FROM chunks c
 				 JOIN documents d ON d.doc_id=c.doc_id
@@ -291,7 +333,7 @@ function resolveEvidence(database: DatabaseSync, datasetId: string, evidenceId: 
 	} else if (kind === "fact" && tableExists(database, "metric_facts")) {
 		row = database
 			.prepare(
-				`SELECT f.fact_id, f.sheet_name, f.cell_ref AS cell_range,
+				`SELECT d.doc_id, f.fact_id, f.sheet_name, f.cell_ref AS cell_range,
 				        d.original_filename, d.source_relpath
 				 FROM metric_facts f JOIN documents d ON d.doc_id=f.doc_id
 				 WHERE f.dataset_id=? AND f.fact_id=? AND ${activeDocumentPredicate()}`,
@@ -300,7 +342,7 @@ function resolveEvidence(database: DatabaseSync, datasetId: string, evidenceId: 
 	} else if (kind === "cell" && tableExists(database, "excel_cells")) {
 		row = database
 			.prepare(
-				`SELECT c.cell_id, c.sheet_name, c.cell_ref AS cell_range,
+				`SELECT d.doc_id, c.cell_id, c.sheet_name, c.cell_ref AS cell_range,
 				        d.original_filename, d.source_relpath
 				 FROM excel_cells c JOIN documents d ON d.doc_id=c.doc_id
 				 WHERE c.dataset_id=? AND c.cell_id=? AND ${activeDocumentPredicate()}`,
@@ -309,6 +351,7 @@ function resolveEvidence(database: DatabaseSync, datasetId: string, evidenceId: 
 	}
 	if (!row) return undefined;
 	return {
+		doc_id: textValue(row, "doc_id") ?? "",
 		evidence_id: evidenceId,
 		citation: sourceCitation(row),
 		filename: textValue(row, "source_relpath") ?? textValue(row, "original_filename") ?? "unknown source",
@@ -320,6 +363,7 @@ function validateClaims(
 	database: DatabaseSync,
 	datasetId: string,
 	claims: readonly MemoClaimInput[],
+	sources: ReadonlyMap<string, PeSourcePayload>,
 	signal?: AbortSignal,
 ): { citationGate: MemoCitationGate; evidence: Map<string, EvidenceReference> } {
 	if (claims.length === 0) throw new Error("memo_claims must contain at least one claim");
@@ -342,7 +386,7 @@ function validateClaims(
 			for (const evidenceId of requestedIds) {
 				let reference = evidence.get(evidenceId);
 				if (!reference) {
-					reference = resolveEvidence(database, datasetId, evidenceId);
+					reference = resolveEvidence(database, datasetId, evidenceId, sources);
 					if (reference) evidence.set(evidenceId, reference);
 				}
 				if (reference) validIds.push(evidenceId);
@@ -594,11 +638,10 @@ function writeAtomicFile(finalPath: string, content: string | Uint8Array): strin
 	}
 }
 
-function currentDocumentSnapshot(database: DatabaseSync): Array<Record<string, unknown>> {
-	const columns = (database.prepare("PRAGMA table_info(documents)").all() as SqlRow[])
-		.map((row) => textValue(row, "name"))
-		.filter((value): value is string => value !== undefined);
-	const available = new Set(columns);
+function documentSnapshot(database: DatabaseSync, citedDocIds: readonly string[]): Array<Record<string, unknown>> {
+	const ids = [...new Set(citedDocIds)].filter(Boolean);
+	if (ids.length === 0) return [];
+	const columns = new Set((database.prepare("PRAGMA table_info(documents)").all() as SqlRow[]).map((row) => row.name));
 	const projection = [
 		"doc_id",
 		"logical_doc_id",
@@ -607,14 +650,12 @@ function currentDocumentSnapshot(database: DatabaseSync): Array<Record<string, u
 		"document_date",
 		"checksum",
 		"doc_type",
-	].filter((column) => available.has(column));
-	const predicates = [
-		available.has("is_current") ? "COALESCE(is_current, 1)=1" : "",
-		available.has("lifecycle_state") ? "COALESCE(lifecycle_state, 'active')='active'" : "",
-		available.has("deleted_at") ? "deleted_at IS NULL" : "",
-	].filter((predicate) => predicate.length > 0);
-	const sql = `SELECT ${projection.join(", ")} FROM documents${predicates.length > 0 ? ` WHERE ${predicates.join(" AND ")}` : ""} ORDER BY doc_id`;
-	return database.prepare(sql).all() as Array<Record<string, unknown>>;
+	].filter((column) => columns.has(column));
+	return database
+		.prepare(
+			`SELECT ${projection.join(", ")} FROM documents WHERE doc_id IN (${ids.map(() => "?").join(",")}) ORDER BY doc_id`,
+		)
+		.all(...ids);
 }
 
 function selectMemoVersion(database: DatabaseSync, datasetId: string, memoVersionId: string): SqlRow | undefined {
@@ -714,6 +755,11 @@ export async function savePeMemo(cwd: string, options: SavePeMemoOptions, signal
 	let committed = false;
 	let createdVersionDirectory: string | undefined;
 	try {
+		const sources = await resolvePeEvidenceSources(
+			cwd,
+			options.claims.flatMap((claim) => claim.evidenceIds),
+			signal,
+		);
 		ensureMemoSchema(connection.database);
 		connection.database.exec("BEGIN IMMEDIATE");
 		transactionOpen = true;
@@ -772,6 +818,7 @@ export async function savePeMemo(cwd: string, options: SavePeMemoOptions, signal
 			connection.database,
 			connection.datasetId,
 			options.claims,
+			sources,
 			signal,
 		);
 		const sections = buildSections(citationGate.claims, evidence);
@@ -888,7 +935,12 @@ export async function savePeMemo(cwd: string, options: SavePeMemoOptions, signal
 				markdownRelativePath,
 				htmlRelativePath,
 				pdfRelativePath,
-				JSON.stringify(currentDocumentSnapshot(connection.database)),
+				JSON.stringify(
+					documentSnapshot(
+						connection.database,
+						[...evidence.values()].map((source) => source.doc_id),
+					),
+				),
 				JSON.stringify(inputPayload),
 				contentHash,
 				createdAt,
