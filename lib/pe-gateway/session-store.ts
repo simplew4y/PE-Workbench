@@ -61,6 +61,10 @@ export class PeGatewaySessionStore {
     this.cipher = cipher;
     this.database.exec("PRAGMA busy_timeout=10000; PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL;");
     this.migrate();
+    // Additive cache: public model descriptors only, never account/model tokens.
+    this.database.exec(`CREATE TABLE IF NOT EXISTS gateway_platform_catalog (
+      user_id TEXT PRIMARY KEY, catalog_json TEXT NOT NULL
+    )`);
   }
 
   private migrate(): void {
@@ -275,6 +279,19 @@ export class PeGatewaySessionStore {
       .prepare("SELECT selected_platform_model FROM gateway_model_preferences WHERE user_id = ?")
       .get(assertUuid(userId, "userId")) as unknown as { selected_platform_model: string | null } | undefined;
     return row?.selected_platform_model ?? null;
+  }
+
+  setPlatformCatalog(userId: string, catalog: unknown): void {
+    this.database.prepare(`INSERT INTO gateway_platform_catalog (user_id, catalog_json) VALUES (?, ?)
+      ON CONFLICT(user_id) DO UPDATE SET catalog_json = excluded.catalog_json`)
+      .run(assertUuid(userId, "userId"), JSON.stringify(catalog));
+  }
+
+  getPlatformCatalog(userId: string): unknown {
+    const row = this.database.prepare("SELECT catalog_json FROM gateway_platform_catalog WHERE user_id = ?")
+      .get(assertUuid(userId, "userId")) as { catalog_json: string } | undefined;
+    if (!row) return null;
+    try { return JSON.parse(row.catalog_json); } catch { return null; }
   }
 
   deleteExpired(now = Math.floor(Date.now() / 1000)): { sessions: number } {

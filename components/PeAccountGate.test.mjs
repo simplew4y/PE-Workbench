@@ -4,6 +4,12 @@ import test from "node:test";
 
 const gateSource = await readFile(new URL("./PeAccountGate.tsx", import.meta.url), "utf8");
 
+test("desktop local mode retains settings and an optional cloud login entry", () => {
+  assert.match(gateSource, /gateState.status === "local"[\s\S]*?<PeAccountMenu user=\{null\}/);
+  assert.match(gateSource, /暂不登录，使用本地功能/);
+  assert.match(gateSource, /desktopMode.current && error instanceof PeAccountClientError/);
+});
+
 test("keeps account verification separate from the signed-out state", () => {
   assert.match(gateSource, /useState<AccountGateState>\(\{ status: "checking" \}\)/);
   assert.match(gateSource, /gateState\.status === "checking"[\s\S]*?<AccountCheckingScreen \/>/);

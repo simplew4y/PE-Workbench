@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { AlertTriangle } from "lucide-react";
+import { PePlatformModelSpecs, type PlatformSpecs } from "./PePlatformModelSpecs";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useI18n } from "@/hooks/useI18n";
 import type { ModelCatalogPreset, ModelCatalogRecommendation } from "@/lib/model-catalog";
@@ -1893,7 +1894,7 @@ function AddProviderPicker({
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-interface PePlatformModel {
+interface PePlatformModel extends PlatformSpecs {
   id: string;
   display_name?: string;
   provider?: string;
@@ -1991,7 +1992,7 @@ function PlatformModelsDialog({
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: 14, marginBottom: 14, border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg-panel)" }}>
             <div>
               <div style={{ fontSize: 12, color: "var(--text-muted)" }}>平台余额</div>
-              <div style={{ marginTop: 4, fontSize: 22, fontWeight: 700, color: "var(--text)" }}>¥{state.platform.balance_cny}</div>
+              <div style={{ marginTop: 4, fontSize: 22, fontWeight: 700, color: "var(--text)" }}>{Number.isFinite(platformBalance) ? `¥${state.platform.balance_cny}` : "未连接"}</div>
             </div>
             <div style={{ fontSize: 12, color: state.platform.available ? "#16a34a" : "#ef4444" }}>
               {state.platform.available ? `已开放 ${state.platform.models.length} 个模型` : "平台模型不可用"}
@@ -2033,6 +2034,7 @@ function PlatformModelsDialog({
                     <span style={{ display: "block", marginTop: 7, color: "var(--text-dim)", fontSize: 11 }}>
                       输入 ¥{model.input_price_cny_per_million ?? "-"}/百万 tokens · 输出 ¥{model.output_price_cny_per_million ?? "-"}/百万 tokens
                     </span>
+                    <PePlatformModelSpecs model={model} />
                   </span>
                 </label>
               );

@@ -6,6 +6,9 @@ import { allowFileRoot } from "@/lib/file-access";
 import { invalidateSessionListCache } from "@/lib/session-reader";
 import { startRpcSession } from "@/lib/rpc-manager";
 import { getPePlatformRpcOptions } from "@/lib/pe-platform-runtime";
+import { authorizePeAgentCommand } from "@/lib/pe-agent-authorization";
+import { PeModelServiceError } from "@/lib/pe-gateway/model-service";
+import { PeBackendError } from "@/lib/pe-gateway/backend-client";
 
 const THINKING_LEVELS = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
@@ -51,7 +54,7 @@ export async function POST(req: Request) {
       throw new Error("provider and modelId must be provided together");
     }
     const explicitThinkingLevel = parseThinkingLevel(thinkingLevel);
-    const platformOptions = await getPePlatformRpcOptions();
+    const platformOptions = await getPePlatformRpcOptions({ metadataOnly: commandType === "ensure_session" });
 
     // Must be unique per request: startRpcSession coalesces concurrent callers
     // that share a key onto one session. Date.now() (ms resolution) collides for
@@ -90,6 +93,7 @@ export async function POST(req: Request) {
       });
     }
 
+    await authorizePeAgentCommand(session, String(promptCommand.type), async () => platformOptions);
     const result = await session.send(promptCommand);
     promptAccepted = promptCommand.type === "prompt";
 
@@ -108,6 +112,6 @@ export async function POST(req: Request) {
       ...(commandType === "prompt" && !promptAccepted
         ? { code: "prompt_rejected", accepted: false }
         : {}),
-    }, { status: 500 });
+    }, { status: error instanceof PeModelServiceError || error instanceof PeBackendError ? error.status : 500 });
   }
 }

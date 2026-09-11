@@ -1,5 +1,6 @@
 import { type NextRequest } from "next/server";
 import { getPeGatewayRuntime } from "@/lib/pe-gateway/runtime";
+import { localAccountContext } from "@/lib/pe-gateway/local-context";
 import {
   clearSessionCookie,
   gatewayError,
@@ -16,13 +17,13 @@ export async function GET(request: NextRequest) {
   const sessionId = sessionIdFromRequest(request, gateway.config);
   if (!sessionId) return unauthenticated();
   try {
-    const user = await gateway.auth.currentUser(sessionId);
-    if (!user) {
+    const context = await localAccountContext(gateway, sessionId);
+    if (!context) {
       const response = unauthenticated();
       clearSessionCookie(response, gateway.config);
       return response;
     }
-    return noStoreJson(publicUser(user));
+    return noStoreJson({ ...publicUser(context.user), offline: context.offline });
   } catch (error) {
     const response = gatewayError(error);
     if (response.status === 401 || response.status === 403) clearSessionCookie(response, gateway.config);

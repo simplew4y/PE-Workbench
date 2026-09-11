@@ -14,6 +14,14 @@ import { getRpcSession, startRpcSession, ModelSelectionError } from "@/lib/rpc-m
 import { resolveSessionPath } from "@/lib/session-reader";
 import { platformRpcOptions } from "@/lib/pe-platform-runtime";
 import { PeModelServiceError } from "@/lib/pe-gateway/model-service";
+import { localAccountContext } from "@/lib/pe-gateway/local-context";
+import { isPeDesktopMode } from "@/lib/pe-desktop-mode";
+
+const LOCAL_MODEL_STATE = {
+  source: "custom", platform: { available: false, balance_cny: "unknown", models: [],
+    default_model: null, selected_model: null, error: "登录云端账户后可使用平台模型" },
+  custom: { configured: null },
+};
 
 export const runtime = "nodejs";
 
@@ -36,8 +44,9 @@ async function authenticatedState(request: NextRequest) {
   const gateway = getPeGatewayRuntime();
   const sessionId = sessionIdFromRequest(request, gateway.config);
   if (!sessionId) return { gateway, response: unauthenticated() };
-  const user = await gateway.auth.currentUser(sessionId);
-  const session = await gateway.auth.requireSession(sessionId);
+  const local = await localAccountContext(gateway, sessionId);
+  const user = local?.user;
+  const session = local?.session;
   if (!user || !session) {
     const response = unauthenticated();
     clearSessionCookie(response, gateway.config);
@@ -49,7 +58,8 @@ async function authenticatedState(request: NextRequest) {
 export async function GET(request: NextRequest) {
   try {
     const context = await authenticatedState(request);
-    if (context.response) return context.response;
+    if (context.response) return isPeDesktopMode() && context.response.status === 401
+      ? noStoreJson(LOCAL_MODEL_STATE) : context.response;
     return noStoreJson(publicState(await context.gateway.models.state(context.session!, context.user!)));
   } catch (error) {
     return gatewayError(error);
@@ -66,7 +76,19 @@ export async function PUT(request: NextRequest) {
       );
     }
     const context = await authenticatedState(request);
-    if (context.response) return context.response;
+    if (context.response) {
+      if (!isPeDesktopMode() || context.response.status !== 401 || body.source !== "custom") return context.response;
+      let appliedModel = null;
+      if (typeof body.sessionId === "string") {
+        let agent = getRpcSession(body.sessionId);
+        if (agent?.isRunning()) throw new ModelSelectionError("当前会话正在运行，请稍后切换");
+        const path = agent?.isAlive() ? null : await resolveSessionPath(body.sessionId);
+        if (!agent?.isAlive() && !path) throw new PeRequestError(404, "session_not_found", "会话不存在");
+        if (!agent?.isAlive()) agent = (await startRpcSession(body.sessionId, path!, undefined, {})).session;
+        appliedModel = await agent.applyModelSource({}, () => {});
+      }
+      return noStoreJson({ ...LOCAL_MODEL_STATE, applied_model: appliedModel, session_id: body.sessionId ?? null });
+    }
     const current = await context.gateway.models.state(context.session!, context.user!);
     const proposed = { ...current, source: body.source as ModelSource, platform: { ...current.platform } };
     if (body.sessionId !== undefined && (typeof body.sessionId !== "string" || !body.sessionId.trim())) {

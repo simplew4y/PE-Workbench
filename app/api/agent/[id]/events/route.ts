@@ -24,7 +24,7 @@ export async function GET(
       return new Response("Session not found", { status: 404 });
     }
     if (req.signal.aborted) return new Response(null, { status: 204 });
-    sessionPromise = getPePlatformRpcOptions()
+    sessionPromise = getPePlatformRpcOptions({ metadataOnly: true })
       .then((options) => startRpcSession(id, filePath, undefined, options))
       .then((result) => result.session);
   }

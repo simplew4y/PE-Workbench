@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { resolveSessionPath } from "@/lib/session-reader";
 import { startRpcSession, getRpcSession, ModelSelectionError } from "@/lib/rpc-manager";
 import { getPePlatformRpcOptions } from "@/lib/pe-platform-runtime";
+import { authorizePeAgentCommand, peCommandUsesModel } from "@/lib/pe-agent-authorization";
+import { PeModelServiceError } from "@/lib/pe-gateway/model-service";
+import { PeBackendError } from "@/lib/pe-gateway/backend-client";
 
 // POST /api/agent/[id] - Send a command to an existing session
 export async function POST(
@@ -19,6 +22,7 @@ export async function POST(
     // Fast path: already-running session
     const existing = getRpcSession(id);
     if (existing?.isAlive()) {
+      await authorizePeAgentCommand(existing, body.type);
       const result = await existing.send(body);
       promptAccepted = body.type === "prompt";
       return NextResponse.json({ success: true, data: result });
@@ -38,8 +42,9 @@ export async function POST(
       id,
       filePath,
       undefined,
-      await getPePlatformRpcOptions(),
+      await getPePlatformRpcOptions({ metadataOnly: !peCommandUsesModel(body.type) }),
     );
+    await authorizePeAgentCommand(session, body.type);
     const result = await session.send(body);
     promptAccepted = body.type === "prompt";
 
@@ -50,7 +55,7 @@ export async function POST(
       ...(commandType === "prompt" && !promptAccepted
         ? { code: "prompt_rejected", accepted: false }
         : {}),
-    }, { status: error instanceof ModelSelectionError ? error.status : 500 });
+    }, { status: error instanceof ModelSelectionError || error instanceof PeModelServiceError || error instanceof PeBackendError ? error.status : 500 });
   }
 }
 

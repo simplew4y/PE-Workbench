@@ -1,24 +1,22 @@
 import { NextResponse } from "next/server";
 import { existsSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
-import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, SessionManager } from "@earendil-works/pi-coding-agent";
 import {
   resolveSessionPath,
   resolveSessionIdByPath,
   invalidateSessionPathCache,
   invalidateSessionListCache,
   buildSessionContext,
-  getSessionEntries,
-  listAllSessions,
   readSessionHeader,
 } from "@/lib/session-reader";
 import { sessionPathKey } from "@/lib/session-path";
-import { getRpcSession } from "@/lib/rpc-manager";
+import { getRpcSession, getRpcSessionInfos } from "@/lib/rpc-manager";
 import { projectTreeForResponse } from "@/lib/project-tree";
 import { computeSessionTotalActiveMs } from "@/lib/session-timing";
 import {
-  collectReferencedAttachmentDirectories,
   removeUnreferencedAttachmentDirectories,
+  readAttachmentReferenceHistories,
   sessionAttachmentDirectory,
 } from "@/lib/session-attachment-store";
 
@@ -124,9 +122,8 @@ export async function DELETE(
     // Read only the bounded header before deleting.
     const sessionHeader = readSessionHeader(filePath);
     const parentSessionPath = sessionHeader?.parentSession;
-    const deletedEntries = getSessionEntries(filePath);
-    const attachmentCandidates = collectReferencedAttachmentDirectories(deletedEntries);
-    if (sessionHeader?.cwd) {
+    const attachmentCandidates = new Set<string>();
+    if (sessionHeader?.cwd && sessionHeader.id === id) {
       attachmentCandidates.add(sessionAttachmentDirectory(sessionHeader.cwd, id));
     }
 
@@ -162,15 +159,22 @@ export async function DELETE(
     unlinkSync(filePath);
     invalidateSessionPathCache(id);
     invalidateSessionListCache();
-    const remainingSessions = await listAllSessions({ force: true });
-    const remainingSessionEntries = remainingSessions.flatMap((session) => {
-      try {
-        return [getSessionEntries(session.path)];
-      } catch {
-        return [];
+    // Cleanup is best-effort and fail-closed. Unreadable histories must not be
+    // treated as zero references; include live, not-yet-persisted forks too.
+    try {
+      const remainingSessionEntries = await readAttachmentReferenceHistories(join(getAgentDir(), "sessions"));
+      for (const live of getRpcSessionInfos()) {
+        const agent = getRpcSession(live.id);
+        if (agent?.isAlive()) remainingSessionEntries.push(agent.inner.sessionManager.getEntries() as never);
       }
-    });
-    await removeUnreferencedAttachmentDirectories(attachmentCandidates, remainingSessionEntries);
+      if (sessionHeader?.cwd && sessionHeader.id === id) {
+        await removeUnreferencedAttachmentDirectories(attachmentCandidates, remainingSessionEntries, {
+          cwd: sessionHeader.cwd, sessionId: id,
+        });
+      }
+    } catch (error) {
+      console.warn("Session deleted; attachments retained because safe cleanup could not be verified", error);
+    }
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });
