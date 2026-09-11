@@ -243,10 +243,14 @@ export function PeAccountMenu({
   user,
   onLoggedOut,
   onUserUpdate,
+  onLogin,
+  onReconnect,
 }: {
-  user: PeAccountUser;
+  user: PeAccountUser | null;
   onLoggedOut: () => void;
   onUserUpdate: (user: PeAccountUser) => void;
+  onLogin?: () => void;
+  onReconnect?: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -303,14 +307,15 @@ export function PeAccountMenu({
               className="absolute bottom-full left-2 right-2 mb-1 overflow-hidden rounded-xl border border-border bg-bg-panel p-1.5 text-sm text-text shadow-xl"
             >
               <div className="px-2.5 py-2">
-                <p className="truncate font-medium">{displayName(user)}</p>
-                <p className="mt-0.5 truncate text-xs text-text-muted">{user.email}</p>
-                <p className="mt-1 text-xs text-text-muted">平台余额 ¥{user.balance_cny}</p>
+                <p className="truncate font-medium">{user ? displayName(user) : "本地模式"}</p>
+                <p className="mt-0.5 truncate text-xs text-text-muted">{user?.email || "本地资料与设置始终可用"}</p>
+                <p className="mt-1 text-xs text-text-muted">{user && !user.offline ? `平台余额 ¥${user.balance_cny}` : "云端账户未连接 · 可配置自定义模型"}</p>
               </div>
               <div className="my-1 border-t border-border" />
               <button
                 type="button"
                 role="menuitem"
+                disabled={!user || user.offline}
                 className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-bg-hover"
                 onClick={() => {
                   setMenuOpen(false);
@@ -348,8 +353,9 @@ export function PeAccountMenu({
                 插件设置
               </button>
               {menuError && <p className="px-2.5 py-1.5 text-xs text-red-600">{menuError}</p>}
+              {user?.offline && onReconnect && <button type="button" role="menuitem" onClick={onReconnect} className="w-full rounded-lg px-2.5 py-2 text-left hover:bg-bg-hover">重新连接用户服务</button>}
               <div className="my-1 border-t border-border" />
-              <button
+              {user ? <button
                 type="button"
                 role="menuitem"
                 disabled={signingOut}
@@ -358,7 +364,10 @@ export function PeAccountMenu({
               >
                 <LogOut className="size-4" aria-hidden="true" />
                 {signingOut ? "退出中…" : "退出登录"}
-              </button>
+              </button> : <>
+                {onLogin && <button type="button" role="menuitem" onClick={onLogin} className="w-full rounded-lg px-2.5 py-2 text-left hover:bg-bg-hover">登录云端账户</button>}
+                {onReconnect && <button type="button" role="menuitem" onClick={onReconnect} className="w-full rounded-lg px-2.5 py-2 text-left hover:bg-bg-hover">重新连接用户服务</button>}
+              </>}
             </div>
           )}
           <button
@@ -366,7 +375,7 @@ export function PeAccountMenu({
             aria-haspopup="menu"
             aria-expanded={menuOpen}
             aria-label="打开个人中心"
-            title={displayName(user)}
+            title={user ? displayName(user) : "本地设置"}
             onClick={() => {
               setMenuError("");
               setMenuOpen((open) => !open);
@@ -374,15 +383,15 @@ export function PeAccountMenu({
             className="flex h-11 w-full items-center gap-2 rounded-lg px-2 text-left text-sm hover:bg-bg-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
           >
             <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-accent text-xs font-semibold text-white">
-              {initials(user)}
+              {user ? initials(user) : <Settings className="size-4" />}
             </span>
-            <span className="min-w-0 flex-1 truncate">{displayName(user)}</span>
+            <span className="min-w-0 flex-1 truncate">{user ? `${displayName(user)}${user.offline ? " · 离线" : ""}` : "本地设置"}</span>
             <ChevronUp className="size-4 shrink-0 text-text-muted" aria-hidden="true" />
           </button>
         </div>,
         menuTarget,
       )}
-      {settingsOpen && (
+      {settingsOpen && user && !user.offline && (
         <AccountSettingsDialog
           user={user}
           onClose={() => setSettingsOpen(false)}

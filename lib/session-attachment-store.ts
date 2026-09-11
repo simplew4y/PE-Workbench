@@ -1,5 +1,5 @@
 import { createHash } from "crypto";
-import { rm } from "fs/promises";
+import { lstat, readdir, readFile, realpath, rm } from "fs/promises";
 import { join, normalize, resolve, sep } from "path";
 import type { SessionEntry } from "./types";
 
@@ -82,15 +82,51 @@ export function entriesReferenceAttachmentDirectory(entries: SessionEntry[], dir
   return strings.some((value) => normalizeSlashes(value).includes(target));
 }
 
+/** Unlike the browsing SDK, deletion must not skip corrupt or unreadable files. */
+export async function readAttachmentReferenceHistories(root: string): Promise<SessionEntry[][]> {
+  const histories: SessionEntry[][] = [];
+  for (const entry of await readdir(root, { withFileTypes: true })) {
+    const path = join(root, entry.name);
+    if (entry.isSymbolicLink()) throw new Error("Cannot prove attachment references through a session symlink");
+    if (entry.isDirectory()) histories.push(...await readAttachmentReferenceHistories(path));
+    else if (entry.name.endsWith(".jsonl")) {
+      const lines = (await readFile(path, "utf8")).split("\n").filter((line) => line.trim());
+      const parsed = lines.map((line) => JSON.parse(line));
+      if (parsed[0]?.type !== "session") throw new Error("Unreadable session header during attachment cleanup");
+      histories.push(parsed as SessionEntry[]);
+    }
+  }
+  return histories;
+}
+
 export async function removeUnreferencedAttachmentDirectories(
   candidates: Iterable<string>,
   remainingSessionEntries: SessionEntry[][],
+  owner: { cwd: string; sessionId: string },
 ): Promise<{ removed: string[]; retained: string[] }> {
   const removed: string[] = [];
   const retained: string[] = [];
+  const ownedDirectory = sessionAttachmentDirectory(owner.cwd, owner.sessionId);
   for (const candidate of new Set(candidates)) {
-    if (!isRecognizedAttachmentDirectory(candidate)) continue;
+    // Text references can retain data, but can NEVER establish ownership.
+    if (!isRecognizedAttachmentDirectory(candidate) || resolve(candidate) !== ownedDirectory) {
+      retained.push(candidate);
+      continue;
+    }
     if (remainingSessionEntries.some((entries) => entriesReferenceAttachmentDirectory(entries, candidate))) {
+      retained.push(candidate);
+      continue;
+    }
+    try {
+      const project = await realpath(owner.cwd);
+      const actual = await realpath(candidate);
+      if ((await lstat(candidate)).isSymbolicLink()
+        || actual !== sessionAttachmentDirectory(project, owner.sessionId)) {
+        retained.push(candidate);
+        continue;
+      }
+    } catch {
+      // Missing, unreadable, or broken links are not permission to delete.
       retained.push(candidate);
       continue;
     }

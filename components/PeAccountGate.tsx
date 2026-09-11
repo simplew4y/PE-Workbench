@@ -6,7 +6,7 @@ import { PeAccountMenu } from "@/components/PeAccountMenu";
 import {
   getCurrentPeUser,
   getPeModelServiceState,
-  getPeRuntimeMode,
+  getPeRuntimeInfo,
   loginPeAccount,
   PeAccountClientError,
   registerPeAccount,
@@ -25,7 +25,7 @@ type AccountMode = "login" | "register" | "forgot";
 
 type AccountGateState =
   | { status: "checking" }
-  | { status: "local" }
+  | { status: "local"; accountEnabled?: boolean }
   | { status: "authenticated"; user: PeAccountUser }
   | { status: "unauthenticated" }
   | { status: "error"; message: string };
@@ -112,7 +112,7 @@ function PlatformBalanceWarning({ onDismiss }: { onDismiss: () => void }) {
   );
 }
 
-function AccountScreen({ onAuthenticated }: { onAuthenticated: (user: PeAccountUser) => void }) {
+function AccountScreen({ onAuthenticated, onLocal }: { onAuthenticated: (user: PeAccountUser) => void; onLocal?: () => void }) {
   const [mode, setMode] = useState<AccountMode>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -329,6 +329,7 @@ function AccountScreen({ onAuthenticated }: { onAuthenticated: (user: PeAccountU
               {busy ? "请稍候…" : mode === "login" ? "登录" : mode === "register" ? "创建账号" : "重置密码"}
             </button>
           </form>
+          {onLocal && <button type="button" onClick={onLocal} className="mt-4 w-full rounded-lg border border-border px-4 py-2.5 text-sm text-text-muted hover:bg-bg-hover">暂不登录，使用本地功能</button>}
         </section>
       </div>
     </main>
@@ -340,6 +341,7 @@ export function PeAccountGate({ children }: { children: ReactNode }) {
   const [platformBalanceBlocked, setPlatformBalanceBlocked] = useState(false);
   const [balanceWarningDismissed, setBalanceWarningDismissed] = useState(false);
   const requestSequence = useRef(0);
+  const desktopMode = useRef(false);
   const authenticatedUserId = gateState.status === "authenticated" ? gateState.user.id : null;
   const authenticatedBalance = gateState.status === "authenticated" ? gateState.user.balance_cny : null;
 
@@ -347,7 +349,9 @@ export function PeAccountGate({ children }: { children: ReactNode }) {
     const sequence = ++requestSequence.current;
     setGateState({ status: "checking" });
     try {
-      const multiUser = await getPeRuntimeMode();
+      const runtime = await getPeRuntimeInfo();
+      const multiUser = runtime.multi_user;
+      desktopMode.current = runtime.desktop;
       if (sequence !== requestSequence.current) return;
       if (!multiUser) {
         setGateState({ status: "local" });
@@ -361,6 +365,11 @@ export function PeAccountGate({ children }: { children: ReactNode }) {
         }
       } catch (error) {
         if (sequence !== requestSequence.current) return;
+        if (desktopMode.current && error instanceof PeAccountClientError
+          && (error.status === 401 || error.status >= 500)) {
+          setGateState({ status: "local", accountEnabled: true });
+          return;
+        }
         if (error instanceof PeAccountClientError && [401, 403].includes(error.status)) {
           setGateState({ status: "unauthenticated" });
         } else {
@@ -435,13 +444,18 @@ export function PeAccountGate({ children }: { children: ReactNode }) {
   if (gateState.status === "checking") {
     return <AccountCheckingScreen />;
   }
-  if (gateState.status === "local") return children;
+  if (gateState.status === "local") return <>{children}<PeAccountMenu user={null}
+    onLoggedOut={() => {}} onUserUpdate={() => {}}
+    onLogin={gateState.accountEnabled ? () => setGateState({ status: "unauthenticated" }) : undefined}
+    onReconnect={gateState.accountEnabled ? () => { void bootstrap(); } : undefined}
+  /></>;
   if (gateState.status === "error") {
     return <AccountCheckError message={gateState.message} onRetry={() => { void bootstrap(); }} />;
   }
   if (gateState.status === "unauthenticated") {
     return (
       <AccountScreen
+        onLocal={desktopMode.current ? () => setGateState({ status: "local", accountEnabled: true }) : undefined}
         onAuthenticated={(user) => {
           requestSequence.current += 1;
           setGateState({ status: "authenticated", user });
@@ -460,9 +474,10 @@ export function PeAccountGate({ children }: { children: ReactNode }) {
       )}
       <PeAccountMenu
         user={user}
+        onReconnect={() => { void refreshAuthenticatedUser(); }}
         onLoggedOut={() => {
           requestSequence.current += 1;
-          setGateState({ status: "unauthenticated" });
+          setGateState(desktopMode.current ? { status: "local", accountEnabled: true } : { status: "unauthenticated" });
         }}
         onUserUpdate={(updatedUser) => setGateState({ status: "authenticated", user: updatedUser })}
       />

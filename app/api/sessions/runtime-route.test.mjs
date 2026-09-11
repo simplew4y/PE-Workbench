@@ -34,9 +34,11 @@ test("session reads use the live SessionManager before requiring a JSONL path", 
 });
 
 test("session deletion garbage-collects only attachment directories with no surviving references", () => {
-  assert.match(detailRoute, /collectReferencedAttachmentDirectories\(deletedEntries\)/);
-  assert.match(detailRoute, /listAllSessions\(\{ force: true \}\)/);
-  assert.match(detailRoute, /removeUnreferencedAttachmentDirectories\(attachmentCandidates, remainingSessionEntries\)/);
+  assert.doesNotMatch(detailRoute, /collectReferencedAttachmentDirectories/);
+  assert.match(detailRoute, /sessionHeader.id === id/);
+  assert.match(detailRoute, /readAttachmentReferenceHistories\(join\(getAgentDir\(\), "sessions"\)\)/);
+  assert.match(detailRoute, /removeUnreferencedAttachmentDirectories\(attachmentCandidates, remainingSessionEntries, /);
+  assert.match(detailRoute, /getRpcSessionInfos\(\)/);
 });
 
 test("live agent state is available before the session file is persisted", () => {

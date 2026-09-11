@@ -15,6 +15,7 @@ import {
   unauthenticated,
 } from "@/lib/pe-gateway/route-helpers";
 import { isPeMultiUserMode } from "@/lib/pe-multi-user-paths";
+import { isPeDesktopMode } from "@/lib/pe-desktop-mode";
 
 const PUBLIC_PE_API_PATHS = new Set([
   "/api/health",
@@ -28,6 +29,9 @@ export function isPublicPeApiPath(pathname: string): boolean {
 
 async function dispatchPeApiRequest(request: NextRequest): Promise<Response | null> {
   if (!isPeMultiUserMode() || isPublicPeApiPath(request.nextUrl.pathname)) return null;
+  // Opt-in desktop execution is authorized by the local OS owner, not cloud
+  // availability. Host/origin and optional web-password checks still run.
+  if (isPeDesktopMode()) return null;
 
   let gateway: ReturnType<typeof getPeGatewayRuntime>;
   try {

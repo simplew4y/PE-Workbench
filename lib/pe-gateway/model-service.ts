@@ -8,6 +8,8 @@ import type {
   PePlatformModels,
 } from "./backend-client.ts";
 import type { GatewaySession, ModelSource, PeGatewaySessionStore } from "./session-store.ts";
+import { isCloudUnavailable } from "./local-context.ts";
+import { isPeDesktopMode } from "../pe-desktop-mode.ts";
 
 export interface PeModelServiceState {
   source: ModelSource;
@@ -82,7 +84,21 @@ export class PeGatewayModelService {
 
   async state(session: GatewaySession, user: PeBackendUser): Promise<PeModelServiceState> {
     const source = this.sourceForUser(user.id);
-    const platform = await this.backend.models(session.accessToken);
+    let platform: PePlatformModels;
+    try {
+      if (user.status === "offline") throw new PeModelServiceError(503, "backend_unavailable", "用户服务未连接");
+      platform = await this.backend.models(session.accessToken);
+      if (platform.available) this.store.setPlatformCatalog(user.id, platform);
+    } catch (error) {
+      if (user.status !== "offline" && !(isPeDesktopMode() && isCloudUnavailable(error))) throw error;
+      const cached = this.store.getPlatformCatalog(user.id) as PePlatformModels | null;
+      return {
+        source,
+        platform: { available: false, models: Array.isArray(cached?.models) ? cached.models : [], defaultModel: cached?.defaultModel ?? null, selectedModel: this.store.getPlatformModel(user.id),
+          balanceCny: "unknown", error: "用户服务未连接，平台模型暂不可用；可切换到自定义模型" },
+        custom: { configured: this.customModelConfigured() },
+      };
+    }
     const modelIds = platformModelIds(platform);
     const storedModel = this.store.getPlatformModel(user.id);
     const selectedModel = storedModel && modelIds.includes(storedModel)
@@ -100,6 +116,17 @@ export class PeGatewayModelService {
     };
   }
 
+  async catalogRuntime(session: GatewaySession, user: PeBackendUser): Promise<PePlatformRuntime | null> {
+    if (this.sourceForUser(user.id) === "custom") return null;
+    const state = await this.state(session, user);
+    if (!state.platform.selectedModel || !platformModelIds(state.platform).includes(state.platform.selectedModel)) return null;
+    return {
+      models: state.platform.models, selectedModel: state.platform.selectedModel,
+      // Metadata-only registration must NEVER carry a usable model token.
+      access: { accessToken: "metadata-only-no-cloud-authorization", expiresIn: 0, gatewayBaseUrl: "https://platform.invalid/v1" },
+    };
+  }
+
   async platformRuntime(session: GatewaySession, user: PeBackendUser, proposed?: PeModelServiceState): Promise<PePlatformRuntime | null> {
     // Model sources are an explicit security and billing boundary. A custom
     // selection must never request a platform token or silently fall back.
@@ -114,7 +141,7 @@ export class PeGatewayModelService {
       );
     }
     if (!state.platform.available || !state.platform.selectedModel) {
-      throw new Error(state.platform.error || "No platform model is available");
+      throw new PeModelServiceError(503, "platform_models_unavailable", state.platform.error || "No platform model is available");
     }
     const now = Math.floor(Date.now() / 1000);
     let cached = this.accessTokens.get(user.id);

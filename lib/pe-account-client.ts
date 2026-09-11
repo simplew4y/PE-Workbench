@@ -1,4 +1,5 @@
 export interface PeAccountUser {
+  offline?: boolean;
   id: string;
   email: string;
   nick_name: string | null;
@@ -57,6 +58,10 @@ async function jsonRequest<T>(path: string, init: RequestInit = {}): Promise<T> 
 export async function getPeRuntimeMode(): Promise<boolean> {
   const response = await jsonRequest<{ multi_user: boolean }>("/api/runtime-mode");
   return response.multi_user === true;
+}
+
+export function getPeRuntimeInfo(): Promise<{ multi_user: boolean; desktop: boolean }> {
+  return jsonRequest("/api/runtime-mode");
 }
 
 export function getPeModelServiceState(): Promise<PeModelServiceClientState> {
