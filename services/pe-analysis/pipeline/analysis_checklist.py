@@ -322,7 +322,7 @@ def normalize_item_key(value: str) -> str:
 
 
 def ensure_checklist_schema(conn: sqlite3.Connection) -> None:
-    execute_schema(conn, 
+    execute_schema(conn,
         """
         CREATE TABLE IF NOT EXISTS analysis_checklist_items (
             item_id TEXT PRIMARY KEY,

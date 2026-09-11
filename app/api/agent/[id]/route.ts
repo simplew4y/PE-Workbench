@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { resolveSessionPath } from "@/lib/session-reader";
-import { startRpcSession, getRpcSession } from "@/lib/rpc-manager";
+import { startRpcSession, getRpcSession, ModelSelectionError } from "@/lib/rpc-manager";
+import { getPePlatformRpcOptions } from "@/lib/pe-platform-runtime";
 
 // POST /api/agent/[id] - Send a command to an existing session
 export async function POST(
@@ -33,7 +34,12 @@ export async function POST(
       }, { status: 404 });
     }
 
-    const { session } = await startRpcSession(id, filePath, undefined);
+    const { session } = await startRpcSession(
+      id,
+      filePath,
+      undefined,
+      await getPePlatformRpcOptions(),
+    );
     const result = await session.send(body);
     promptAccepted = body.type === "prompt";
 
@@ -44,7 +50,7 @@ export async function POST(
       ...(commandType === "prompt" && !promptAccepted
         ? { code: "prompt_rejected", accepted: false }
         : {}),
-    }, { status: 500 });
+    }, { status: error instanceof ModelSelectionError ? error.status : 500 });
   }
 }
 

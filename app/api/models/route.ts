@@ -11,6 +11,7 @@ import {
 import { resolveVisibleModels, selectInitialModelScope } from "@/lib/model-scope";
 import { getAllowedFileRoots, isExistingFilePathAllowed } from "@/lib/file-access";
 import { projectTrustReloadOptions } from "@/lib/project-trust";
+import { getPePlatformRuntimeForRequest } from "@/lib/pe-platform-runtime";
 
 export const dynamic = "force-dynamic";
 
@@ -117,6 +118,28 @@ export async function GET(req: Request) {
   }
 
   try {
+    const platform = await getPePlatformRuntimeForRequest();
+    if (platform) {
+      const modelList = platform.models.flatMap((model) => {
+        if (!model || typeof model !== "object" || Array.isArray(model)) return [];
+        const value = model as Record<string, unknown>;
+        if (typeof value.id !== "string" || !value.id.trim()) return [];
+        return [{
+          id: value.id.trim(),
+          name: typeof value.display_name === "string" ? value.display_name : value.id.trim(),
+          provider: "pe-platform",
+          input: ["text" as const],
+        }];
+      }).sort(compareModelEntries);
+      return Response.json({
+        models: Object.fromEntries(modelList.map((model) => [`${model.provider}:${model.id}`, model.name])),
+        modelList,
+        defaultModel: { provider: "pe-platform", modelId: platform.selectedModel },
+        thinkingLevels: Object.fromEntries(modelList.map((model) => [`${model.provider}:${model.id}`, ["off"]])),
+        thinkingLevelMaps: {},
+        thinkingLevelPins: {},
+      } satisfies ModelsData);
+    }
     return Response.json(await loadModelsWithCache(cwd, () => loadModels(cwd)));
   } catch {
     return Response.json(withSafeModelLoadFailure(EMPTY_MODELS));

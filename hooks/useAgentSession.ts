@@ -13,7 +13,7 @@ import type {
 } from "@/lib/types";
 import { isBlockingExtensionUiRequest } from "@/lib/browser-notifications";
 import { normalizeToolCalls } from "@/lib/normalize";
-import { isPromptRejectedError, sendAgentCommand } from "@/lib/agent-client";
+import { AgentCommandError, isPromptRejectedError, sendAgentCommand } from "@/lib/agent-client";
 import { clearDraft, rekeyDraft, restoreDraftSubmission } from "@/lib/draft-store";
 import { getPreferredToolPreset, setPreferredToolPreset } from "@/lib/tool-preset-preference";
 import { getToolNamesForPreset, type ToolEntry, type ToolPreset } from "@/lib/tool-presets";
@@ -22,6 +22,12 @@ import type { SessionStatsInfo } from "@/lib/pi-types";
 import { userMessageKey } from "@/lib/prompt-recovery";
 import { AgentEventConnection } from "@/lib/agent-event-connection";
 import { getToolExecutionProgress } from "@/lib/tool-execution-progress";
+import { ensurePePromptAvailable } from "@/lib/pe-account-client";
+import {
+  humanizePeModelError,
+  isPeInsufficientBalanceError,
+} from "@/lib/pe-model-errors";
+import { PE_OPEN_MODELS_EVENT, PE_MODEL_SERVICE_CHANGED_EVENT, type PeModelServiceChangedEventDetail } from "@/lib/pe-ui-events";
 import {
   CHAT_SCROLL_REATTACH_TOLERANCE,
   CHAT_SCROLL_TAIL_TOLERANCE,
@@ -148,6 +154,7 @@ export interface UseAgentSessionOptions {
   onSystemPromptChange?: (prompt: string | null) => void;
   /** Registers an action that lazily starts the session and returns its system prompt. */
   onSystemPromptLoaderChange?: (loader: (() => Promise<void>) | null) => void;
+  onModelSessionTargetChange?: (target: (() => Promise<string | null>) | null) => void;
   onSessionStatsPanelOpen?: () => void;
   setToolPreset?: (preset: ToolPreset) => void;
 }
@@ -265,7 +272,7 @@ type SlashCommandsResponse = {
 export function useAgentSession(opts: UseAgentSessionOptions) {
   const {
     session, sessionRunning, newSessionCwd, newSessionDraftKey, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked,
-    modelsRefreshKey, onBranchDataChange, onSystemPromptChange, onSystemPromptLoaderChange, onSessionStatsPanelOpen,
+    modelsRefreshKey, onBranchDataChange, onSystemPromptChange, onSystemPromptLoaderChange, onModelSessionTargetChange, onSessionStatsPanelOpen,
   } = opts;
 
   const isNew = session === null && newSessionCwd !== null;
@@ -421,11 +428,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   }, [newSessionDraftKey, opts.chatInputRef, resolveComposerDraftKey]);
 
   const sessionStats = useMemo(() => {
-    if (sessionStatsOverride) {
-      return { ...sessionStatsOverride, totalActiveMs: data?.totalActiveMs };
-    }
-    const tokens = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
+    const tokens = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, total: 0 };
     let cost = 0;
+    let platformCostCny = 0;
+    let hasPlatformMessages = false;
+    let hasCustomMessages = false;
     let userMessages = 0;
     let assistantMessages = 0;
     let toolResults = 0;
@@ -435,16 +442,39 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       if (msg.role === "toolResult") toolResults += 1;
       if (msg.role !== "assistant") continue;
       assistantMessages += 1;
-      const u = (msg as import("@/lib/types").AssistantMessage).usage;
-      toolCalls += (msg as import("@/lib/types").AssistantMessage).content.filter((c) => c.type === "toolCall").length;
+      const assistant = msg as import("@/lib/types").AssistantMessage;
+      if (assistant.provider === "pe-platform") hasPlatformMessages = true;
+      else hasCustomMessages = true;
+      const u = assistant.usage;
+      toolCalls += assistant.content.filter((c) => c.type === "toolCall").length;
       if (!u) continue;
       tokens.input += u.input ?? 0;
       tokens.output += u.output ?? 0;
       tokens.cacheRead += u.cacheRead ?? 0;
       tokens.cacheWrite += u.cacheWrite ?? 0;
-      cost += u.cost?.total ?? 0;
+      tokens.reasoning += u.reasoning ?? 0;
+      if (assistant.provider === "pe-platform") {
+        platformCostCny += u.cost?.total ?? 0;
+      } else {
+        cost += u.cost?.total ?? 0;
+      }
     }
     tokens.total = tokens.input + tokens.output + tokens.cacheRead + tokens.cacheWrite;
+    if (sessionStatsOverride) {
+      // Pi's RPC total is currency-agnostic. It is safe to use the complete
+      // total (including compaction summaries) when a session contains one
+      // billing currency; mixed-provider sessions retain the transcript split.
+      const overrideCost = sessionStatsOverride.cost ?? 0;
+      const resolvedCost = hasCustomMessages && !hasPlatformMessages ? overrideCost : cost;
+      const resolvedPlatformCost = hasPlatformMessages && !hasCustomMessages ? overrideCost : platformCostCny;
+      return {
+        ...sessionStatsOverride,
+        tokens: { ...sessionStatsOverride.tokens, reasoning: tokens.reasoning },
+        cost: resolvedCost,
+        platformCostCny: resolvedPlatformCost,
+        totalActiveMs: data?.totalActiveMs,
+      };
+    }
     if (tokens.total === 0 && messages.length === 0) return null;
     return {
       sessionFile: data?.filePath || undefined,
@@ -457,6 +487,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       totalMessages: messages.length,
       tokens,
       cost,
+      platformCostCny,
       totalActiveMs: data?.totalActiveMs,
       ...(contextUsage ? { contextUsage } : {}),
     } satisfies SessionStatsInfo;
@@ -542,12 +573,23 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   const loadTools = useCallback(async (sid: string) => {
     try {
+      // Loading a running session's tool selection is read-only. Do not ask the
+      // gateway to hydrate platform credentials when the user already has a
+      // known balance block; that would turn routine page startup into a 402.
+      try {
+        await ensurePePromptAvailable();
+      } catch (preflightError) {
+        if (isPeInsufficientBalanceError(preflightError)) return;
+      }
       const tools = await sendAgentCommand<ToolEntry[]>(sid, { type: "get_tools" });
       if (tools) {
         const { getPresetFromTools } = await import("@/lib/tool-presets");
         setToolPresetState(getPresetFromTools(tools));
       }
     } catch (e) {
+      // A balance change can race the preflight. It is an expected account
+      // state already surfaced by the account toast, not a console exception.
+      if (e instanceof AgentCommandError && e.status === 402) return;
       console.error("Failed to load tools:", e);
     }
   }, [setToolPresetState]);
@@ -612,7 +654,15 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       sessionIdRef.current = realId;
       if (result.model && newSessionModelOverrideRef.current === selectedModel) {
         setPendingModel(result.model);
-        if (!selectedModel) setNewSessionDefaultModel(result.model);
+        if (selectedModel) {
+          // The server response is canonical. Keeping the optimistic selection
+          // here can make the composer claim DeepSeek while the session actually
+          // started with a fallback model.
+          newSessionModelOverrideRef.current = result.model;
+          setNewSessionModel(result.model);
+        } else {
+          setNewSessionDefaultModel(result.model);
+        }
       }
       if (
         result.thinkingLevel
@@ -1102,7 +1152,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         }
         break;
       case "prompt_error":
-        addNotice({ type: "error", message: (event.errorMessage as string | undefined) ?? "Command failed" });
+        addNotice({
+          type: "error",
+          message: humanizePeModelError(
+            (event.errorMessage as string | undefined) ?? "Command failed",
+          ),
+        });
         break;
       case "extension_error":
         addNotice({
@@ -1223,7 +1278,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         });
         break;
       case "auto_retry_start":
-        setRetryInfo({ attempt: event.attempt as number, maxAttempts: event.maxAttempts as number, errorMessage: event.errorMessage as string | undefined });
+        setRetryInfo({
+          attempt: event.attempt as number,
+          maxAttempts: event.maxAttempts as number,
+          errorMessage: event.errorMessage
+            ? humanizePeModelError(event.errorMessage)
+            : undefined,
+        });
         break;
       case "auto_retry_end":
         setRetryInfo(null);
@@ -1273,6 +1334,20 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       return;
     }
 
+    if (!isSlashCommandPrompt) {
+      try {
+        await ensurePePromptAvailable();
+      } catch (preflightError) {
+        const errorNotice = humanizePeModelError(preflightError);
+        addNotice({ type: "error", message: errorNotice });
+        restoreSubmission(message, images, composerDraftKey, documents);
+        if (isPeInsufficientBalanceError(preflightError)) {
+          window.dispatchEvent(new CustomEvent(PE_OPEN_MODELS_EVENT));
+        }
+        return;
+      }
+    }
+
     const promptRunId = promptRunIdRef.current + 1;
     cancelEventStreamGrace();
     rpcPromptPendingRef.current = true;
@@ -1307,11 +1382,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
         if (!sid) throw new Error("Unable to create a session for the prompt");
         sentSessionId = sid;
-        if (selectedModel) {
-          setPendingModel(selectedModel);
-          if (existingSid) {
-            await sendAgentCommand(sid, { type: "set_model", provider: selectedModel.provider, modelId: selectedModel.modelId });
-          }
+        if (selectedModel && existingSid) {
+          await sendAgentCommand(sid, { type: "set_model", provider: selectedModel.provider, modelId: selectedModel.modelId });
         }
         await ensureEventsConnected(sid);
         promptRequestStarted = true;
@@ -1355,7 +1427,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           ? prev
           : [...prev.slice(0, optimisticIndex), ...prev.slice(optimisticIndex + 1)];
       });
-      addNotice({ type: "error", message: e instanceof Error ? e.message : String(e) });
+      addNotice({ type: "error", message: humanizePeModelError(e) });
       restoreSubmission(message, images, composerDraftKey, documents);
       optimisticUserMessageKeyRef.current = null;
       // Rejection only describes this submission. Another tab or an event we
@@ -1550,6 +1622,40 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       }
     }
   }, [isNew, newSessionCwd, session?.cwd]);
+
+  // Saving account model settings is an explicit switch. Ordinary list refreshes
+  // still preserve the session's selection (including manual composer choices).
+  useEffect(() => {
+    let active = true;
+    const onModelSettingsSaved = (event: Event) => {
+      const detail = (event as CustomEvent<PeModelServiceChangedEventDetail>).detail;
+      if (!detail) return;
+      void (async () => {
+        const sid = sessionIdRef.current;
+        if (isNew && !detail.sessionId) {
+          newSessionModelOverrideRef.current = null;
+          setNewSessionModel(null);
+          setPendingModel(null);
+        } else if (sid && sid === detail.sessionId && detail.appliedModel) {
+          if (isNew) {
+            newSessionModelOverrideRef.current = detail.appliedModel;
+            setNewSessionModel(detail.appliedModel);
+            setPendingModel(detail.appliedModel);
+          }
+          setCurrentModelOverride(detail.appliedModel);
+          await loadSession(sid, false, true);
+        }
+        if (active) await loadModels();
+      })().catch((error) => {
+        if (active) addNotice({ type: "error", message: `模型设置同步失败：${error instanceof Error ? error.message : String(error)}` });
+      });
+    };
+    window.addEventListener(PE_MODEL_SERVICE_CHANGED_EVENT, onModelSettingsSaved);
+    return () => {
+      active = false;
+      window.removeEventListener(PE_MODEL_SERVICE_CHANGED_EVENT, onModelSettingsSaved);
+    };
+  }, [isNew, loadSession, loadModels, addNotice]);
 
   const handleBuiltinSlashCommand = useCallback(async (text: string): Promise<BuiltinSlashCommandResult> => {
     if (!text.startsWith("/")) return { handled: false };
@@ -1855,6 +1961,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     onSystemPromptLoaderChange?.(loadSystemPrompt);
     return () => onSystemPromptLoaderChange?.(null);
   }, [loadSystemPrompt, onSystemPromptLoaderChange]);
+
+  useEffect(() => {
+    // Include a tools-created provisional session; never start a new one just
+    // to save preferences. Wait for an already in-flight creation first.
+    onModelSessionTargetChange?.(async () => sessionIdRef.current ?? await ensuringNewSessionRef.current ?? null);
+    return () => onModelSessionTargetChange?.(null);
+  }, [onModelSessionTargetChange]);
 
   useEffect(() => {
     if (!onBranchDataChange) return;

@@ -851,7 +851,7 @@ function AssistantMessageView({
       }}>
         {message.usage && !isStreaming && (
           <div style={{ fontSize: 11, color: "var(--text-dim)" }}>
-            {formatUsage(message.usage)}
+            {formatUsage(message.usage, message.provider)}
           </div>
         )}
         {textContent && !isStreaming && (
@@ -1682,14 +1682,22 @@ function formatUsage(usage: {
   output: number;
   cacheRead: number;
   cacheWrite: number;
+  reasoning?: number;
+  totalTokens?: number;
   cost: { total: number };
-}): string {
+}, provider: string): string {
   const parts = [];
-  if (usage.input) parts.push(`${usage.input.toLocaleString()} in`);
-  if (usage.output) parts.push(`${usage.output.toLocaleString()} out`);
-  if (usage.cacheRead) parts.push(`${usage.cacheRead.toLocaleString()} cache R`);
-  if (usage.cacheWrite) parts.push(`${usage.cacheWrite.toLocaleString()} cache W`);
-  if (usage.cost?.total) parts.push(`$${usage.cost.total.toFixed(4)}`);
+  const total = usage.totalTokens
+    ?? usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
+  parts.push(`${usage.input.toLocaleString()} in`);
+  parts.push(`${usage.output.toLocaleString()} out`);
+  if (usage.reasoning !== undefined) parts.push(`${usage.reasoning.toLocaleString()} reasoning`);
+  parts.push(`${usage.cacheRead.toLocaleString()} cache R`);
+  parts.push(`${usage.cacheWrite.toLocaleString()} cache W`);
+  parts.push(`${total.toLocaleString()} total`);
+  if (usage.cost?.total) {
+    parts.push(`${provider === "pe-platform" ? "¥" : "$"}${usage.cost.total.toFixed(4)}`);
+  }
   return parts.join(" · ");
 }
 

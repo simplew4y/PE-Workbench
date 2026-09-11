@@ -106,7 +106,7 @@ function assertNoAmbiguousExactPatterns(
  * the UI without any selectable model.
  */
 export async function resolveVisibleModels(
-  modelRuntime: ModelRuntime,
+  modelRuntime: Pick<ModelRuntime, "getAvailable">,
   patterns: string[] | undefined,
 ): Promise<ModelScopeResult> {
   const cleaned = (patterns ?? []).map((pattern) => pattern.trim()).filter(Boolean);

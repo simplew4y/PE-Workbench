@@ -256,7 +256,7 @@ class IssuerIdentification:
 
 
 def ensure_issuer_schema(conn: sqlite3.Connection) -> None:
-    execute_schema(conn, 
+    execute_schema(conn,
         """
         CREATE TABLE IF NOT EXISTS issuers (
             issuer_id TEXT PRIMARY KEY,

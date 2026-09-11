@@ -1,6 +1,7 @@
 import { createAgentEventStream } from "@/lib/agent-event-stream";
 import { resolveSessionPath } from "@/lib/session-reader";
 import { getRpcSession, startRpcSession } from "@/lib/rpc-manager";
+import { getPePlatformRpcOptions } from "@/lib/pe-platform-runtime";
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +24,9 @@ export async function GET(
       return new Response("Session not found", { status: 404 });
     }
     if (req.signal.aborted) return new Response(null, { status: 204 });
-    sessionPromise = startRpcSession(id, filePath, undefined).then((result) => result.session);
+    sessionPromise = getPePlatformRpcOptions()
+      .then((options) => startRpcSession(id, filePath, undefined, options))
+      .then((result) => result.session);
   }
 
   const stream = createAgentEventStream(req, id, sessionPromise);

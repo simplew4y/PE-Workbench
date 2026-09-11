@@ -7,6 +7,7 @@ import {
   type LoadExtensionsResult,
 } from "@earendil-works/pi-coding-agent";
 import { join } from "node:path";
+import { isPeMultiUserMode } from "./pe-multi-user-paths";
 
 const HOST_EXTENSION_NAME = "pi-web-project-command-environment";
 const HOST_EXTENSION_PATH = `<inline:${HOST_EXTENSION_NAME}>`;
@@ -31,13 +32,28 @@ function isHostRuntimeVariable(name: string, platform: NodeJS.Platform): boolean
     || comparableName.startsWith("NEXT_");
 }
 
+function isPeHostSecretVariable(name: string, platform: NodeJS.Platform): boolean {
+  const comparableName = platform === "win32" ? name.toUpperCase() : name;
+  return comparableName === "PI_WEB_PASSWORD"
+    || comparableName.startsWith("PE_SESSION_")
+    || comparableName.startsWith("PE_GATEWAY_")
+    || comparableName.startsWith("PE_BACKEND_")
+    || comparableName.startsWith("PE_PLATFORM_");
+}
+
 export function sanitizeProjectCommandEnvironment(
   baseEnvironment: NodeJS.ProcessEnv,
   platform: NodeJS.Platform = process.platform,
 ): NodeJS.ProcessEnv {
   const environment = { ...baseEnvironment };
+  const multiUserMode = isPeMultiUserMode(baseEnvironment);
   for (const name of Object.keys(environment)) {
-    if (isHostRuntimeVariable(name, platform)) delete environment[name];
+    if (
+      isHostRuntimeVariable(name, platform)
+      || (multiUserMode && isPeHostSecretVariable(name, platform))
+    ) {
+      delete environment[name];
+    }
   }
   return environment;
 }

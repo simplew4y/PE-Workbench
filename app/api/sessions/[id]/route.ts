@@ -8,12 +8,19 @@ import {
   invalidateSessionPathCache,
   invalidateSessionListCache,
   buildSessionContext,
+  getSessionEntries,
+  listAllSessions,
   readSessionHeader,
 } from "@/lib/session-reader";
 import { sessionPathKey } from "@/lib/session-path";
 import { getRpcSession } from "@/lib/rpc-manager";
 import { projectTreeForResponse } from "@/lib/project-tree";
 import { computeSessionTotalActiveMs } from "@/lib/session-timing";
+import {
+  collectReferencedAttachmentDirectories,
+  removeUnreferencedAttachmentDirectories,
+  sessionAttachmentDirectory,
+} from "@/lib/session-attachment-store";
 
 export async function GET(
   req: Request,
@@ -115,7 +122,13 @@ export async function DELETE(
     }
 
     // Read only the bounded header before deleting.
-    const parentSessionPath = readSessionHeader(filePath)?.parentSession;
+    const sessionHeader = readSessionHeader(filePath);
+    const parentSessionPath = sessionHeader?.parentSession;
+    const deletedEntries = getSessionEntries(filePath);
+    const attachmentCandidates = collectReferencedAttachmentDirectories(deletedEntries);
+    if (sessionHeader?.cwd) {
+      attachmentCandidates.add(sessionAttachmentDirectory(sessionHeader.cwd, id));
+    }
 
     // Re-attach all direct children to this session's parent (cascade re-parent)
     // Scan sibling files in the same directory
@@ -149,6 +162,15 @@ export async function DELETE(
     unlinkSync(filePath);
     invalidateSessionPathCache(id);
     invalidateSessionListCache();
+    const remainingSessions = await listAllSessions({ force: true });
+    const remainingSessionEntries = remainingSessions.flatMap((session) => {
+      try {
+        return [getSessionEntries(session.path)];
+      } catch {
+        return [];
+      }
+    });
+    await removeUnreferencedAttachmentDirectories(attachmentCandidates, remainingSessionEntries);
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });

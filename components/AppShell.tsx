@@ -29,6 +29,12 @@ import {
 } from "@/lib/browser-notifications";
 import { getInitialNavigation } from "@/lib/initial-navigation";
 import {
+  PE_OPEN_MODELS_EVENT,
+  PE_OPEN_PLUGINS_EVENT,
+  PE_OPEN_SKILLS_EVENT,
+  type PeOpenConfigEventDetail,
+} from "@/lib/pe-ui-events";
+import {
   clearLastOpen,
   getLastOpenSession,
   setLastOpenSession,
@@ -99,6 +105,13 @@ export function AppShell() {
   const [sessionKey, setSessionKey] = useState(0);
   const [explorerRefreshKey, setExplorerRefreshKey] = useState(0);
   const [modelsConfigOpen, setModelsConfigOpen] = useState(false);
+  const modelSessionTargetRef = useRef<(() => Promise<string | null>) | null>(null);
+  const handleModelSessionTargetChange = useCallback((target: (() => Promise<string | null>) | null) => {
+    modelSessionTargetRef.current = target;
+  }, []);
+  const getModelSessionId = useCallback(async () => {
+    return modelSessionTargetRef.current ? await modelSessionTargetRef.current() : selectedSession?.id ?? null;
+  }, [selectedSession?.id]);
   const [modelsRefreshKey, setModelsRefreshKey] = useState(0);
   const [skillsConfigOpen, setSkillsConfigOpen] = useState(false);
   const [pluginsConfigOpen, setPluginsConfigOpen] = useState(false);
@@ -110,6 +123,16 @@ export function AppShell() {
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
   const [mobileToolbarMoreOpen, setMobileToolbarMoreOpen] = useState(false);
   const [mobileSidebarReady, setMobileSidebarReady] = useState(false);
+
+  useEffect(() => {
+    const openModelsConfig = (event: Event) => {
+      setModelsConfigOpen(true);
+      const detail = (event as CustomEvent<PeOpenConfigEventDetail>).detail;
+      if (detail) detail.opened = true;
+    };
+    window.addEventListener(PE_OPEN_MODELS_EVENT, openModelsConfig);
+    return () => window.removeEventListener(PE_OPEN_MODELS_EVENT, openModelsConfig);
+  }, []);
   const sidebarWidthRef = useRef(SIDEBAR_DEFAULT_WIDTH);
   const rightPanelWidthRef = useRef(RIGHT_PANEL_FALLBACK_WIDTH);
   const getResponsiveRightPanelWidth = useCallback(
@@ -846,6 +869,29 @@ export function AppShell() {
   const showPlaceholder = initialSessionRestored && !showChat;
 
   useEffect(() => {
+    const openProjectConfig = (
+      setter: (open: boolean) => void,
+      event: Event,
+    ) => {
+      const detail = (event as CustomEvent<PeOpenConfigEventDetail>).detail;
+      if (!projectTrustCwd) {
+        if (detail) detail.error = "请先选择或创建一个项目";
+        return;
+      }
+      setter(true);
+      if (detail) detail.opened = true;
+    };
+    const openSkillsConfig = (event: Event) => openProjectConfig(setSkillsConfigOpen, event);
+    const openPluginsConfig = (event: Event) => openProjectConfig(setPluginsConfigOpen, event);
+    window.addEventListener(PE_OPEN_SKILLS_EVENT, openSkillsConfig);
+    window.addEventListener(PE_OPEN_PLUGINS_EVENT, openPluginsConfig);
+    return () => {
+      window.removeEventListener(PE_OPEN_SKILLS_EVENT, openSkillsConfig);
+      window.removeEventListener(PE_OPEN_PLUGINS_EVENT, openPluginsConfig);
+    };
+  }, [projectTrustCwd]);
+
+  useEffect(() => {
     setProjectTrust(null);
     setProjectTrustDialogOpen(false);
     setProjectTrustError(null);
@@ -926,68 +972,10 @@ export function AppShell() {
         onBackgroundTaskDone={handleBackgroundTaskDone}
         onRunningSessionIdsChange={handleRunningSessionIdsChange}
       />
-      <div style={{ padding: "8px", flexShrink: 0, display: "flex", justifyContent: "space-between", gap: 4 }}>
-        {([
-          {
-             label: translate("common.models"),
-            onClick: () => setModelsConfigOpen(true),
-            disabled: false,
-            icon: (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="4" y="4" width="16" height="16" rx="2" /><rect x="9" y="9" width="6" height="6" />
-                <line x1="9" y1="1" x2="9" y2="4" /><line x1="15" y1="1" x2="15" y2="4" />
-                <line x1="9" y1="20" x2="9" y2="23" /><line x1="15" y1="20" x2="15" y2="23" />
-                <line x1="20" y1="9" x2="23" y2="9" /><line x1="20" y1="14" x2="23" y2="14" />
-                <line x1="1" y1="9" x2="4" y2="9" /><line x1="1" y1="14" x2="4" y2="14" />
-              </svg>
-            ),
-          },
-          {
-             label: translate("common.skills"),
-            onClick: () => setSkillsConfigOpen(true),
-            disabled: !activeCwd && !selectedSession?.cwd && !newSessionCwd,
-            icon: (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 2L2 7l10 5 10-5-10-5z" />
-                <path d="M2 17l10 5 10-5" />
-                <path d="M2 12l10 5 10-5" />
-              </svg>
-            ),
-          },
-          {
-             label: translate("common.plugins"),
-            onClick: () => setPluginsConfigOpen(true),
-            disabled: !activeCwd && !selectedSession?.cwd && !newSessionCwd,
-            icon: (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M9 7V2" />
-                <path d="M15 7V2" />
-                <path d="M6 13V8a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v5a6 6 0 0 1-12 0Z" />
-                <path d="M12 19v3" />
-              </svg>
-            ),
-          },
-        ] as { label: string; onClick: () => void; disabled: boolean; icon: React.ReactNode }[]).map(({ label, onClick, disabled, icon }) => (
-          <button
-            key={label}
-            onClick={onClick}
-            disabled={disabled}
-            title={label}
-            style={{
-              flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-              height: 32, padding: 0, background: "none", border: "none",
-              borderRadius: 9, color: "var(--text-muted)", cursor: disabled ? "default" : "pointer",
-              fontSize: 12, opacity: disabled ? 0.35 : 1,
-              transition: "background 0.12s, color 0.12s",
-            }}
-            onMouseEnter={(e) => { if (!disabled) { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text)"; } }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = "var(--text-muted)"; }}
-          >
-            {icon}
-            {label}
-          </button>
-        ))}
-      </div>
+      <div
+        id="pe-account-menu-slot"
+        style={{ flexShrink: 0, borderTop: "1px solid var(--border)" }}
+      />
     </>
   );
 
@@ -1362,12 +1350,16 @@ export function AppShell() {
 
     const tokens = sessionStats?.tokens;
     const cost = sessionStats?.cost ?? 0;
+    const platformCostCny = sessionStats?.platformCostCny ?? 0;
     const formatCompact = (value: number) => value >= 1_000_000
       ? `${(value / 1_000_000).toFixed(1)}M`
       : value >= 1000
         ? `${(value / 1000).toFixed(0)}k`
         : String(value);
-    const costText = cost > 0 ? (cost >= 0.01 ? `$${cost.toFixed(2)}` : `<$0.01`) : null;
+    const costTexts = [
+      ...(platformCostCny > 0 ? [platformCostCny >= 0.01 ? `¥${platformCostCny.toFixed(2)}` : `<¥0.01`] : []),
+      ...(cost > 0 ? [cost >= 0.01 ? `$${cost.toFixed(2)}` : `<$0.01`] : []),
+    ];
 
     let contextColor = "var(--text-muted)";
     let desktopContextText: string | null = null;
@@ -1388,7 +1380,9 @@ export function AppShell() {
       tooltipParts.push(`out: ${tokens.output.toLocaleString(locale)}`);
       tooltipParts.push(`cache read: ${tokens.cacheRead.toLocaleString(locale)}`);
       tooltipParts.push(`cache write: ${tokens.cacheWrite.toLocaleString(locale)}`);
-      if (cost > 0) tooltipParts.push(`cost: $${cost.toFixed(4)}`);
+      if ((tokens.reasoning ?? 0) > 0) tooltipParts.push(`reasoning: ${tokens.reasoning!.toLocaleString(locale)}`);
+      if (platformCostCny > 0) tooltipParts.push(`platform charge: ¥${platformCostCny.toFixed(4)}`);
+      if (cost > 0) tooltipParts.push(`custom model cost: $${cost.toFixed(4)}`);
     }
     if (contextUsage?.contextWindow) {
       const percent = contextUsage.percent;
@@ -1398,7 +1392,7 @@ export function AppShell() {
     const covered = mobile && mobileToolbarMoreOpen;
     const hasMobileValues = Boolean(
       (tokens && (tokens.input > 0 || tokens.output > 0))
-      || costText
+      || costTexts.length > 0
       || mobileContextText,
     );
 
@@ -1459,11 +1453,11 @@ export function AppShell() {
                 {formatCompact(tokens.output)}
               </span>
             )}
-            {costText && (
-              <span className="mobile-session-stat-cost" style={{ color: "var(--text)", fontWeight: 500, flexShrink: 0 }}>
+            {costTexts.map((costText) => (
+              <span key={costText} className="mobile-session-stat-cost" style={{ color: "var(--text)", fontWeight: 500, flexShrink: 0 }}>
                 {costText}
               </span>
-            )}
+            ))}
             {mobileContextText && (
               <span style={{ color: contextColor, flexShrink: 0 }}>
                 {mobileContextText}
@@ -1501,11 +1495,11 @@ export function AppShell() {
                 {formatCompact(tokens.cacheRead)}
               </span>
             )}
-            {costText && (
-              <span style={{ display: "flex", alignItems: "center", color: "var(--text)", fontWeight: 500 }}>
+            {costTexts.map((costText) => (
+              <span key={costText} style={{ display: "flex", alignItems: "center", color: "var(--text)", fontWeight: 500 }}>
                 {costText}
               </span>
-            )}
+            ))}
             {desktopContextText && (
               <span style={{ display: "flex", alignItems: "center", gap: 4, color: contextColor }}>
                 <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -1933,14 +1927,16 @@ export function AppShell() {
                     const tokenRows = [
                        [translate("session.input"), sessionStats.tokens.input.toLocaleString(locale)],
                        [translate("session.output"), sessionStats.tokens.output.toLocaleString(locale)],
-                       ...(sessionStats.tokens.cacheRead > 0 ? [[translate("session.cacheRead"), sessionStats.tokens.cacheRead.toLocaleString(locale)]] : []),
-                       ...(sessionStats.tokens.cacheWrite > 0 ? [[translate("session.cacheWrite"), sessionStats.tokens.cacheWrite.toLocaleString(locale)]] : []),
+                       ...(sessionStats.tokens.reasoning !== undefined ? [[translate("session.reasoning"), sessionStats.tokens.reasoning.toLocaleString(locale)]] : []),
+                       [translate("session.cacheRead"), sessionStats.tokens.cacheRead.toLocaleString(locale)],
+                       [translate("session.cacheWrite"), sessionStats.tokens.cacheWrite.toLocaleString(locale)],
                        [translate("session.total"), sessionStats.tokens.total.toLocaleString(locale)],
                     ];
                     const ctx = contextUsage ?? sessionStats.contextUsage;
                     const formatCompact = (n: number) => n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(0)}k` : String(n);
                     const extraTokenRows = [
                        ...(sessionStats.cost > 0 ? [[translate("session.cost"), `$${sessionStats.cost.toFixed(4)}`]] : []),
+                       ...((sessionStats.platformCostCny ?? 0) > 0 ? [[translate("session.platformCost"), `¥${sessionStats.platformCostCny!.toFixed(4)}`]] : []),
                        ...(ctx?.contextWindow ? [[translate("session.context"), `${ctx.percent !== null ? `${ctx.percent.toFixed(1)}%` : "?"} / ${formatCompact(ctx.contextWindow)}`]] : []),
                        // Cache hit rate = cache reads / (input + cache writes + cache reads) — the denominator covers all input-class tokens.
                        ...(sessionStats.tokens.cacheRead + sessionStats.tokens.cacheWrite > 0 && sessionStats.tokens.cacheRead + sessionStats.tokens.cacheWrite + sessionStats.tokens.input > 0
@@ -2093,6 +2089,7 @@ export function AppShell() {
               onBranchDataChange={handleBranchDataChange}
               onSystemPromptChange={handleSystemPromptChange}
               onSystemPromptLoaderChange={handleSystemPromptLoaderChange}
+              onModelSessionTargetChange={handleModelSessionTargetChange}
               onSessionStatsChange={handleSessionStatsChange}
               onSessionStatsPanelOpen={openSessionStatsPanel}
               onContextUsageChange={handleContextUsageChange}
@@ -2247,7 +2244,7 @@ export function AppShell() {
         </div>
       </div>
     </div>
-    {modelsConfigOpen && <ModelsConfig onClose={() => { setModelsConfigOpen(false); setModelsRefreshKey((k) => k + 1); }} />}
+    {modelsConfigOpen && <ModelsConfig getSessionId={getModelSessionId} onClose={() => { setModelsConfigOpen(false); setModelsRefreshKey((k) => k + 1); }} />}
     {projectTrustDialogOpen && projectTrustCwd && (
       <ProjectTrustDialog
         cwd={projectTrustCwd}

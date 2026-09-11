@@ -161,7 +161,7 @@ def format_canonical(value: float, canonical_unit: str, currency: str = "") -> s
 
 
 def ensure_cards_schema(conn: sqlite3.Connection) -> None:
-    execute_schema(conn, 
+    execute_schema(conn,
         """
         CREATE TABLE IF NOT EXISTS consensus_cards (
             card_id TEXT PRIMARY KEY,

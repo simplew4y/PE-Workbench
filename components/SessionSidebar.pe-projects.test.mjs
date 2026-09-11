@@ -19,7 +19,11 @@ test("uses the PE project registry instead of arbitrary directory selection", ()
   assert.doesNotMatch(source, /<DirectoryPicker/);
   assert.doesNotMatch(source, /fetch\("\/api\/cwd\/validate"/);
   assert.doesNotMatch(source, /fetch\(`\/api\/worktrees/);
-  assert.doesNotMatch(source, /<FileExplorer/);
+  assert.match(source, /<FileExplorer/);
+  assert.match(source, /loadExplorerOpen/);
+  assert.match(source, /saveExplorerOpen/);
+  assert.doesNotMatch(source, /openUploadPicker/);
+  assert.doesNotMatch(source, /openResearchUploadPicker/);
   assert.match(source, /<PeProjectCreateDialog/);
   assert.match(source, /setCreateProjectOpen\(true\)/);
 });

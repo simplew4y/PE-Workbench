@@ -15,6 +15,7 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { allowFileRoot } from "./file-access";
 import { initializePeCollectionDatabase, rollbackPeTransaction } from "./pe-ingest/schema";
 import { disallowFileRoot } from "./allowed-roots";
+import { getPeAgentDir, isPeMultiUserMode, isPeUserPathAllowed } from "./pe-multi-user-paths";
 import { projectIdentityKey } from "./project-identity";
 import type {
   CreatePeProjectInput,
@@ -118,7 +119,9 @@ function storePaths(options: PeProjectStoreOptions = {}): {
   projectsRoot: string;
   storeRoot: string;
 } {
-  const agentDir = resolve(options.agentDir ?? getAgentDir());
+  const agentDir = resolve(options.agentDir ?? (
+    isPeMultiUserMode() ? getPeAgentDir() : getAgentDir()
+  ));
   const storeRoot = join(agentDir, "pe-workbench");
   return {
     registryPath: join(storeRoot, "datasets.sqlite3"),
@@ -217,12 +220,17 @@ export function listPeProjects(
     let state = database.prepare(
       "SELECT active_dataset_id FROM dataset_state WHERE id = 1",
     ).get() as { active_dataset_id: string | null } | undefined;
-    const projects = projectRows(database).map(projectFromRow);
-    if (!state?.active_dataset_id && projects[0]) {
+    const registeredProjects = projectRows(database).map(projectFromRow);
+    const projects = registeredProjects.filter((project) => isPeUserPathAllowed(project.root));
+    if (projects.length !== registeredProjects.length) {
+      console.warn("Ignored PE projects outside the current user workspace");
+    }
+    const activeProjectExists = projects.some((project) => project.datasetId === state?.active_dataset_id);
+    if (!activeProjectExists) {
       database.prepare(`
         UPDATE dataset_state SET active_dataset_id = ?, updated_at = ? WHERE id = 1
-      `).run(projects[0].datasetId, new Date().toISOString());
-      state = { active_dataset_id: projects[0].datasetId };
+      `).run(projects[0]?.datasetId ?? null, new Date().toISOString());
+      state = { active_dataset_id: projects[0]?.datasetId ?? null };
     }
     for (const project of projects) allowFileRoot(project.root);
     return {

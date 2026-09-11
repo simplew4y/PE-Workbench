@@ -8,13 +8,15 @@ import {
   resolveDirectory,
   shouldShowWindowsDrivePicker,
 } from "@/lib/directory-browser";
+import { getPeUserRoot, isPeMultiUserMode, isPeUserPathAllowed } from "@/lib/pe-multi-user-paths";
 
 // GET /api/cwd/browse?path=...：列出文件系统中的可读子目录。
 export async function GET(request: NextRequest) {
   try {
     const requested = request.nextUrl.searchParams.get("path")?.trim();
 
-    if (shouldShowWindowsDrivePicker(requested)) {
+    const multiUserMode = isPeMultiUserMode();
+    if (!multiUserMode && shouldShowWindowsDrivePicker(requested)) {
       return NextResponse.json({
         path: "",
         parentPath: null,
@@ -23,7 +25,11 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    const candidate = getBrowseStartDirectory(requested);
+    const candidate = multiUserMode ? requested || getPeUserRoot() : getBrowseStartDirectory(requested);
+
+    if (!isPeUserPathAllowed(candidate)) {
+      return NextResponse.json({ error: "Path is outside the current PE user workspace" }, { status: 403 });
+    }
 
     let resolved: string;
     try {
@@ -32,16 +38,24 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Directory does not exist" }, { status: 404 });
     }
 
+    if (!isPeUserPathAllowed(resolved)) {
+      return NextResponse.json({ error: "Path is outside the current PE user workspace" }, { status: 403 });
+    }
+
     const directoryStat = await stat(resolved);
     if (!directoryStat.isDirectory()) {
       return NextResponse.json({ error: "Path is not a directory" }, { status: 400 });
     }
 
-    const directories = await listDirectories(resolved);
+    const directoryCandidates = await listDirectories(resolved);
+    const directories = multiUserMode
+      ? directoryCandidates.filter((entry) => isPeUserPathAllowed(entry.path))
+      : directoryCandidates;
+    const parent = getParentDirectory(resolved);
 
     return NextResponse.json({
       path: resolved,
-      parentPath: getParentDirectory(resolved),
+      parentPath: parent && isPeUserPathAllowed(parent) ? parent : null,
       directories,
     });
   } catch (error) {

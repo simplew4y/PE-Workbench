@@ -232,7 +232,7 @@ def _int_env(name: str, fallback: int) -> int:
 
 def ensure_claims_schema(conn: sqlite3.Connection) -> None:
     ensure_state_schema(conn)
-    execute_schema(conn, 
+    execute_schema(conn,
         """
         CREATE TABLE IF NOT EXISTS atomic_claims (
             claim_id TEXT PRIMARY KEY,
@@ -294,7 +294,7 @@ def ensure_claims_schema(conn: sqlite3.Connection) -> None:
 
         """
     )
-    execute_schema(conn, 
+    execute_schema(conn,
         """
         CREATE INDEX IF NOT EXISTS idx_atomic_claims_item
             ON atomic_claims(dataset_id, item_key, status, quality_status);

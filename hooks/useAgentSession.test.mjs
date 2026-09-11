@@ -114,6 +114,24 @@ test("new-session promotion rekeys drafts before publishing the real session", (
   assert.match(chatWindowSource, /draftKey=\{session\?\.id \?\? newSessionDraftKey \?\? undefined\}/);
 });
 
+test("fresh-session model display follows the model confirmed by the server", () => {
+  const ensureSource = source.slice(
+    source.indexOf("  const ensureNewSession = useCallback"),
+    source.indexOf("  // Opening the System panel"),
+  );
+  const sendSource = source.slice(
+    source.indexOf("  const handleSend = useCallback"),
+    source.indexOf("  const executeBash = useCallback"),
+  );
+
+  assert.match(ensureSource, /newSessionModelOverrideRef\.current = result\.model/);
+  assert.match(ensureSource, /setNewSessionModel\(result\.model\)/);
+  assert.doesNotMatch(
+    sendSource,
+    /sentSessionId = sid;\s*if \(selectedModel\) \{\s*setPendingModel\(selectedModel\)/,
+  );
+});
+
 test("fresh sessions restore the preferred tool preset without overriding existing sessions", () => {
   const preferenceSource = source.slice(
     source.indexOf("  const setToolPresetState"),
@@ -135,6 +153,9 @@ test("fresh sessions restore the preferred tool preset without overriding existi
   assert.match(changeSource, /setPreferredToolPreset\(preset\)/);
   assert.match(changeSource, /sendAgentCommand\(sid, \{ type: "set_tools", toolNames \}\)/);
   assert.doesNotMatch(loadToolsSource, /setPreferredToolPreset/);
+  assert.match(loadToolsSource, /await ensurePePromptAvailable\(\)/);
+  assert.match(loadToolsSource, /isPeInsufficientBalanceError\(preflightError\)\) return/);
+  assert.match(loadToolsSource, /e instanceof AgentCommandError && e\.status === 402\) return/);
 });
 
 test("submission recovery updates live refs before a possible session rekey", () => {

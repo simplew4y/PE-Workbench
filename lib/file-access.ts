@@ -4,6 +4,7 @@ import path from "path";
 import { getAdditionalAllowedRoots, normalizeSlashes } from "./allowed-roots";
 import { isExistingPathWithinRoots, isPathWithinRoots } from "./path-security";
 import { listAllSessions } from "./session-reader";
+import { getPeUserRoot, isPeMultiUserMode } from "./pe-multi-user-paths";
 export { allowFileRoot, normalizeSlashes } from "./allowed-roots";
 export { isWindowsAbsolutePath } from "./paths";
 
@@ -21,6 +22,12 @@ export async function getAllowedFileRoots(): Promise<Set<string>> {
   const now = Date.now();
   const cached = globalThis.__piAllowedRootsCache;
   if (cached && cached.expiresAt > now) return cached.roots;
+
+  if (isPeMultiUserMode()) {
+    const roots = new Set([normalizeSlashes(getPeUserRoot())]);
+    globalThis.__piAllowedRootsCache = { roots, expiresAt: now + ALLOWED_ROOTS_TTL_MS };
+    return roots;
+  }
 
   const sessions = await listAllSessions();
   const roots = new Set<string>();
