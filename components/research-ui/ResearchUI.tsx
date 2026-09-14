@@ -32,6 +32,7 @@ export interface ResearchArtifact {
   subtitle?: string;
   content: ReactNode;
   actions?: ReactNode;
+  headerActions?: ReactNode;
 }
 
 /** IDs are unique within one rail. A null selection collapses the reader. */
@@ -49,7 +50,7 @@ export function ResearchRail({ artifacts, selectedId, onSelect }: {
       aria-labelledby={`${prefix}-tab-${selected.id}`} tabIndex={0}
       onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); close(); } }}>
       <header><div><strong>{selected.label}</strong><small>{selected.subtitle}</small></div>
-        <button type="button" aria-label="收起研究成果" onClick={close}>×</button></header>
+        <div className={styles.headerActions}>{selected.headerActions}<button type="button" aria-label="收起研究成果" onClick={close}>×</button></div></header>
       {selected.actions && <div className={styles.actions}>{selected.actions}</div>}
       <div className={styles.content}>{selected.content}</div>
       <footer>想调整内容？直接在对话中告诉 Agent。</footer>

@@ -45,3 +45,94 @@
 .frameworkReader > summary { padding: 16px 0; cursor: pointer; font-size: 13px; }
 .frameworkReader > nav { margin: 10px 0 20px; }
 .frameworkReader > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.framework { font-size: 14px; line-height: 1.75; }
+.framework h2 { font-size: 21px; line-height: 1.5; margin: 16px 0; text-wrap: pretty; }
+.scope { margin-bottom: 24px; color: var(--text-muted); }
+.scope summary, .coverage summary, .trackingDisclosure > summary { cursor: pointer; padding: 12px 0; font-size: 13px; font-weight: 550; }
+.scope p { color: var(--text); }
+.frameworkToolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 0; border-bottom: 1px solid var(--border); }
+.frameworkToolbar strong { font-size: 14px; }
+.frameworkToolbar strong span { color: var(--text-muted); margin-left: 6px; font-weight: 400; }
+.frameworkToolbar select { max-width: 50%; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; font: inherit; font-size: 12px; }
+.frameworkItem { border-bottom: 1px solid var(--border); }
+.frameworkItem > summary { position: relative; list-style: none; cursor: pointer; padding: 18px 24px 18px 0; }
+.frameworkItem > summary::-webkit-details-marker { display: none; }
+.frameworkItem > summary::after { content: "+"; position: absolute; right: 2px; top: 18px; color: var(--text-muted); font-size: 20px; }
+.frameworkItem[open] > summary::after { content: "−"; }
+.frameworkItem > summary:hover h3 { color: var(--accent); }
+.itemMeta { font-size: 12px; color: var(--text-muted); }
+.frameworkItem h3 { font-size: 16px; line-height: 1.5; margin: 5px 0 8px; font-weight: 600; }
+.claimPreview { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 13px; line-height: 1.7; color: var(--text-muted); }
+.frameworkItem[open] .claimPreview { display: none; }
+.itemBody { padding: 0 0 22px; }
+.itemBody h4 { font-size: 12px; font-weight: 600; color: var(--text-muted); margin: 22px 0 6px; }
+.fullClaim { font-weight: 500; border-left: 2px solid var(--accent); padding-left: 14px; }
+.verification { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; padding: 16px; background: var(--bg-panel); border-radius: 6px; }
+.verification dt { margin-top: 0; font-size: 12px; }
+.verification dd { margin-top: 6px; font-size: 13px; }
+.sources { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; color: var(--text-muted); }
+.coverage { margin: 22px 0; padding: 0 14px; border-left: 2px solid var(--accent); background: var(--bg-panel); }
+.coverage ul { padding: 0 0 16px 20px; }
+.coverage li { margin: 12px 0; }
+.trackingDisclosure { margin-top: 24px; border-top: 1px solid var(--border); }
+.trackingDisclosure > summary { padding: 18px 0; }
+.framework :is(summary, select):focus-visible, .trackingDisclosure > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+@media (max-width: 600px) { .verification { grid-template-columns: 1fr; } .framework h2 { font-size: 18px; } }
+
+.reportActions { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; margin: 12px 0 24px; }
+.reportActions :is(button, a) { border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); padding: 8px 10px; font: inherit; font-size: 12px; cursor: pointer; min-height: 36px; }
+.reportActions [role="group"] { display: flex; gap: 4px; }
+.reportActions button[aria-pressed="true"] { background: var(--bg-selected); border-color: var(--accent); }
+.reportActions :is(button, a):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.reportIntro { margin-bottom: 28px; }
+.reportIntro h3 { margin-top: 20px; }
+.framework section.frameworkItem { margin-top: 24px; padding-top: 24px; border-bottom: 0; }
+.framework section.coverage { padding: 18px; }
+.framework .itemBody p, .reportIntro p { margin: 0 0 14px; line-height: 1.9; }
+.framework .fullClaim { margin: 14px 0 24px; }
+.framework .verification { grid-template-columns: 1fr; background: transparent; padding: 0; gap: 16px; }
+.framework .verification dd p { margin: 6px 0; }
+.framework .sources { gap: 5px; margin: 10px 0; }
+.framework .coverage { background: transparent; }
+
+.timelineModule { margin: 0 0 28px; }
+.timelineCaption { display: flex; align-items: baseline; gap: 10px; font-size: 12px; color: var(--text-muted); }
+.timelineCaption strong { color: var(--text); font-weight: 550; }
+.timeline { display: flex; overflow-x: auto; padding: 18px 2px 12px; scrollbar-width: thin; }
+.timelineStep { display: flex; align-items: flex-start; flex: 0 0 auto; }
+.timelineNode { display: flex; flex-direction: column; align-items: center; gap: 8px; min-width: 70px; background: none; border: 0; cursor: pointer; color: var(--text-muted); padding: 0 6px 6px; }
+.timelineNode strong { display: flex; align-items: center; gap: 5px; font-size: 13px; font-weight: 550; }
+.timelineNode em { font-size: 10px; font-style: normal; font-weight: 400; }
+.timelineNode time { font-size: 11px; font-variant-numeric: tabular-nums; }
+.timelineDot { width: 10px; height: 10px; border: 1px solid var(--text-muted); border-radius: 50%; background: var(--bg); margin: 6px 0; }
+.timelineNode[aria-current] { color: var(--accent); }
+.timelineNode[aria-current] .timelineDot { background: var(--accent); border-color: var(--accent); box-shadow: 0 0 0 4px var(--bg-selected); }
+.timelineBridge { display: flex; align-items: center; width: 88px; height: 22px; }
+.timelineBridge::before, .timelineBridge::after { content: ""; height: 1px; flex: 1; background: var(--border); }
+.timelineBridge button { background: var(--bg); color: var(--text-muted); border: 1px solid var(--border); border-radius: 12px; font-size: 11px; padding: 4px 9px; cursor: pointer; }
+.timelineBridge button[aria-expanded="true"] { color: var(--accent); border-color: var(--accent); }
+.timelineModule button:focus-visible, .changeEntry summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.versionComparison { border: 1px solid var(--border); border-radius: 8px; margin: 10px 0 24px; padding: 20px; }
+.comparisonHeading { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.comparisonHeading strong { font-size: 16px; }
+.comparisonHeading p { color: var(--text-muted); font-size: 12px; margin: 4px 0; }
+.comparisonHeading button { border: 0; background: transparent; color: var(--text-muted); font-size: 12px; cursor: pointer; padding: 8px; }
+.changeGroup h3 { font-size: 12px; margin: 22px 0 6px; }
+.changeGroup h3 span { color: var(--text-muted); font-weight: 400; margin-left: 4px; }
+.changeEntry { border-top: 1px solid var(--border); }
+.changeEntry summary { padding: 14px 0; cursor: pointer; font-size: 13px; }
+.changeEntry summary span { margin-left: 8px; font-size: 11px; color: var(--text-muted); }
+.changeField { margin-bottom: 20px; }
+.changeField h4 { font-size: 12px; margin: 8px 0; color: var(--text-muted); font-weight: 500; }
+.diffColumns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.diffColumns > div { padding: 12px; background: var(--bg-panel); border-left: 2px solid var(--border); min-width: 0; }
+.diffColumns > div:last-child { border-left-color: var(--accent); }
+.diffColumns p { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.85; margin: 8px 0 0; }
+@media (max-width: 600px) { .diffColumns { grid-template-columns: 1fr; } .versionComparison { padding: 14px; } }
+
+.settingsPositioner { z-index: 60; }
+.settingsPopup { width: min(380px, calc(100vw - 24px)); max-height: min(640px, var(--available-height)); overflow-y: auto; overscroll-behavior: contain; padding: 18px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); color: var(--text); box-shadow: 0 10px 32px #0002; outline: none; }
+.settingsTitle { font-size: 14px; font-weight: 600; margin: 0 0 6px; }
+.settingsPopup .trackingSettings { border: 0; }
+.settingsPopup .trackingSettings > summary { display: none; }

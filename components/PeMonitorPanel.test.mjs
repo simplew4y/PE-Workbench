@@ -14,9 +14,9 @@ runInNewContext(outputText, { exports, require: (id) => id.endsWith(".css") ? { 
 const project = { datasetId: "p", root: "/project", companyName: "公司", name: "公司" };
 const config = { enabled: true, mode: "review", intervalHours: 24, includeMemos: true, queries: [], objective: "核对" };
 const run = { id: "run", startedAt: "2026-09-14T00:00:00Z", status: "review_required", draftId: "draft", events: [], changes: [] };
-function render(status, baseVersionId = "current", runStatus = "review_required") {
+function render(status, baseVersionId = "current", runStatus = "review_required", mode = "all") {
   return renderToStaticMarkup(React.createElement(exports.PeMonitorPanel, {
-    project, refresh() {}, monitor: { config, revision: 1, workerOnline: true, runs: [{ ...run, status: runStatus }] },
+    project, mode, refresh() {}, monitor: { config, revision: 1, workerOnline: true, runs: [{ ...run, status: runStatus }] },
     framework: { currentVersionId: "current", drafts: [{ id: "draft", status, revision: 1, baseVersionId, content: {} }], versions: [] },
   }));
 }
@@ -38,4 +38,14 @@ test("settings and history start collapsed, and incomplete checks never imply no
   }));
   assert.match(empty, /本次检查尚未完成/);
   assert.doesNotMatch(empty, /本次复盘未调整框架/);
+});
+
+test("header settings view opens controls while activity view omits settings", () => {
+  const settings = render("open", "current", "review_required", "settings");
+  assert.match(settings, /<details[^>]*open=""/);
+  assert.match(settings, /保存设置/);
+  assert.doesNotMatch(settings, /有一份调整建议待你确认/);
+  const activity = render("open", "current", "review_required", "activity");
+  assert.match(activity, /有一份调整建议待你确认/);
+  assert.doesNotMatch(activity, /保存设置/);
 });

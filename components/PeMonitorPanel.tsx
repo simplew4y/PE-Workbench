@@ -33,8 +33,8 @@ function EvidenceProgress({ detail }: { detail: string }) {
   return <><p>读取原始资料{location}</p><details><summary>查看读取位置</summary><small>{detail}</small></details></>;
 }
 
-export function PeMonitorPanel({ project, monitor, framework, refresh }: {
-  project: PeProjectSummary; monitor: Monitor; framework: FrameworkState; refresh: () => void;
+export function PeMonitorPanel({ project, monitor, framework, refresh, mode = "all" }: {
+  project: PeProjectSummary; monitor: Monitor; framework: FrameworkState; refresh: () => void; mode?: "all" | "activity" | "settings";
 }) {
   const subject = project.companyName || project.name;
   const [config, setConfig] = useState<MonitorConfig>(monitor.config ?? {
@@ -73,7 +73,7 @@ export function PeMonitorPanel({ project, monitor, framework, refresh }: {
   const failedSources = latest?.events.filter((event) => event.status === "failed") ?? [];
   const headline = !latest ? "让研究持续跟上变化" : latest.status === "running" ? "正在检查最新资料" : candidate?.status === "rejected" ? "本次建议未采用" : stale ? "这份建议需要重新复盘" : awaiting ? "有一份调整建议待你确认" : updated ? "投资框架已更新" : latest.status === "no_change" ? "本次复盘未调整框架" : "本次检查尚未完成";
   return <article className={`${styles.document} ${styles.monitor}`}>
-    <div className={styles.trackingLine}><span>{monitor.config?.enabled ? online ? "自动跟踪中" : "自动跟踪暂时中断" : "自动跟踪未开启"}</span>{monitor.config?.enabled && <small>每 {monitor.config.intervalHours} 小时检查</small>}</div>
+    {mode !== "settings" && <><div className={styles.trackingLine}><span>{monitor.config?.enabled ? online ? "自动跟踪中" : "自动跟踪暂时中断" : "自动跟踪未开启"}</span>{monitor.config?.enabled && <small>每 {monitor.config.intervalHours} 小时检查</small>}</div>
     <div className={styles.updateCard}>
       <small>最新动态{latest ? ` · ${new Date(latest.startedAt).toLocaleDateString()}` : ""}</small>
       <h2 role="status">{headline}</h2>
@@ -88,8 +88,9 @@ export function PeMonitorPanel({ project, monitor, framework, refresh }: {
       {!!latest?.changes?.length && <details><summary>查看变化</summary>{latest.changes.map((change) => <section key={change.id}><p><small>原判断</small><br />{change.before ?? "新增条目"}</p><p><small>新判断</small><br />{change.after ?? "已移除"}</p><p><small>调整依据</small><br />{change.reason}</p></section>)}</details>}
       {latest?.events.some((event) => event.evidenceId) && <details><summary>查看依据</summary>{latest.events.filter((event) => event.evidenceId).map((event, index) => <p key={index}>{names[event.stage as keyof typeof names] ?? "资料"} · <PeSourceCitation cwd={project.root} evidenceId={event.evidenceId!}>原始来源</PeSourceCitation></p>)}</details>}
     </div>
+    </>}
     {error && <p role="alert">{error}</p>}
-    <details className={styles.trackingSettings}>
+    {mode !== "activity" && <details className={styles.trackingSettings} open={mode === "settings" ? true : undefined}>
       <summary>自动跟踪设置</summary>
     <div className={styles.monitorActions}>
       <button type="button" disabled={busy || !framework.currentVersionId} onClick={() => void request("monitor-save", { config: { ...(monitor.config?.enabled ? monitor.config : config), enabled: !monitor.config?.enabled }, revision: monitor.revision })}>{monitor.config?.enabled ? "暂停跟踪" : "启用跟踪"}</button>
@@ -129,6 +130,6 @@ export function PeMonitorPanel({ project, monitor, framework, refresh }: {
         </details>;
       })}
     </details>
-    </details>
+    </details>}
   </article>;
 }

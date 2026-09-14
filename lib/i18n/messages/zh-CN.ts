@@ -157,7 +157,7 @@ export const zhCNLocale: LocalePlugin = {
     "projectDocuments.statusQueued": "等待处理",
     "projectDocuments.statusRunning": "处理中",
     "projectDocuments.statusCompleted": "已完成",
-    "projectDocuments.statusWarnings": "有警告",
+    "projectDocuments.statusWarnings": "已完成 · 需留意",
     "projectDocuments.statusFailed": "处理失败",
     "projectDocuments.statusNeedsOcr": "{count} 页需 OCR",
     "projectDocuments.previewOriginal": "查看原文",

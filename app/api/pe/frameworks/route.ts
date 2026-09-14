@@ -1,3 +1,4 @@
+import { frameworkReportMarkdown } from "@/lib/framework-report";
 import { NextResponse } from "next/server";
 import {
   cancelResearchJob, createResearchDraft, enqueueResearchJob, getResearchFramework,
@@ -49,6 +50,16 @@ export async function GET(request: Request) {
   try {
     const project = projectFor(new URL(request.url).searchParams.get("datasetId"));
     const framework = getResearchFramework(project.root, project.datasetId);
+    const downloadId = new URL(request.url).searchParams.get("download");
+    if (downloadId !== null) {
+      const version = framework.versions.find((entry) => entry.id === downloadId);
+      if (!version) throw new ResearchError(404, "Framework version not found");
+      return new Response(frameworkReportMarkdown(version.content), { headers: {
+        "Content-Type": "text/markdown; charset=utf-8",
+        "Content-Disposition": `attachment; filename="investment-framework-v${version.version}.md"`,
+        "Cache-Control": "no-store",
+      } });
+    }
     const history = listPeMemoHistory(project.root, { datasetId: project.datasetId });
     const memos = history.series.flatMap((series) => series.current_memo_version_id
       ? [getPeMemoVersion(project.root, series.current_memo_version_id, project.datasetId)] : []);
