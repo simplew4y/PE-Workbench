@@ -19,6 +19,7 @@ import { PE_PDF_SEARCH_PROMPT_SNIPPET, pePdfSearchTool } from "./pdf-search.ts";
 import { PE_RENDER_UI_PROMPT_SNIPPET, peRenderUiTool } from "./render-ui.ts";
 import { peResearchNoteSaveTool } from "./research-note-save.ts";
 import { PE_SOURCE_DETAIL_PROMPT_SNIPPET, peSourceDetailTool } from "./source-detail.ts";
+import { peStockTrackingTool } from "./stock-tracking.ts";
 import { peTrustedSourceTool } from "./trusted-source.ts";
 import { PE_VALUATION_DATE_PROMPT_SNIPPET, peValuationDateTool } from "./valuation-date.ts";
 import { PE_VALUATION_OUTPUT_PROMPT_SNIPPET, peValuationOutputTool } from "./valuation-output.ts";
@@ -30,11 +31,13 @@ const memoSkillPath = join(toolsDirectory, "../../skills/pe-memo/SKILL.md");
 const researchNoteSkillPath = join(toolsDirectory, "../../skills/pe-research-note/SKILL.md");
 const generativeUiSkillPath = join(toolsDirectory, "../../skills/pe-generative-ui/SKILL.md");
 const valuationSkillPath = join(toolsDirectory, "../../skills/pe-valuation-model-explainer/SKILL.md");
+const aliceValuationSkillPath = join(toolsDirectory, "../../skills/valuation-pricing-framework/SKILL.md");
 const consensusSkillPath = join(toolsDirectory, "../../skills/pe-consensus-divergence/SKILL.md");
 
 // 系统提示词列出常驻能力；Memo、Research Note 的生成流程留在对应 Skill 中。
 export const PE_TOOL_PROMPT_SNIPPETS = [
 	{ name: "pe_trusted_source", description: peTrustedSourceTool.promptSnippet },
+	{ name: "pe_stock_tracking", description: peStockTrackingTool.promptSnippet },
 	{ name: "pe_investment_framework", description: peFrameworkTool.promptSnippet },
 	// 旧版 Chunk 检索保留在源码中便于追溯，但不再写入系统提示词。
 	// { name: "pe_dataset_search", description: PE_DATASET_SEARCH_PROMPT_SNIPPET },
@@ -62,6 +65,7 @@ export function pePromptSnippets(): ReadonlyArray<{ name: string; description: s
 //注册所有pe工具
 export function registerPeTools(pi: ExtensionAPI): void {
 	pi.registerTool(peTrustedSourceTool);
+	pi.registerTool(peStockTrackingTool);
 	pi.registerTool(peFrameworkTool);
 	// 旧版 Chunk 检索保留在源码中便于追溯，但不再注册给模型。
 	// pi.registerTool(peDatasetSearchTool);
@@ -91,6 +95,7 @@ export function registerPeTools(pi: ExtensionAPI): void {
 			researchNoteSkillPath,
 			generativeUiSkillPath,
 			valuationSkillPath,
+			aliceValuationSkillPath,
 			...(isPeConsensusEnabled() ? [consensusSkillPath] : []),
 		],
 	}));

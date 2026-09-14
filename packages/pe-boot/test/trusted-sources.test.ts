@@ -139,6 +139,22 @@ it("routes announcements with query and caps retrieval, without inferring full c
 	expect(result.preview).toContain("query_result_not_exhaustive");
 });
 
+it("routes valuation computations to Alice Market and fetches again even when the evidence is unchanged", async () => {
+	const root = project();
+	const mock = mockWind(response(120));
+	const query = { category: "analytics" as const, query: "0700.HK EPS 10 HKD，按同业 PE 8/12/15 倍计算情景价格" };
+	const first = await fetchWindSnapshot(root, query);
+	const second = await fetchWindSnapshot(root, query);
+	expect(mock).toHaveBeenCalledTimes(4);
+	expect(mock.mock.calls[1][0]).toBe("https://mcp.wind.com.cn/vserver_analytics_data/mcp/");
+	expect(JSON.parse(String(mock.mock.calls[1][1].body)).params).toEqual({
+		name: "get_financial_data",
+		arguments: { question: query.query },
+	});
+	expect(second.docId).toBe(first.docId);
+	expect(first.preview).toContain("computed_data");
+});
+
 it("makes the tail of long news responses accessible through bounded line citations", async () => {
 	const root = project();
 	mockWind({ content: [{ type: "text", text: `${"长".repeat(25000)}END_OF_NEWS` }], isError: false });

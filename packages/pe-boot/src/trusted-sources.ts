@@ -13,19 +13,35 @@ import {
 	sourceMarkdownCitation,
 } from "./tools/database.ts";
 
-export const WIND_CATEGORIES = ["quote", "financials", "events", "holders", "announcements", "news"] as const;
+export const WIND_CATEGORIES = [
+	"quote",
+	"financials",
+	"events",
+	"holders",
+	"announcements",
+	"news",
+	"analytics",
+] as const;
 export type WindCategory = (typeof WIND_CATEGORIES)[number];
 export interface WindQuery {
 	category: WindCategory;
 	query: string;
 }
-const routes: Record<WindCategory, [string, string]> = {
+export interface WindHistoryQuery {
+	category: "history";
+	query: string;
+	startDate: string;
+	endDate: string;
+}
+const routes: Record<WindCategory | "history", [string, string]> = {
 	quote: ["stock_data", "get_stock_price_indicators"],
+	history: ["stock_data", "get_stock_kline"],
 	financials: ["stock_data", "get_stock_fundamentals"],
 	events: ["stock_data", "get_stock_events"],
 	holders: ["stock_data", "get_stock_equity_holders"],
 	announcements: ["financial_docs", "get_company_announcements"],
 	news: ["financial_docs", "get_financial_news"],
+	analytics: ["analytics_data", "get_financial_data"],
 };
 
 export function windApiKey(): string | undefined {
@@ -44,9 +60,9 @@ function object(value: unknown): value is Record<string, unknown> {
 }
 
 /** Only allow documented read-only routes, never caller-supplied URLs or methods. */
-export async function queryWind(input: WindQuery, signal?: AbortSignal): Promise<unknown> {
+export async function queryWind(input: WindQuery | WindHistoryQuery, signal?: AbortSignal): Promise<unknown> {
 	if (
-		!WIND_CATEGORIES.includes(input.category) ||
+		!Object.hasOwn(routes, input.category) ||
 		typeof input.query !== "string" ||
 		!input.query.trim() ||
 		input.query.length > 2000
@@ -54,6 +70,19 @@ export async function queryWind(input: WindQuery, signal?: AbortSignal): Promise
 		throw new Error("Select a supported Wind category and a query of 1–2000 characters");
 	if (input.category === "quote" && input.query.split(",").length > 50)
 		throw new Error("Select at most 50 securities per quote request");
+	if (input.category === "history") {
+		for (const date of [input.startDate, input.endDate]) {
+			if (
+				typeof date !== "string" ||
+				!/^\d{4}-\d{2}-\d{2}$/u.test(date) ||
+				!Number.isFinite(Date.parse(date)) ||
+				new Date(date).toISOString().slice(0, 10) !== date
+			)
+				throw new Error("Wind history requires valid YYYY-MM-DD dates");
+		}
+		if (input.startDate > input.endDate || !/^[A-Z0-9.-]+\.[A-Z]{1,3}$/u.test(input.query.trim()))
+			throw new Error("Wind history requires one exact Wind code and an ordered date range");
+	}
 	const key = windApiKey();
 	if (!key) throw new Error("WIND_KEY_MISSING: configure WIND_API_KEY on the server");
 	const [server, tool] = routes[input.category];
@@ -123,11 +152,22 @@ export async function queryWind(input: WindQuery, signal?: AbortSignal): Promise
 		clientInfo: { name: "pe-workbench", version: "1" },
 	});
 	const args =
-		input.category === "quote"
-			? { windcode: input.query.trim() }
-			: ["announcements", "news"].includes(input.category)
-				? { query: input.query.trim(), top_k: 5 }
-				: { question: input.query.trim() };
+		input.category === "history"
+			? // The MCP schema uses 10 for daily bars; the Wind CLI maps its 1d alias to 10.
+				{
+					windcode: input.query.trim(),
+					begin_date: input.startDate,
+					end_date: input.endDate,
+					period: "10",
+					count: 0,
+					aftype: "2",
+					issusp: "0",
+				}
+			: input.category === "quote"
+				? { windcode: input.query.trim() }
+				: ["announcements", "news"].includes(input.category)
+					? { query: input.query.trim(), top_k: 5 }
+					: { question: input.query.trim() };
 	const result = await request("tools/call", { name: tool, arguments: args });
 	if (result.isError) throw new Error(`WIND_TOOL_ERROR: ${JSON.stringify(result.content).slice(0, 500)}`);
 	if (!Array.isArray(result.content) || result.content.length === 0) throw new Error("WIND_EMPTY_RESPONSE");
@@ -147,12 +187,13 @@ export async function queryWind(input: WindQuery, signal?: AbortSignal): Promise
 
 export interface WindSnapshot {
 	provider: "wind";
-	category: WindCategory;
+	category: WindCategory | "history";
 	query: string;
+	history?: { startDate: string; endDate: string; period: "1d"; adjustment: "unadjusted" };
 	fetchedAt: string;
 	endpoint: string;
 	tool: string;
-	evidenceType: "vendor_data" | "retrieved_disclosure" | "media_report";
+	evidenceType: "vendor_data" | "retrieved_disclosure" | "media_report" | "computed_data";
 	coverage: "query_result_not_exhaustive";
 	textChunks: string[];
 	response: unknown;
@@ -196,7 +237,7 @@ export function listWindSnapshots(cwd: string) {
 	}
 }
 
-export async function fetchWindSnapshot(cwd: string, input: WindQuery, signal?: AbortSignal) {
+export async function fetchWindSnapshot(cwd: string, input: WindQuery | WindHistoryQuery, signal?: AbortSignal) {
 	const connection = openPeDataset(cwd);
 	const { datasetId, workspaceRoot } = connection;
 	connection.database.close();
@@ -207,15 +248,27 @@ export async function fetchWindSnapshot(cwd: string, input: WindQuery, signal?: 
 		provider: "wind",
 		category: input.category,
 		query: input.query.trim(),
+		...(input.category === "history"
+			? {
+					history: {
+						startDate: input.startDate,
+						endDate: input.endDate,
+						period: "1d" as const,
+						adjustment: "unadjusted" as const,
+					},
+				}
+			: {}),
 		fetchedAt: new Date().toISOString(),
 		endpoint: `https://mcp.wind.com.cn/vserver_${server}/mcp/`,
 		tool,
 		evidenceType:
-			input.category === "news"
-				? "media_report"
-				: input.category === "announcements"
-					? "retrieved_disclosure"
-					: "vendor_data",
+			input.category === "analytics"
+				? "computed_data"
+				: input.category === "news"
+					? "media_report"
+					: input.category === "announcements"
+						? "retrieved_disclosure"
+						: "vendor_data",
 		coverage: "query_result_not_exhaustive",
 		// Keep long announcement/news blocks readable through bounded line citations.
 		textChunks:
@@ -227,7 +280,11 @@ export async function fetchWindSnapshot(cwd: string, input: WindQuery, signal?: 
 		response,
 	};
 	const identity = createHash("sha256")
-		.update(JSON.stringify([input.category, snapshot.query]))
+		.update(
+			JSON.stringify(
+				snapshot.history ? [input.category, snapshot.query, snapshot.history] : [input.category, snapshot.query],
+			),
+		)
 		.digest("hex")
 		.slice(0, 20);
 	const name = `Wind-${input.category}-${identity}.txt`;
