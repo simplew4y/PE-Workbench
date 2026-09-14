@@ -1,0 +1,47 @@
+.workspace { display: flex; height: 100%; min-width: 0; position: relative; }
+.chat { flex: 1; min-width: 0; height: 100%; }
+.empty { padding: 48px 0; color: var(--text-muted); }
+.empty h2 { margin: 18px 0 10px; font-size: 16px; font-weight: 600; color: var(--text); }
+.empty p { margin-bottom: 12px; }
+.document { font-size: 13px; line-height: 1.8; overflow-wrap: anywhere; }
+.document h2 { font-size: 20px; font-weight: 650; line-height: 1.5; margin: 8px 0 14px; }
+.document h3 { font-size: 14px; font-weight: 600; margin: 5px 0 10px; }
+.document p { margin: 8px 0; white-space: pre-wrap; }
+.document small { color: var(--text-muted); font-size: 11px; }
+.document section { margin-top: 26px; padding-top: 20px; border-top: 1px solid var(--border); }
+.document dl { margin: 16px 0; }
+.document dt { color: var(--text-muted); font-size: 11px; margin-top: 10px; }
+.document dd { margin: 0; }
+.confirmation { margin: 0 0 24px; font-size: 12px; color: var(--text-muted); }
+.confirm { display: inline-flex; align-items: center; gap: 8px; min-height: 38px; padding: 8px 14px; border: 1px solid var(--border); border-radius: 7px; color: var(--text); background: var(--bg-panel); cursor: pointer; font-size: 13px; font-weight: 550; }
+.confirm:hover:not(:disabled) { background: var(--bg-hover); border-color: var(--accent); }
+.confirm:disabled { cursor: default; color: var(--text-muted); }
+.confirmation p[role="alert"] { color: var(--text); margin-top: 8px; }
+.confirmation button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.monitor label { display: block; margin: 14px 0; }
+.monitor select, .monitor textarea, .monitor input[type="number"] { display: block; width: 100%; box-sizing: border-box; margin-top: 6px; padding: 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; }
+.monitor textarea { resize: vertical; }
+.monitor button { padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-panel); color: var(--text); cursor: pointer; }
+.monitor button:disabled { opacity: .5; cursor: default; }
+.monitor :is(button, input, textarea, select, summary):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.monitor summary { cursor: pointer; padding: 12px 0; }
+.monitorActions { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0; }
+.monitorRun { border-top: 1px solid var(--border); padding: 8px 0; }
+.monitorEvent { border-left: 2px solid var(--border); padding-left: 12px; margin: 12px 0; }
+.monitor [role="alert"] { color: var(--text); border-left: 2px solid #cf6836; padding-left: 10px; }
+.trackingLine { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 22px; color: var(--text-muted); font-size: 12px; }
+.trackingLine span { display: inline-flex; align-items: center; gap: 7px; }
+.updateCard { padding: 20px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-panel); }
+.updateCard h2 { font-size: 20px; margin: 8px 0 12px; }
+.keyChanges { margin: 18px 0; padding-left: 18px; }
+.keyChanges li { padding-left: 3px; margin: 12px 0; }
+.excerpt { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.attention { border-left: 2px solid var(--accent); padding-left: 12px; margin-top: 18px; }
+.attention .excerpt { -webkit-line-clamp: 2; }
+.sourceNotice { font-size: 12px; color: var(--text-muted); }
+.updateCard > details { border-top: 1px solid var(--border); margin-top: 12px; }
+.trackingSettings, .monitorHistory, .frameworkReader { border-bottom: 1px solid var(--border); padding: 6px 0; }
+.monitorHistory > summary { color: var(--text-muted); font-size: 12px; }
+.frameworkReader > summary { padding: 16px 0; cursor: pointer; font-size: 13px; }
+.frameworkReader > nav { margin: 10px 0 20px; }
+.frameworkReader > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

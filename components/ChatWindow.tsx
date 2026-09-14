@@ -8,6 +8,9 @@ import { countToolCallBlocks, getAssistantErrorMessage, getDisplayableAssistantB
 import { extractTurnWrittenFiles, type WrittenFile } from "@/lib/turn-written-files";
 import { hasGenerativeUiToolCall } from "@/lib/generative-ui/tool";
 import { MessageView } from "./MessageView";
+import { PeFrameworkConfirmation, PeResearchRail, usePeResearch } from "./PeFrameworkPanel";
+import { getTurnFrameworkProposal } from "@/lib/framework-proposal";
+import researchStyles from "./PeFrameworkPanel.module.css";
 import { ChatInput, type ChatInputHandle } from "./ChatInput";
 import { ChatMinimap, useMessageRefs } from "./ChatMinimap";
 import { ExtensionStatusBar } from "./ExtensionStatusBar";
@@ -226,6 +229,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
     handleSend, handleAbort, handleFork, handleNavigate, handleModelChange,
     handleCompact, handleSteer, handleFollowUp, handlePromptWithStreamingBehavior, handleAbortCompaction,
     handleRecallQueue,
+    ensureEventsConnected,
     handleBuiltinSlashCommand,
     handleToolPresetChange, handleThinkingLevelChange, loadSlashCommands, scrollUserMsgToTop,
   } = useAgentSession({
@@ -360,6 +364,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
   const isEmptyNew = isNew && messages.length === 0 && !streamState.isStreaming && !sessionBusy;
   const hasStreamingContent = Boolean(streamState.streamingMessage?.content.length);
   const messageCwd = session?.cwd ?? newSessionCwd ?? undefined;
+  const research = usePeResearch(messageCwd, `${sessionBusy}:${messages.length}`);
   const messageContentRef = useRef<HTMLDivElement | null>(null);
   const promptAnchorSpacerRef = useRef<HTMLDivElement | null>(null);
   const promptAnchorSpacerHeightRef = useRef(0);
@@ -528,6 +533,8 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
   }
 
   return (
+    <div className={researchStyles.workspace}>
+    <div className={researchStyles.chat}>
     <div
       className="relative flex h-full min-w-0 flex-col overflow-hidden"
       style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
@@ -801,6 +808,8 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
                   }
                   const writtenFiles = extractTurnWrittenFiles(turnContent, toolResultsMap, messageCwd);
                   rendered.push(renderMessage(finalAssistantIdx, { messageOverride: finalAnswerMessage, writtenFiles }));
+                  const proposal = getTurnFrameworkProposal(turnContent, toolResultsMap);
+                  if (proposal) rendered.push(<PeFrameworkConfirmation key={`framework-${session?.id ?? sessionIdRef.current}-${proposal.draftId}-${proposal.revision}`} proposal={proposal} research={research} sessionId={session?.id ?? sessionIdRef.current} ensureEventsConnected={ensureEventsConnected} />);
                 }
                 for (let renderIdx = finalAssistantIdx + 1; renderIdx < endIdx; renderIdx++) {
                   rendered.push(renderMessage(renderIdx));
@@ -870,6 +879,9 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
       </div>
       </>
       )}
+    </div>
+    </div>
+    <PeResearchRail research={research} />
     </div>
   );
 }

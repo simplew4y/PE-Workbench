@@ -2064,6 +2064,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     dispatch, setAgentRunning, setForkingEntryId,
     bashRunning, pendingBash,
     // Subscriptions
+    ensureEventsConnected,
     handleAgentEventRef,
   };
 }
