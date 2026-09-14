@@ -2,6 +2,7 @@
 
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { Dialog } from "@base-ui/react/dialog";
 import { Bot, ChevronUp, KeyRound, LogOut, Plug, Settings, Sparkles, UserRound, X } from "lucide-react";
 import {
   changePeAccountPassword,
@@ -12,6 +13,7 @@ import {
   updatePeAccountProfile,
 } from "@/lib/pe-account-client";
 import {
+  PE_OPEN_ACCOUNT_MENU_EVENT,
   PE_OPEN_MODELS_EVENT,
   PE_OPEN_PLUGINS_EVENT,
   PE_OPEN_SKILLS_EVENT,
@@ -52,14 +54,6 @@ function AccountSettingsDialog({
   const [passwordBusy, setPasswordBusy] = useState(false);
   const [passwordNotice, setPasswordNotice] = useState("");
   const [passwordError, setPasswordError] = useState("");
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
 
   async function saveProfile(event: FormEvent) {
     event.preventDefault();
@@ -116,17 +110,17 @@ function AccountSettingsDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/45 px-4 py-8" role="presentation">
-      <section
-        aria-labelledby="pe-account-settings-title"
-        aria-modal="true"
-        className="max-h-full w-full max-w-lg overflow-y-auto rounded-2xl border border-border bg-bg-panel p-5 text-text shadow-2xl sm:p-6"
-        role="dialog"
+    <Dialog.Root open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <Dialog.Portal>
+      <Dialog.Backdrop className="fixed inset-0 z-[600] bg-black/45" />
+      <Dialog.Popup
+        finalFocus={() => document.querySelector<HTMLButtonElement>('[aria-label="打开个人中心"]')}
+        className="fixed left-1/2 top-1/2 z-[601] max-h-[calc(100dvh-4rem)] w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl border border-border bg-bg-panel p-5 text-text shadow-2xl outline-none sm:p-6"
       >
         <header className="mb-5 flex items-start justify-between gap-4">
           <div>
-            <h2 id="pe-account-settings-title" className="text-lg font-semibold">账户设置</h2>
-            <p className="mt-1 text-sm text-text-muted">管理个人资料和登录密码</p>
+            <Dialog.Title className="text-lg font-semibold">账户设置</Dialog.Title>
+            <Dialog.Description className="mt-1 text-sm text-text-muted">管理个人资料和登录密码</Dialog.Description>
           </div>
           <button
             type="button"
@@ -234,8 +228,9 @@ function AccountSettingsDialog({
             {passwordBusy ? "修改中…" : "修改密码"}
           </button>
         </form>
-      </section>
-    </div>
+      </Dialog.Popup>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }
 
@@ -378,6 +373,7 @@ export function PeAccountMenu({
             title={user ? displayName(user) : "本地设置"}
             onClick={() => {
               setMenuError("");
+              if (!menuOpen) window.dispatchEvent(new Event(PE_OPEN_ACCOUNT_MENU_EVENT));
               setMenuOpen((open) => !open);
             }}
             className="flex h-11 w-full items-center gap-2 rounded-lg px-2 text-left text-sm hover:bg-bg-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"

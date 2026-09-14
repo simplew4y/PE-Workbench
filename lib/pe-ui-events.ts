@@ -1,3 +1,4 @@
+export const PE_OPEN_ACCOUNT_MENU_EVENT = "pe:open-account-menu";
 export const PE_OPEN_MODELS_EVENT = "pe:open-models-config";
 export const PE_OPEN_SKILLS_EVENT = "pe:open-skills-config";
 export const PE_OPEN_PLUGINS_EVENT = "pe:open-plugins-config";

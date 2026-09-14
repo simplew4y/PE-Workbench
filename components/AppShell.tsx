@@ -29,6 +29,7 @@ import {
 } from "@/lib/browser-notifications";
 import { getInitialNavigation } from "@/lib/initial-navigation";
 import {
+  PE_OPEN_ACCOUNT_MENU_EVENT,
   PE_OPEN_MODELS_EVENT,
   PE_OPEN_PLUGINS_EVENT,
   PE_OPEN_SKILLS_EVENT,
@@ -271,6 +272,15 @@ export function AppShell() {
   // Single active panel — only one dropdown open at a time
   const [activeTopPanel, setActiveTopPanel] = useState<"branches" | "system" | "session" | "language" | null>(null);
   const [topPanelPos, setTopPanelPos] = useState<{ top: number; left: number; width: number } | null>(null);
+
+  useEffect(() => {
+    const closeTopPanels = () => {
+      setActiveTopPanel(null);
+      setMobileToolbarMoreOpen(false);
+    };
+    window.addEventListener(PE_OPEN_ACCOUNT_MENU_EVENT, closeTopPanels);
+    return () => window.removeEventListener(PE_OPEN_ACCOUNT_MENU_EVENT, closeTopPanels);
+  }, []);
 
   const toggleTopPanel = useCallback((
     panel: "branches" | "system" | "session" | "language",
