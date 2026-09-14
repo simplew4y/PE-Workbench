@@ -13,10 +13,10 @@ export function peCommandUsesModel(command: string): boolean { return MODEL_COMM
 export async function authorizePeAgentCommand(
   agent: AgentSessionWrapper,
   command: string,
-  loadOptions: () => Promise<RpcSessionStartOptions> = getPePlatformRpcOptions,
+  loadOptions: (options?: { thinkingLevel?: string }) => Promise<RpcSessionStartOptions> = getPePlatformRpcOptions,
 ): Promise<void> {
   if (!peCommandUsesModel(command) || agent.inner.model?.provider !== "pe-platform") return;
-  const options = await loadOptions();
+  const options = await loadOptions({ thinkingLevel: agent.inner.agent?.state?.thinkingLevel ?? "off" });
   const token = options.platformProvider?.apiKey;
   if (!token) throw new PeModelServiceError(401, "platform_login_required", "请连接云端账户使用平台模型，或切换当前会话到自定义模型");
   const tokens = globalThis.__peAuthorizedAgentTokens ??= new WeakMap();

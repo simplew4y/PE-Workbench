@@ -20,6 +20,10 @@ interface PublicPlatformModel {
   thinkingLevelMap: ThinkingLevelMap;
   compat: OpenAICompletionsCompat;
   cost?: ModelCost;
+  thinkingCost?: ModelCost;
+  thinkingMaxTokens?: number;
+  maxInputTokens?: number;
+  thinkingMaxInputTokens?: number;
 }
 
 function numericField(value: unknown, field: string, modelId: string, minimum: number): number {
@@ -68,11 +72,22 @@ export function publicModels(models: unknown[]): PublicPlatformModel[] {
       const tiers = (value.cost as Record<string, unknown>).tiers;
       if (Array.isArray(tiers)) cost.tiers = tiers.map((tier) => ({ ...parseRates(tier), inputTokensAbove: numericField(tier.inputTokensAbove, "tier threshold", id, 1) }));
     }
+    let thinkingCost: ModelCost | undefined;
+    if (value.thinking_cost) {
+      thinkingCost = parseRates(value.thinking_cost);
+      const tiers = (value.thinking_cost as Record<string, unknown>).tiers;
+      if (Array.isArray(tiers)) thinkingCost.tiers = tiers.map((tier) => ({ ...parseRates(tier), inputTokensAbove: numericField(tier.inputTokensAbove, "tier threshold", id, 1) }));
+    }
+    const metadata = value.metadata && typeof value.metadata === "object" ? value.metadata as Record<string, unknown> : {};
+    const optionalLimit = (key: string) => metadata[key] == null ? undefined : numericField(metadata[key], key, id, 1);
     return [{
       id,
       reasoning: value.reasoning === true,
       input: Array.isArray(value.input) && value.input.includes("image") ? ["text", "image"] : ["text"],
-      thinkingLevelMap, compat, cost,
+      thinkingLevelMap, compat, cost, thinkingCost,
+      thinkingMaxTokens: optionalLimit("max_output_tokens_thinking"),
+      maxInputTokens: optionalLimit("max_input_tokens"),
+      thinkingMaxInputTokens: optionalLimit("reasoning_max_input_tokens"),
       ...(typeof value.display_name === "string" ? { display_name: value.display_name } : {}),
       max_output_tokens: numericField(value.max_output_tokens, "max_output_tokens", id, 1),
       context_window: numericField(value.context_window, "context_window", id, 1),
@@ -106,6 +121,7 @@ export async function getPePlatformRuntimeForRequest(): Promise<PePlatformRuntim
 export function platformRpcOptions(
   userName: string,
   platform: PePlatformRuntime | null,
+  thinking = false,
 ): RpcSessionStartOptions {
   if (!platform) return { userName };
   const models = publicModels(platform.models);
@@ -130,14 +146,14 @@ export function platformRpcOptions(
       // prices are CNY per million tokens and the web UI labels them as CNY.
       // Tiered and cached rates come from the same descriptor as billing.
       // Time-based prices are estimates here; backend settlement is final.
-      cost: model.cost ?? {
+      cost: (thinking ? model.thinkingCost ?? model.cost : model.cost) ?? {
         input: model.input_price_cny_per_million,
         output: model.output_price_cny_per_million,
         cacheRead: model.input_price_cny_per_million,
         cacheWrite: model.input_price_cny_per_million,
       },
-      contextWindow: model.context_window,
-      maxTokens: model.max_output_tokens,
+      contextWindow: Math.min(model.context_window, (thinking ? model.thinkingMaxInputTokens ?? model.maxInputTokens : model.maxInputTokens) ?? model.context_window),
+      maxTokens: Math.min(model.max_output_tokens, (thinking ? model.thinkingMaxTokens : undefined) ?? model.max_output_tokens),
     })),
   };
 
@@ -149,7 +165,7 @@ export function platformRpcOptions(
   };
 }
 
-export async function getPePlatformRpcOptions(options: { metadataOnly?: boolean } = {}): Promise<RpcSessionStartOptions> {
+export async function getPePlatformRpcOptions(options: { metadataOnly?: boolean; thinkingLevel?: string } = {}): Promise<RpcSessionStartOptions> {
   const context = await authenticatedPeContextForRequest();
   if (!context) return {};
   const userName = context.user.nickName?.trim()
@@ -158,5 +174,5 @@ export async function getPePlatformRpcOptions(options: { metadataOnly?: boolean 
   const platform = options.metadataOnly
     ? await context.gateway.models.catalogRuntime(context.session, context.user)
     : await context.gateway.models.platformRuntime(context.session, context.user);
-  return platformRpcOptions(userName, platform);
+  return platformRpcOptions(userName, platform, Boolean(options.thinkingLevel && options.thinkingLevel !== "off"));
 }
