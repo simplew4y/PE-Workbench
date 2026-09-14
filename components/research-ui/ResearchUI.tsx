@@ -1,6 +1,7 @@
 "use client";
 
-import { useId, useRef, type ReactNode } from "react";
+import { useCallback, useId, useRef, type CSSProperties, type ReactNode } from "react";
+import { useResizablePanel } from "@/hooks/useResizablePanel";
 import styles from "./research-ui.module.css";
 
 export type ConfirmationStatus = "draft" | "pending" | "confirmed" | "error" | "stale";
@@ -33,6 +34,8 @@ export interface ResearchArtifact {
   content: ReactNode;
   actions?: ReactNode;
   headerActions?: ReactNode;
+  wide?: boolean;
+  footer?: ReactNode;
 }
 
 /** IDs are unique within one rail. A null selection collapses the reader. */
@@ -42,18 +45,40 @@ export function ResearchRail({ artifacts, selectedId, onSelect }: {
   onSelect: (id: string | null) => void;
 }) {
   const prefix = useId();
+  const railRef = useRef<HTMLElement>(null);
+  const widthRef = useRef(400);
+  const getMaxWidth = useCallback(() => {
+    const workspaceWidth = railRef.current?.parentElement?.clientWidth ?? window.innerWidth;
+    const tabsWidth = window.innerWidth <= 500 ? 50 : 66;
+    return workspaceWidth - tabsWidth - (window.innerWidth > 1100 ? 320 : 0);
+  }, []);
+  const resizer = useResizablePanel({
+    ariaLabel: "调整研究面板宽度",
+    cssVariable: "--research-panel-width",
+    defaultWidth: 400,
+    getMaxWidth,
+    growthDirection: "left",
+    minWidth: 280,
+    maxWidth: 800,
+    storageKey: "pi-research-panel-width",
+    widthRef,
+  });
   const buttons = useRef(new Map<string, HTMLButtonElement>());
   const selected = artifacts.find((artifact) => artifact.id === selectedId);
   const close = () => { onSelect(null); if (selected) buttons.current.get(selected.id)?.focus(); };
-  return <aside className={styles.rail} aria-label="研究成果">
-    {selected && <section className={styles.panel} role="tabpanel" id={`${prefix}-panel-${selected.id}`}
+  return <aside ref={railRef} className={styles.rail} aria-label="研究成果">
+    {selected && <section ref={resizer.panelRef} className={styles.panel}
+      style={{ "--research-panel-width": `${resizer.width}px` } as CSSProperties} role="tabpanel" id={`${prefix}-panel-${selected.id}`}
       aria-labelledby={`${prefix}-tab-${selected.id}`} tabIndex={0}
       onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); close(); } }}>
+      <div {...resizer.separatorProps} aria-controls={`${prefix}-panel-${selected.id}`}
+        className={`panel-resize-handle ${styles.resizeHandle}${resizer.isResizing ? " is-resizing" : ""}`}
+        title="拖动调整宽度，双击恢复默认宽度" />
       <header><div><strong>{selected.label}</strong><small>{selected.subtitle}</small></div>
         <div className={styles.headerActions}>{selected.headerActions}<button type="button" aria-label="收起研究成果" onClick={close}>×</button></div></header>
       {selected.actions && <div className={styles.actions}>{selected.actions}</div>}
       <div className={styles.content}>{selected.content}</div>
-      <footer>想调整内容？直接在对话中告诉 Agent。</footer>
+      {selected.footer !== false && <footer>{selected.footer ?? "想调整内容？直接在对话中告诉 Agent。"}</footer>}
     </section>}
     <div className={styles.tabs} role="tablist" aria-label="成果类型" aria-orientation="vertical">
       {artifacts.map((artifact, index) => <button key={artifact.id} type="button" role="tab"

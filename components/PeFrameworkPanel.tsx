@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Popover } from "@base-ui/react/popover";
-import { BookOpen, FileText, Settings } from "lucide-react";
+import { BookOpen, ChartNoAxesCombined, FileText, Settings } from "lucide-react";
 import type { FrameworkContent, FrameworkState, ResearchContinuation, getPeMemoVersion, getResearchMonitor } from "@earendil-works/pe-boot";
 import type { PeProjectCatalog, PeProjectSummary } from "@/lib/pe-project-types";
 import type { FrameworkProposal } from "@/lib/framework-proposal";
@@ -10,13 +10,14 @@ import { PeSourceCitation } from "./PeSourceCitation";
 import { MarkdownBody } from "./MarkdownBody";
 import { FrameworkTimeline } from "./FrameworkTimeline";
 import { PeMonitorPanel } from "./PeMonitorPanel";
+import { PeStockTracking } from "./PeStockTracking";
 import { FrameworkConfirmation, ResearchRail } from "./research-ui/ResearchUI";
 import { frameworkReportMarkdown, reportParagraphs, reportCoverage } from "@/lib/framework-report";
 export { frameworkReportMarkdown } from "@/lib/framework-report";
 import styles from "./PeFrameworkPanel.module.css";
 
 type Snapshot = { framework: FrameworkState; memos: ReturnType<typeof getPeMemoVersion>[]; continuations: ResearchContinuation[]; monitor: ReturnType<typeof getResearchMonitor> };
-type View = "framework" | "memo" | null;
+type View = "framework" | "memo" | "tracking" | null;
 
 export function usePeResearch(cwd: string | undefined, settledKey: string) {
   const [loaded, setLoaded] = useState<{ cwd: string; project: PeProjectSummary; snapshot: Snapshot } | null>(null);
@@ -52,7 +53,7 @@ export function usePeResearch(cwd: string | undefined, settledKey: string) {
     return () => { controller.abort(); window.removeEventListener("focus", refresh); };
   }, [cwd, settledKey, reload, refresh]);
   const data = loaded?.cwd === cwd ? loaded : null;
-  return { ...data, error, refresh, view, setView };
+  return { ...data, error, refresh, view, setView, settledKey };
 }
 type Research = ReturnType<typeof usePeResearch>;
 
@@ -166,7 +167,9 @@ export function PeFrameworkConfirmation({ proposal, research, sessionId, ensureE
   </div>;
 }
 
-export function PeResearchRail({ research }: { research: Research }) {
+export function PeResearchRail({ research, model, agentUnavailable = false }: {
+  research: Research; model?: { provider: string; modelId: string }; agentUnavailable?: boolean;
+}) {
   const { project, snapshot, view, setView, error } = research;
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [selectedVersion, setSelectedVersion] = useState<string | null>(null);
@@ -174,7 +177,7 @@ export function PeResearchRail({ research }: { research: Research }) {
   const displayed = snapshot?.framework.versions.find((entry) => entry.id === selectedVersion) ?? current;
   if (!project && !error) return null;
   const failure = error && <p role="alert">{error}<button type="button" onClick={research.refresh}>重试</button></p>;
-  return <ResearchRail selectedId={view} onSelect={(id) => setView(id === "framework" || id === "memo" ? id : null)} artifacts={[
+  return <ResearchRail selectedId={view} onSelect={(id) => setView(id === "framework" || id === "memo" || id === "tracking" ? id : null)} artifacts={[
     { id: "framework", label: "投资框架", icon: <BookOpen size={18} />, subtitle: `${project?.name ?? ""}${displayed ? ` · 阅读 v${displayed.version}${displayed.id === current?.id ? " · 最新版本" : " · 历史版本"}` : ""}`,
       headerActions: <Popover.Root open={settingsOpen} onOpenChange={setSettingsOpen}>
         <Popover.Trigger aria-label="投资框架设置" title="投资框架设置"><Settings size={18} /></Popover.Trigger>
@@ -188,5 +191,7 @@ export function PeResearchRail({ research }: { research: Research }) {
       content: <>{failure}{displayed && project ? <div className={styles.frameworkReader}><FrameworkTimeline key={project.datasetId} versions={snapshot?.framework.versions ?? []} selectedId={displayed.id} currentId={snapshot?.framework.currentVersionId ?? null} onSelect={setSelectedVersion} /><FrameworkText key={displayed.id} content={displayed.content} cwd={project.root} downloadUrl={`/api/pe/frameworks?${new URLSearchParams({ datasetId: project.datasetId, download: displayed.id })}`} /></div> : <div className={styles.empty}><h2>让判断在对话中成形</h2><p>和 Agent 讨论投资逻辑，生成后点击回复下方的「确定投资框架」。</p></div>}{project && snapshot?.monitor && <details className={styles.trackingDisclosure}><summary>最新变化与自动跟踪{snapshot.monitor.runs[0]?.status === "review_required" ? " · 有待确认的调整" : ""}</summary><PeMonitorPanel key={`${project.datasetId}-${snapshot.monitor.revision}`} project={project} monitor={snapshot.monitor} framework={snapshot.framework} refresh={research.refresh} mode="activity" /></details>}</> },
     { id: "memo", label: "Memo", icon: <FileText size={18} />, subtitle: project?.name,
       content: <>{failure}{snapshot?.memos.length && project ? snapshot.memos.map((memo) => <article className={styles.document} key={memo.memo_version_id}><small>Memo · v{memo.version_no} · {memo.as_of_date}</small><h2>{memo.series_title}</h2>{memo.sections.map((section) => <section key={section.section_id}><h3>{section.title}</h3><MarkdownBody cwd={project.root}>{section.content}</MarkdownBody>{section.needs_review && <small>待进一步验证</small>}{section.evidence_ids.map((id, i) => <PeSourceCitation key={id} cwd={project.root} evidenceId={id}>来源 {i + 1}</PeSourceCitation>)}</section>)}</article>) : <div className={styles.empty}><h2>研究沉淀成文</h2><p>在对话中让 Agent 生成 Memo，完成后会自动出现在这里。</p></div>}</> },
+    { id: "tracking", label: "股票追踪", icon: <ChartNoAxesCombined size={18} />, subtitle: project?.name, wide: true, footer: false,
+      content: <>{failure}{project && <PeStockTracking key={project.datasetId} project={project} model={model} agentUnavailable={agentUnavailable} settledKey={research.settledKey} />}</> },
   ]} />;
 }

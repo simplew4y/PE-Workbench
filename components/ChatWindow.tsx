@@ -4,7 +4,7 @@ import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, use
 import type { AgentMessage, AssistantContentBlock, AssistantMessage, BashExecutionMessage, BlockingExtensionUiRequest, CustomMessage, ExtensionUiRequest, SessionInfo, SessionTreeNode, ToolResultMessage, UserMessage } from "@/lib/types";
 import { normalizeCustomPanelLines, parseAnsiLine } from "@/lib/ansi";
 import { asBracketedPaste, toTerminalKeyData } from "@/lib/terminal-input";
-import { countToolCallBlocks, getAssistantErrorMessage, getDisplayableAssistantBlocks, splitFinalAssistantBlocks } from "@/lib/message-display";
+import { isFrameworkConfirmationMessage, countToolCallBlocks, getAssistantErrorMessage, getDisplayableAssistantBlocks, splitFinalAssistantBlocks } from "@/lib/message-display";
 import { extractTurnWrittenFiles, type WrittenFile } from "@/lib/turn-written-files";
 import { hasGenerativeUiToolCall } from "@/lib/generative-ui/tool";
 import { MessageView } from "./MessageView";
@@ -93,7 +93,7 @@ function findFinalAssistantIndex(messages: AgentMessage[], userIdx: number, endI
 }
 
 function getUserInputText(message: AgentMessage): string | null {
-  if (message.role !== "user") return null;
+  if (message.role !== "user" || isFrameworkConfirmationMessage(message)) return null;
   if (typeof message.content === "string") {
     const text = message.content.trim();
     return text.length > 0 ? text : null;
@@ -330,7 +330,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
 
   const { isDragOver, handleDragEnter, handleDragOver, handleDragLeave, handleDrop } = useDragDrop(onDrop);
 
-  const visibleMessages = messages.filter((m) => m.role === "user" || m.role === "assistant");
+  const visibleMessages = messages.filter((m) => (m.role === "user" || m.role === "assistant") && !isFrameworkConfirmationMessage(m));
   // Stable Map identity: `messages` doesn't change during streaming updates
   // (the streaming message lives in streamState), so memoized MessageViews
   // skip re-rendering on every message_update event. An inline `new Map()`
@@ -501,7 +501,10 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
       availableThinkingLevels={availableThinkingLevels}
       thinkingLevelMap={currentThinkingLevelMap}
       retryInfo={retryInfo}
-      queuedMessages={queuedMessages}
+      queuedMessages={{
+        steering: queuedMessages.steering.filter((content) => !isFrameworkConfirmationMessage({ role: "user", content })),
+        followUp: queuedMessages.followUp.filter((content) => !isFrameworkConfirmationMessage({ role: "user", content })),
+      }}
       inputHistory={inputHistory}
       onRecallQueue={handleRecallQueue}
       slashCommands={slashCommands}
@@ -637,7 +640,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
             {(() => {
               let lastUserIdx = -1;
               for (let i = messages.length - 1; i >= 0; i--) {
-                if (messages[i].role === "user") { lastUserIdx = i; break; }
+                if (messages[i].role === "user" && !isFrameworkConfirmationMessage(messages[i])) { lastUserIdx = i; break; }
               }
               // Anchor for live-tail detection: the last user message, or a
               // compaction summary when compaction has replaced it mid-turn.
@@ -652,7 +655,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
               const visibleRefIndexByMessage = new Map<number, number>();
               let refIdx = 0;
               messages.forEach((msg, idx) => {
-                if (msg.role === "user" || msg.role === "assistant") {
+                if ((msg.role === "user" || msg.role === "assistant") && !isFrameworkConfirmationMessage(msg)) {
                   visibleRefIndexByMessage.set(idx, refIdx++);
                 }
               });
@@ -664,6 +667,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
 
               const renderMessage = (idx: number, options: { attachRef?: boolean; keyPrefix?: string; messageOverride?: AgentMessage; showTimestamp?: boolean; writtenFiles?: WrittenFile[] } = {}): ReactNode => {
                 const msg = options.messageOverride ?? messages[idx];
+                if (isFrameworkConfirmationMessage(msg)) return null;
                 const prevAssistantEntryId =
                   msg.role === "user" && idx > 0 && messages[idx - 1].role === "assistant"
                     ? entryIds[idx - 1]
@@ -864,7 +868,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
         </div>
         {isMobile ? null : (
           <ChatMinimap
-            messages={messages}
+            messages={visibleMessages}
             streamingMessage={streamState.streamingMessage}
             scrollContainer={scrollContainerRef}
             messageRefs={messageRefs}
@@ -881,7 +885,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
       )}
     </div>
     </div>
-    <PeResearchRail research={research} />
+    <PeResearchRail research={research} model={displayModelValue ?? undefined} agentUnavailable={toolPreset === "none" || modelSwitching} />
     </div>
   );
 }

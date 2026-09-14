@@ -2,7 +2,7 @@ import { realpathSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { setTimeout } from "node:timers/promises";
 import { parseArgs } from "node:util";
-import { createPiResearchEngine, getResearchMonitor, runResearchMonitor, runNextResearchJob } from "@earendil-works/pe-boot";
+import { createPiResearchEngine, getResearchMonitor, getStockTracking, runDueStockTrackers, runResearchMonitor, runNextResearchJob } from "@earendil-works/pe-boot";
 import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import lockfile from "proper-lockfile";
 import { join } from "node:path";
@@ -18,8 +18,8 @@ const stop = () => controller.abort();
 process.once("SIGINT", stop);
 process.once("SIGTERM", stop);
 let release;
+let runtime;
 try {
-  const runtime = await ModelRuntime.create({ allowModelNetwork: false, signal: controller.signal });
   do {
     // Read only the explicitly selected registered project; never scan arbitrary directories.
     let project = values.cwd ? { dataset_root: values.cwd } : null;
@@ -31,16 +31,25 @@ try {
     if (!project || typeof project.dataset_root !== "string") throw new Error("Selected project is not registered");
     const cwd = realpathSync(project.dataset_root);
     if (!release) release = await lockfile.lock(join(cwd, "meta/collection.sqlite3"), { lockfilePath: join(cwd, "meta/research-worker.lock"), stale: 30_000, update: 10_000, onCompromised: () => controller.abort() });
-    const settings = SettingsManager.create(cwd);
-    const provider = process.env.PE_RESEARCH_PROVIDER || settings.getDefaultProvider();
-    const model = process.env.PE_RESEARCH_MODEL || settings.getDefaultModel();
-    if (!provider || !model) throw new Error("Select a default model or set PE_RESEARCH_PROVIDER and PE_RESEARCH_MODEL");
-    // Resolve the model only when research is needed; source checks still work if the model is unavailable.
-    const engine = { generate: (...args) => createPiResearchEngine(cwd, values.dataset, runtime, provider, model).generate(...args) };
-    if (values.monitor && !getResearchMonitor(cwd, values.dataset).config?.enabled) break;
-    const processed = values.monitor
-      ? await runResearchMonitor(cwd, values.dataset, engine, controller.signal)
-      : await runNextResearchJob(cwd, values.dataset, engine, controller.signal);
+    // Price collection and deterministic valuation do not require an LLM account.
+    const engine = { generate: async (...args) => {
+      const settings = SettingsManager.create(cwd);
+      const provider = process.env.PE_RESEARCH_PROVIDER || settings.getDefaultProvider();
+      const model = process.env.PE_RESEARCH_MODEL || settings.getDefaultModel();
+      if (!provider || !model) throw new Error("Select a default model or set PE_RESEARCH_PROVIDER and PE_RESEARCH_MODEL");
+      runtime ??= await ModelRuntime.create({ allowModelNetwork: false, signal: controller.signal });
+      return createPiResearchEngine(cwd, values.dataset, runtime, provider, model).generate(...args);
+    } };
+    let processed = false;
+    if (values.monitor) {
+      const researchEnabled = !!getResearchMonitor(cwd, values.dataset).config?.enabled;
+      const trackingEnabled = getStockTracking(cwd, values.dataset).trackers.some((tracker) => tracker.config.enabled);
+      if (!researchEnabled && !trackingEnabled) break;
+      if (trackingEnabled) processed = (await runDueStockTrackers(cwd, values.dataset, controller.signal)) > 0;
+      if (researchEnabled) processed = (await runResearchMonitor(cwd, values.dataset, engine, controller.signal)) || processed;
+    } else {
+      processed = await runNextResearchJob(cwd, values.dataset, engine, controller.signal);
+    }
     if (values.once) break;
     await setTimeout(processed ? 100 : 5_000, undefined, { signal: controller.signal });
   } while (!controller.signal.aborted);

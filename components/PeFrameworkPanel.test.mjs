@@ -13,7 +13,7 @@ const require = createRequire(import.meta.url);
 const reportExports = {};
 const reportCode = ts.transpileModule(readFileSync(new URL("../lib/framework-report.ts", import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
 runInNewContext(reportCode, {exports: reportExports});
-runInNewContext(outputText, { exports, require: (id) => id === "@/lib/framework-report" ? reportExports : id.endsWith(".css") ? { default: {} } : id === "./PeSourceCitation" ? { PeSourceCitation: ({children}) => React.createElement("button", null, children) } : ["./MarkdownBody", "./PeMonitorPanel", "./FrameworkTimeline", "./research-ui/ResearchUI"].includes(id) ? {} : require(id) });
+runInNewContext(outputText, { exports, require: (id) => id === "@/lib/framework-report" ? reportExports : id.endsWith(".css") ? { default: {} } : id === "./PeSourceCitation" ? { PeSourceCitation: ({children}) => React.createElement("button", null, children) } : ["./MarkdownBody", "./PeMonitorPanel", "./PeStockTracking", "./FrameworkTimeline", "./research-ui/ResearchUI"].includes(id) ? {} : require(id) });
 test("framework keeps complete claims and evidence behind short subject headings", () => {
   const item = { id: "one", kind: "thesis", subject: "短主题", claim: "完整判断不能被截断丢弃", rationale: "原始依据", verification: "验证条件", invalidation: "失效条件", origin: "research", evidenceIds: ["e1"] };
   const html = renderToStaticMarkup(React.createElement(exports.FrameworkText, { cwd: "/project", content: { title: "框架", objective: "目标", horizon: "期限", items: [item], coverageGaps: ["缺少资料"] } }));

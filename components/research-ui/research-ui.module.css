@@ -2,7 +2,8 @@
 .tabs { display: flex; flex-direction: column; gap: 8px; width: 66px; padding: 16px 6px; border-left: 1px solid var(--border, #ddd); background: var(--bg-panel, #fafaf8); }
 .tabs button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; min-height: 68px; border: 0; border-radius: 8px; background: transparent; color: var(--text-muted, #646b64); cursor: pointer; font-size: 11px; }
 .tabs button[aria-selected="true"] { background: var(--bg-selected, #eaf0e8); color: var(--text, #252925); box-shadow: inset 2px 0 var(--accent, #597151); }
-.panel { width: clamp(420px, 52vw, 780px); display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--border, #ddd); background: var(--bg, #fff); }
+.panel { position: relative; width: var(--research-panel-width, 400px); min-width: 0; flex-shrink: 0; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--border, #ddd); background: var(--bg, #fff); }
+.resizeHandle.resizeHandle { display: block; position: absolute; inset: 0 auto 0 0; height: 100%; }
 .panel > header { display: flex; justify-content: space-between; align-items: center; padding: 22px; border-bottom: 1px solid var(--border, #ddd); }
 .panel small { display: block; color: var(--text-muted, #646b64); margin-top: 4px; font-size: 11px; }
 .panel > header button { background: none; border: 0; color: inherit; font-size: 24px; cursor: pointer; width: 36px; height: 36px; }
@@ -20,8 +21,8 @@
 .confirmation p[role="alert"] { margin: 10px 0; }
 .rail button:disabled, .confirm:disabled { opacity: .55; cursor: default; }
 .rail :is(button, section):focus-visible, .confirmation :is(button, summary):focus-visible { outline: 2px solid var(--accent, #597151); outline-offset: 3px; }
-@media (max-width: 1100px) { .panel { position: absolute; inset: 0 66px 0 auto; z-index: 5; width: calc(100% - 66px); box-shadow: -12px 0 32px #0001; } }
-@media (max-width: 500px) { .tabs { width: 50px; padding: 12px 3px; } .tabs button { font-size: 10px; } .tabs button span:last-child { max-width: 26px; } .panel { right: 50px; width: calc(100% - 50px); } .content { padding: 20px; } }
+@media (max-width: 1100px) { .panel { position: absolute; inset: 0 66px 0 auto; z-index: 5; width: min(var(--research-panel-width, 400px), calc(100% - 66px)); box-shadow: -12px 0 32px #0001; } }
+@media (max-width: 500px) { .tabs { width: 50px; padding: 12px 3px; } .tabs button { font-size: 10px; } .tabs button span:last-child { max-width: 26px; } .panel { right: 50px; width: min(var(--research-panel-width, 400px), calc(100% - 50px)); } .content { padding: 20px; } }
 
 .headerActions { display: flex; align-items: center; gap: 4px; }
 .headerActions button { display: grid; place-items: center; }
