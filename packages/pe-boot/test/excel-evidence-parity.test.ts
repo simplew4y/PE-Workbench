@@ -103,8 +103,7 @@ describe("Excel parity and immutable evidence on the shared PDF schema", () => {
 		const docId = register(root);
 		const prepared = await preparePeDocument(root, { docId });
 		const expectedWarnings = [
-			"16 formula cell(s) have missing or unusable cached values; formulas were not recalculated.",
-			"2 formula reference(s) could not be resolved completely.",
+			"文件已上传，16 个公式结果暂时无法读取，相关数据可能不完整。请用 Excel 重新计算并保存后上传；若仍有错误，请检查公式及外部数据。位置：Hidden assumptions!B2、Formula cases!B1、Formula cases!C1、Formula cases!E1、Formula cases!F1 等。",
 		];
 		expect(prepared.warnings).toEqual(expectedWarnings);
 		expect(prepared.document.status).toBe("completed_with_warnings");

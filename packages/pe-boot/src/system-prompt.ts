@@ -47,10 +47,10 @@ export function buildToolsList(): string {
 		.join("\n");
 }
 
-export function buildPeSystemPrompt(cwd: string): string {
+export function buildPeSystemPrompt(cwd: string, userName = PE_USER_name): string {
 	const promptCwd = cwd.replaceAll("\\", "/");
 	//【提示词】用户相关
-	const PE_USER = `You serve financial researcher ${PE_USER_name}.`;
+	const PE_USER = `You serve financial researcher ${JSON.stringify(userName.trim().slice(0, 200) || PE_USER_name)}.`;
 	//【提示词】工作目录与目录架构规范（源码中有promptCwd）
 	const PE_WORKSPACE = `The current project workspace is ${promptCwd}.
 It has a fixed top-level structure:

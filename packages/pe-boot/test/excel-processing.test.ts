@@ -198,8 +198,7 @@ describe("immutable Excel registration and shared preparation", () => {
 		expect(cached.cachePath).toBe(prepared.cachePath);
 		expect(prepared.document.status).toBe("completed_with_warnings");
 		expect(prepared.warnings).toEqual([
-			"16 formula cell(s) have missing or unusable cached values; formulas were not recalculated.",
-			"2 formula reference(s) could not be resolved completely.",
+			"文件已上传，16 个公式结果暂时无法读取，相关数据可能不完整。请用 Excel 重新计算并保存后上传；若仍有错误，请检查公式及外部数据。位置：Hidden assumptions!B2、Formula cases!B1、Formula cases!C1、Formula cases!E1、Formula cases!F1 等。",
 		]);
 		const readable = readFileSync(prepared.readablePath, "utf8");
 		expect(readable).toContain("x".repeat(5100));

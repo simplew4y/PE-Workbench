@@ -7,6 +7,10 @@ import { registerPeTools } from "../src/tools/index.ts";
 afterEach(() => vi.unstubAllEnvs());
 
 describe("PE system prompt", () => {
+	it("accepts the Web account display name while preserving the CLI default", () => {
+		expect(buildPeSystemPrompt("/workspace", "研究员")).toContain('financial researcher "研究员"');
+		expect(buildPeSystemPrompt("/workspace")).toContain('financial researcher "小天"');
+	});
 	it.each([undefined, "", "0", "true", "1", " 1 "])(
 		"keeps consensus registration and prompt visibility aligned for flag %s",
 		(value) => {
