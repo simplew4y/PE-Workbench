@@ -111,6 +111,16 @@ function isOverviewRequest(text: string, imageCount: number): boolean {
 		)
 	)
 		return false;
+	const trackingOperation =
+		/(?:创建|新建|建立|构建|生成|配置|设置|启用|开启|暂停|关闭|更新|刷新|记录|录入|添加|加入|加到|保存).{0,30}(?:股票[追跟]踪|股价[追跟]踪|[追跟]踪(?:表|流程)|模拟(?:交易|买入|卖出|持仓))|\b(?:create|configure|set\s+up|refresh|update|record|add|enable|disable|pause|start|save)\b[^.!?\n]{0,50}\b(?:stock\s+track(?:ing|ers?)|price\s+tracking|tracking\s+(?:table|workflow)|(?:simulated|paper)\s+(?:trade|buy|sell|position)s?)\b/iu.test(
+			text,
+		);
+	const explicitReport =
+		/(?:生成|撰写|出具|提供|输出|交付|整理|完成).{0,20}(?:(?:完整|整体|全面)(?:的)?(?:估值模型|估值|模型)?报告|估值报告)|\b(?:write|generate|produce|prepare|provide|deliver)\b[^.!?\n]{0,40}\b(?:(?:full|complete|overall)\s+(?:valuation\s+(?:model\s+)?)?report|valuation\s+report)\b/iu.test(
+			text,
+		);
+	// Creating/refreshing a tracker may require model analysis, but is not itself an overall valuation report.
+	if (trackingOperation && !explicitReport) return false;
 	if (imageCount > 0 && !/(?:excel|工作簿|\.xlsx\b|\.xlsm\b)/iu.test(text)) return false;
 	if (
 		/(?:比较|对比|compare|comparison).{0,40}(?:模型|工作簿|workbooks?|models?)|(?:多个|两个|两份|多份|multiple|two|both).{0,20}(?:模型|工作簿|models?|workbooks?)/iu.test(

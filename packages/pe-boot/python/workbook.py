@@ -129,15 +129,16 @@ def _formula_details(value: Any) -> tuple[bool, Optional[str], Optional[str], di
     return True, stable_type, formula_text, metadata
 
 
-def _formula_cache_status(is_formula: bool, cached: Any) -> str:
+def _formula_cache_status(is_formula: bool, cached: Any, data_type: str = "n") -> str:
     if not is_formula:
         return "not_applicable"
-    if cached is None or cached == "":
+    # openpyxl reads an explicitly saved empty string as None with type "str".
+    if cached is None and data_type not in {"str", "s", "inlineStr"}:
         return "missing"
-    if _is_formula(cached) or not isinstance(cached, (str, int, float, bool, datetime, date)):
-        return "unavailable"
-    if isinstance(cached, str) and cached.startswith("#"):
+    if data_type == "e":
         return "error"
+    if cached is not None and not isinstance(cached, (str, int, float, bool, datetime, date)):
+        return "unavailable"
     return "present"
 
 
@@ -809,7 +810,7 @@ def _parse_loaded_workbook(wb_formula, wb_values, *, dataset_id: str, doc_id: st
         for (row, col), value in cells.items():
             is_formula, _, _, _ = _formula_details(value)
             cached_for_label = values_ws.cell(row, col).value if is_formula and values_ws is not None else None
-            cache_status = _formula_cache_status(is_formula, cached_for_label)
+            cache_status = _formula_cache_status(is_formula, cached_for_label, values_ws.cell(row, col).data_type if values_ws is not None else "n")
             label_value = cached_for_label if cache_status in {"present", "error"} else None
             label_values[(row, col)] = label_value if is_formula else value
             text = cell_display(label_value if is_formula else value, 120)
@@ -829,7 +830,9 @@ def _parse_loaded_workbook(wb_formula, wb_values, *, dataset_id: str, doc_id: st
         for (row, col), value in sorted(cells.items(), key=lambda item: item[0]):
             cached = values_ws.cell(row, col).value if values_ws is not None else None
             is_formula, formula_type, formula, formula_metadata = _formula_details(value)
-            cache_status = _formula_cache_status(is_formula, cached)
+            cache_status = _formula_cache_status(is_formula, cached, values_ws.cell(row, col).data_type if values_ws is not None else "n")
+            if is_formula and cache_status == "present" and cached is None:
+                cached = ""
             display_source = cached if is_formula and cache_status in {"present", "error"} else value
             display = cell_display(display_source, 200)
             row_label = _nearest_left_label(row_text_cols, row, col)
@@ -1162,28 +1165,25 @@ def _parse_loaded_workbook(wb_formula, wb_values, *, dataset_id: str, doc_id: st
         fact_quality_counts[status] = fact_quality_counts.get(status, 0) + 1
 
     warnings: list[str] = []
-    incomplete_formula_cache_count = sum(
-        count
-        for status, count in formula_cache_counts.items()
-        if status in {"missing", "unavailable", "error"}
-    )
-    if incomplete_formula_cache_count:
+    incomplete_formula_cells = [
+        row for row in cell_rows
+        if row["is_formula"] and row["formula_cache_status"] in {"missing", "unavailable", "error"}
+    ]
+    if incomplete_formula_cells:
+        locations = "、".join(f"{row['sheet_name']}!{row['cell_ref']}" for row in incomplete_formula_cells[:5])
+        if len(incomplete_formula_cells) > 5:
+            locations += " 等"
         warnings.append(
-            f"{incomplete_formula_cache_count} formula cell(s) have missing or unusable cached values; formulas were not recalculated."
+            f"文件已上传，{len(incomplete_formula_cells)} 个公式结果暂时无法读取，相关数据可能不完整。"
+            f"请用 Excel 重新计算并保存后上传；若仍有错误，请检查公式及外部数据。位置：{locations}。"
         )
-    unresolved_reference_count = sum(
-        count
-        for status, count in formula_reference_status_counts.items()
-        if status != "resolved"
-    )
-    if unresolved_reference_count:
-        warnings.append(
-            f"{unresolved_reference_count} formula reference(s) could not be resolved completely."
-        )
+    # Reference parsing limits remain in the structured diagnostics; they do not
+    # prevent reading a saved result and require no upload warning by themselves.
     external_link_count = len(getattr(wb_formula, "_external_links", ()))
     if external_link_count:
         warnings.append(
-            f"Workbook contains {external_link_count} external link(s); external values were not refreshed."
+            f"文件包含 {external_link_count} 个外部数据链接，当前使用文件中已保存的结果。"
+            "如需最新数据，请用 Excel 刷新链接并保存后上传。"
         )
 
     workbook = {

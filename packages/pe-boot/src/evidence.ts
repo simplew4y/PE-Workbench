@@ -17,6 +17,7 @@ import {
 	textValue,
 } from "./tools/database.ts";
 import { readExcelCellsByBounds } from "./tools/excel-cells.ts";
+import { readWindSnapshot } from "./trusted-sources.ts";
 
 /** A citation can be the first entry into a project after an upgrade. */
 function migrateEvidenceCollection(cwd: string): void {
@@ -131,6 +132,14 @@ export function resolvePeEvidenceRecord(
 			.prepare("SELECT COUNT(*) AS count FROM pdf_pages WHERE doc_id=? AND page_number BETWEEN ? AND ?")
 			.get(reference.docId, location.pageStart, location.pageEnd);
 		if (Number(count?.count) !== location.pageEnd - location.pageStart + 1) return undefined;
+	} else if (location.kind === "text" && document.parser_name === "wind_snapshot") {
+		const snapshot = readWindSnapshot(database, datasetId, reference.docId);
+		if (
+			!snapshot ||
+			location.lineEnd > snapshot.text.split("\n").length ||
+			location.lineEnd - location.lineStart >= 2000
+		)
+			return undefined;
 	} else {
 		// Text and Office citations require the asynchronous cache readiness barrier.
 		return undefined;
@@ -258,6 +267,37 @@ export async function resolvePeEvidenceSource(
 		}
 	}
 	if (location.kind === "text" || location.kind === "block") {
+		if (location.kind === "text") {
+			const connection = openPeDataset(cwd);
+			try {
+				const snapshot = readWindSnapshot(connection.database, connection.datasetId, reference.docId);
+				if (snapshot) {
+					const lines = snapshot.text.split("\n");
+					if (location.lineEnd > lines.length || location.lineEnd - location.lineStart >= 2000)
+						throw new PeSourceError(404, "Source lines do not exist in this snapshot");
+					const content = lines.slice(location.lineStart - 1, location.lineEnd).join("\n");
+					const row = { ...snapshot.document, ...sourceLocationRow(reference) };
+					return {
+						filePath: snapshot.filePath,
+						payload: {
+							kind: "text",
+							dataset_id: connection.datasetId,
+							doc_id: reference.docId,
+							version_no: Number(row.version_no),
+							evidence_id: evidenceId,
+							citation: sourceCitation(row),
+							markdown_citation: sourceMarkdownCitation(row, evidenceId),
+							filename: sourceFilename(row),
+							warnings: [],
+							content: content.slice(0, 12000),
+							truncated: content.length > 12000,
+						},
+					};
+				}
+			} finally {
+				connection.database.close();
+			}
+		}
 		const prepared = await preparePeDocument(cwd, { docId: reference.docId }, signal);
 		const cache = JSON.parse(readFileSync(prepared.cachePath, "utf8")) as {
 			text?: string;

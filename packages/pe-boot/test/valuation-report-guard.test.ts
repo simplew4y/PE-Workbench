@@ -274,6 +274,39 @@ describe("valuation report final-message guard", () => {
 		expect(await run.finish()).toBeUndefined();
 	});
 
+	it.each([
+		"分析当前估值模型并建立股票追踪表，自动识别股票和模型。",
+		"根据估值模型分析结果配置股票跟踪流程。",
+		"分析估值模型后记录一笔模拟买入。",
+		"分析估值模型并刷新股票追踪，用交互表格展示。",
+		"Analyze the valuation model and create a stock tracker with an interactive tracking table.",
+		"Review the valuation model and configure stock tracking.",
+		"Analyze the valuation model and record a simulated buy.",
+		"Explain the valuation model and refresh stock tracking.",
+	])("preserves stock-tracking operational output: %s", async (prompt) => {
+		const run = harness();
+		await run.begin(prompt);
+		await run.call("model", "doc-a", "pe_excel_range");
+		await run.result("model", {}, false, "pe_excel_range");
+		await run.call("tracking", "doc-a", "pe_stock_tracking");
+		await run.result("tracking", { kind: "pe_stock_tracking", operation: "configure" }, false, "pe_stock_tracking");
+		expect(await run.finish()).toBeUndefined();
+		expect(run.repairs).toEqual([]);
+	});
+
+	it.each([
+		"请分析估值模型，重点解释后续跟踪指标和风险。",
+		"请生成完整估值报告，同时建立股票追踪表。",
+		"Write a complete valuation report and configure stock tracking.",
+	])("still requires report validation for report intent: %s", async (prompt) => {
+		const run = harness();
+		await run.begin(prompt);
+		expect(text(await run.finish())).toContain("尚未通过校验");
+		await run.call();
+		await run.result();
+		expect(text(await run.finish())).toBe(REPORT);
+	});
+
 	it("does not guard projects with no active workbook", async () => {
 		const run = harness();
 		update(run.cwd, "UPDATE documents SET is_current=0");
