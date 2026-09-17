@@ -1,4 +1,4 @@
-import type { AssistantContentBlock, AssistantMessage, ThinkingContent, ToolCallContent } from "./types";
+import type { AgentMessage, AssistantContentBlock, AssistantMessage, ThinkingContent, ToolCallContent } from "./types";
 import { isGenerativeUiToolCall } from "./generative-ui/tool.ts";
 import { humanizePeModelError } from "./pe-model-errors.ts";
 
@@ -46,4 +46,13 @@ export function splitFinalAssistantBlocks(
 
 export function countToolCallBlocks(blocks: AssistantContentBlock[]): number {
   return blocks.filter((block): block is ToolCallContent => block.type === "toolCall").length;
+}
+
+/** Internal confirmation prompts stay in agent history, but are not chat content. */
+export function isFrameworkConfirmationMessage(message: AgentMessage): boolean {
+  if (message.role !== "user") return false;
+  const text = typeof message.content === "string"
+    ? message.content
+    : message.content.filter((block) => block.type === "text").map((block) => block.text).join("\n");
+  return /^\[framework-confirmation:[^\]\r\n]+\](?:\s|$)/.test(text);
 }

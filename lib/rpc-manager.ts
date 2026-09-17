@@ -10,6 +10,7 @@ import { validateAgentImages } from "./image-attachments";
 import { prepareSessionDocuments, validateSessionDocuments } from "./session-document-processor";
 import type { AttachedDocument } from "./session-attachments";
 import { invalidateModelsCache } from "./models-cache";
+import { registerStockTrackingWorker } from "./research-monitor-worker";
 import { resolveVisibleModels, selectInitialModelScope } from "./model-scope";
 import {
   createProjectCommandBashExtension,
@@ -1716,6 +1717,7 @@ export async function startRpcSession(
             if (platformProviderState.current) pi.registerProvider("pe-platform", platformProviderState.current);
           },
           registerPeTools,
+          registerStockTrackingWorker,
           createProjectCommandBashExtension({
             cwd: sessionCwd,
             settings: settingsManager,

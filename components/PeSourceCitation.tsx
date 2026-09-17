@@ -16,6 +16,7 @@ interface PeSourceCitationProps {
   evidenceId: string;
   children: ReactNode;
   className?: string;
+  portalContainer?: Element | null;
 }
 
 type LoadState =
@@ -146,7 +147,7 @@ function ExcelSourcePreview({ source }: { source: PeExcelSource }) {
   );
 }
 
-export function PeSourceCitation({ cwd, evidenceId, children, className }: PeSourceCitationProps) {
+export function PeSourceCitation({ cwd, evidenceId, children, className, portalContainer }: PeSourceCitationProps) {
   const [open, setOpen] = useState(false);
   const [state, setState] = useState<LoadState>({ status: "idle" });
   const [retryKey, setRetryKey] = useState(0);
@@ -198,11 +199,14 @@ export function PeSourceCitation({ cwd, evidenceId, children, className }: PeSou
   useEffect(() => {
     if (!open) return;
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") closeDrawer();
+      if (event.key === "Escape") {
+        if (portalContainer) event.preventDefault();
+        closeDrawer();
+      }
     };
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [closeDrawer, open]);
+  }, [closeDrawer, open, portalContainer]);
 
   const dialog = open && typeof document !== "undefined"
     ? createPortal(
@@ -279,7 +283,7 @@ export function PeSourceCitation({ cwd, evidenceId, children, className }: PeSou
             </div>
           </section>
         </div>,
-        document.body,
+        portalContainer ?? document.body,
       )
     : null;
 
