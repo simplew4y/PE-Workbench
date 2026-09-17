@@ -168,9 +168,9 @@ test("trade form saves the selected historical date, quantity and price with ide
   const request = { current: { body: "", id: "" } };
   const source = readFileSync(new URL("./PeStockTracking.tsx", import.meta.url), "utf8");
   const compiled = ts.transpileModule(source, { compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS } }).outputText;
-  const module = {};
-  runInNewContext(compiled, { exports: module, FormData: class { constructor(data) { return data; } }, crypto: { randomUUID: () => `request-${calls.length}` }, require: (id) => id === "react" ? { ...React, useState: () => ["buy", () => {}], useRef: () => request } : id === "@/lib/stock-tracking-chart" ? { ...chart, trackingMarketDate: () => today } : id.endsWith(".css") ? { default: {} } : id.startsWith("./") ? {} : require(id) });
-  const form = module.TradeForm({ ...props, onSave: (trade) => calls.push(trade) });
+  const compiledExports = {};
+  runInNewContext(compiled, { exports: compiledExports, FormData: class { constructor(data) { return data; } }, crypto: { randomUUID: () => `request-${calls.length}` }, require: (id) => id === "react" ? { ...React, useState: () => ["buy", () => {}], useRef: () => request } : id === "@/lib/stock-tracking-chart" ? { ...chart, trackingMarketDate: () => today } : id.endsWith(".css") ? { default: {} } : id.startsWith("./") ? {} : require(id) });
+  const form = compiledExports.TradeForm({ ...props, onSave: (trade) => calls.push(trade) });
   today = "2026-09-15";
   const data = new Map([["date", "2026-09-12"], ["price", "12.5"], ["quantity", "4"], ["fee", ""]]);
   const submit = () => form.props.onSubmit({ preventDefault() {}, currentTarget: data });

@@ -26,6 +26,24 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: workspaceRoot,
   },
+  webpack(config, { isServer, nextRuntime }) {
+    if (isServer && nextRuntime === "nodejs") {
+      // Workspace symlinks resolve outside node_modules, so Next's automatic
+      // serverExternalPackages matching misses these ESM-only SDK packages.
+      const workspaceExternals = Object.fromEntries(
+        [
+          "@earendil-works/pe-boot",
+          "@earendil-works/pi-coding-agent",
+          "@earendil-works/pi-agent-core",
+          "@earendil-works/pi-ai",
+          "@earendil-works/pi-tui",
+        ].map((name) => [name, `module ${name}`]),
+      );
+      const existing = config.externals ?? [];
+      config.externals = [workspaceExternals, ...(Array.isArray(existing) ? existing : [existing])];
+    }
+    return config;
+  },
   serverExternalPackages: [
     "undici",
     "pdfjs-dist",
