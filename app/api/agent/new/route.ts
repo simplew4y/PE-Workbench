@@ -9,6 +9,8 @@ import { getPePlatformRpcOptions } from "@/lib/pe-platform-runtime";
 import { authorizePeAgentCommand } from "@/lib/pe-agent-authorization";
 import { PeModelServiceError } from "@/lib/pe-gateway/model-service";
 import { PeBackendError } from "@/lib/pe-gateway/backend-client";
+import { ResearchError } from "@earendil-works/pe-boot";
+import { prepareResearchCardPrompt } from "@/lib/research-cards";
 
 const THINKING_LEVELS = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
@@ -49,7 +51,11 @@ export async function POST(req: Request) {
     }
 
     // Use a one-time key so startRpcSession's lock doesn't conflict with real session ids
-    const { provider, modelId, toolNames, thinkingLevel, ...promptCommand } = command as { provider?: string; modelId?: string; toolNames?: string[]; thinkingLevel?: unknown; [key: string]: unknown };
+    const { provider, modelId, toolNames, thinkingLevel, researchContext, ...promptCommand } = command as { provider?: string; modelId?: string; toolNames?: string[]; thinkingLevel?: unknown; [key: string]: unknown };
+    if (researchContext !== undefined) {
+      if (commandType !== "prompt") throw new ResearchError(400, "研究接续仅用于新会话提问");
+      promptCommand.message = prepareResearchCardPrompt(cwd, promptCommand.message, researchContext);
+    }
     if ((provider && !modelId) || (!provider && modelId)) {
       throw new Error("provider and modelId must be provided together");
     }
@@ -112,6 +118,6 @@ export async function POST(req: Request) {
       ...(commandType === "prompt" && !promptAccepted
         ? { code: "prompt_rejected", accepted: false }
         : {}),
-    }, { status: error instanceof PeModelServiceError || error instanceof PeBackendError ? error.status : 500 });
+    }, { status: error instanceof PeModelServiceError || error instanceof PeBackendError || error instanceof ResearchError ? error.status : 500 });
   }
 }

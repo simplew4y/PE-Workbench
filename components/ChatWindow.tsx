@@ -9,6 +9,8 @@ import { extractTurnWrittenFiles, type WrittenFile } from "@/lib/turn-written-fi
 import { hasGenerativeUiToolCall } from "@/lib/generative-ui/tool";
 import { MessageView } from "./MessageView";
 import { PeFrameworkConfirmation, PeResearchRail, usePeResearch } from "./PeFrameworkPanel";
+import { PeResearchNotebook, ResearchCardCapture } from "./PeResearchNotebook";
+import { getToolNamesForPreset } from "@/lib/tool-presets";
 import { getTurnFrameworkProposal } from "@/lib/framework-proposal";
 import researchStyles from "./PeFrameworkPanel.module.css";
 import { ChatInput, type ChatInputHandle } from "./ChatInput";
@@ -365,6 +367,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
   const hasStreamingContent = Boolean(streamState.streamingMessage?.content.length);
   const messageCwd = session?.cwd ?? newSessionCwd ?? undefined;
   const research = usePeResearch(messageCwd, `${sessionBusy}:${messages.length}`);
+  const [researchCardsRefresh, setResearchCardsRefresh] = useState(0);
   const messageContentRef = useRef<HTMLDivElement | null>(null);
   const promptAnchorSpacerRef = useRef<HTMLDivElement | null>(null);
   const promptAnchorSpacerHeightRef = useRef(0);
@@ -811,7 +814,13 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
                     }
                   }
                   const writtenFiles = extractTurnWrittenFiles(turnContent, toolResultsMap, messageCwd);
-                  rendered.push(renderMessage(finalAssistantIdx, { messageOverride: finalAnswerMessage, writtenFiles }));
+                  const answerView = renderMessage(finalAssistantIdx, { messageOverride: finalAnswerMessage, writtenFiles });
+                  const answerText = finalAnswerMessage.content.filter((block) => block.type === "text").map((block) => block.text).join("\n").trim();
+                  const sourceSessionId = session?.id ?? sessionIdRef.current;
+                  if (research.project && sourceSessionId && entryIds[finalAssistantIdx] && answerText && !getAssistantErrorMessage(finalAssistant)) {
+                    rendered.push(<ResearchCardCapture key={`capture-${sourceSessionId}-${entryIds[finalAssistantIdx]}`} project={research.project} sessionId={sourceSessionId} entryId={entryIds[finalAssistantIdx]} text={answerText}
+                      onSaved={() => { setResearchCardsRefresh((value) => value + 1); research.setView("notebook"); }}>{answerView}</ResearchCardCapture>);
+                  } else rendered.push(answerView);
                   const proposal = getTurnFrameworkProposal(turnContent, toolResultsMap);
                   if (proposal) rendered.push(<PeFrameworkConfirmation key={`framework-${session?.id ?? sessionIdRef.current}-${proposal.draftId}-${proposal.revision}`} proposal={proposal} research={research} sessionId={session?.id ?? sessionIdRef.current} ensureEventsConnected={ensureEventsConnected} />);
                 }
@@ -885,7 +894,9 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
       )}
     </div>
     </div>
-    <PeResearchRail research={research} model={displayModelValue ?? undefined} agentUnavailable={toolPreset === "none" || modelSwitching} />
+    <PeResearchRail research={research} model={displayModelValue ?? undefined} agentUnavailable={toolPreset === "none" || modelSwitching}
+      notebook={research.project ? <PeResearchNotebook key={research.project.datasetId} project={research.project} refreshKey={researchCardsRefresh}
+        onOpenFramework={() => research.setView("framework")} onSessionCreated={onSessionForked} model={displayModelValue ?? undefined} toolNames={getToolNamesForPreset(toolPreset)} agentUnavailable={toolPreset === "none" || modelSwitching || sessionBusy} /> : undefined} />
     </div>
   );
 }

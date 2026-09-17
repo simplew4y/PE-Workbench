@@ -1,0 +1,45 @@
+.panel { padding: 22px; color: var(--text); font-size: 13px; line-height: 1.65; }
+.intro { margin: 0 0 18px; color: var(--text-muted); }
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 18px; }
+.stats div { padding: 12px; display: flex; flex-direction: column; }
+.stats div + div { border-left: 1px solid var(--border); }
+.stats strong { font-size: 22px; font-weight: 600; }
+.stats span, .meta { color: var(--text-muted); font-size: 12px; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.panel button, .capture button { border: 1px solid var(--border); background: var(--bg-panel); color: var(--text); border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 12px; }
+.panel button:hover, .capture button:hover { background: var(--bg-hover); }
+.panel button:disabled, .capture button:disabled { opacity: .5; cursor: not-allowed; }
+.panel .primary, .capture .primary { color: var(--bg); background: var(--text); border-color: var(--text); }
+.panel button:focus-visible, .capture button:focus-visible, .panel input:focus-visible, .panel textarea:focus-visible, .capture input:focus-visible, .capture textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.form { display: grid; gap: 12px; padding: 14px; margin: 12px 0; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-panel); }
+.form label { display: grid; gap: 5px; font-size: 12px; }
+.form input, .form textarea, .search, .filter { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; }
+.form textarea { resize: vertical; min-height: 90px; }
+.search { margin: 16px 0 8px; }
+.filter { margin-bottom: 14px; }
+.card { padding: 16px 0; border-top: 1px solid var(--border); overflow-wrap: anywhere; }
+.cardHeader { display: flex; gap: 9px; align-items: flex-start; }
+.cardHeader input { margin-top: 6px; accent-color: var(--accent); }
+.cardHeader h3 { margin: 0; font-size: 14px; font-weight: 600; }
+.badge { display: inline-block; margin: 6px 0; font-size: 11px; color: var(--text-muted); background: var(--bg-hover); padding: 2px 7px; border-radius: 4px; }
+.confirmed { color: var(--accent); }
+.body { max-height: 240px; overflow: auto; margin: 9px 0; }
+.details { margin: 10px 0; }
+.details summary { cursor: pointer; color: var(--text-muted); }
+.evidence { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.link { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+.error { padding: 10px; border: 1px solid var(--border); border-radius: 6px; color: var(--text); background: var(--bg-hover); margin: 12px 0; }
+.empty { padding: 26px 0; color: var(--text-muted); }
+.continue { position: sticky; bottom: 0; padding: 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-panel); box-shadow: 0 -5px 18px -12px #0005; margin-top: 18px; }
+.continue textarea { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid var(--border); border-radius: 5px; color: var(--text); background: var(--bg); margin: 8px 0; font: inherit; resize: vertical; }
+.capturePositioner { z-index: 80; }
+.capturePositioner[data-anchor-hidden] { visibility: hidden; }
+.capture { padding: 10px; max-width: calc(100vw - 24px); max-height: min(620px, calc(100dvh - 32px)); overflow-y: auto; box-sizing: border-box; color: var(--text); background: var(--bg-panel); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 8px 28px #0002; font-size: 12px; line-height: 1.6; }
+.captureTitle { margin: 0 0 8px; color: var(--text-muted); font-size: 12px; font-weight: 500; }
+.captureEditor { width: 380px; }
+.capture .form { margin: 0; padding: 0; border: 0; }
+.excerpt { margin: 0; padding: 8px 10px; border-left: 2px solid var(--accent); background: var(--bg); max-height: 150px; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+.savedToast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 90; padding: 10px 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-panel); color: var(--text); box-shadow: 0 4px 16px #0002; font-size: 13px; }
+.capture .meta { margin: 8px 0; }
+.selection { border-left: 2px solid var(--accent); padding-left: 10px; max-height: 180px; overflow: auto; }
+@media (max-width: 500px) { .panel { padding: 14px; } .stats div { padding: 9px; } }
