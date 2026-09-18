@@ -1,5 +1,7 @@
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { resolvePeEvidenceReference } from "../evidence.ts";
+import { sourceId } from "../source.ts";
 import {
 	addSimulatedTrade,
 	getStockTracking,
@@ -22,7 +24,8 @@ const basis = Type.Object({
 	evidenceIds: Type.Array(citation, {
 		minItems: 1,
 		maxItems: 20,
-		description: "Resolvable source: citations from this project's documents, including memo and research reports.",
+		description:
+			"Exact source: or page: citations returned by project tools, including memo and research reports. PDF page IDs are normalized before saving.",
 	}),
 });
 const config = Type.Object({
@@ -210,10 +213,35 @@ export const peStockTrackingTool = defineTool({
 				);
 			if (trackerId && trackerId !== params.config.id)
 				throw new Error("tracker_id must match config.id when updating");
+			const config = params.config;
+			const normalizeBasis = (value: typeof config.basis) => ({
+				...value,
+				evidenceIds: [
+					...new Set(
+						value.evidenceIds.map((id) =>
+							id.startsWith("page:") ? sourceId(resolvePeEvidenceReference(workspaceRoot, id)) : id,
+						),
+					),
+				],
+			});
 			const saved = await saveStockTrackerWithSources(
 				workspaceRoot,
 				datasetId,
-				params.config,
+				{
+					...config,
+					basis: normalizeBasis(config.basis),
+					...(config.forecast
+						? { forecast: { ...config.forecast, basis: normalizeBasis(config.forecast.basis) } }
+						: {}),
+					...(config.valuationEstimates
+						? {
+								valuationEstimates: config.valuationEstimates.map((point) => ({
+									...point,
+									basis: normalizeBasis(point.basis),
+								})),
+							}
+						: {}),
+				},
 				params.revision,
 				signal,
 			);

@@ -30,7 +30,10 @@ function project() {
 	const cwd = mkdtempSync(join(tmpdir(), "pe-framework-test-"));
 	roots.push(cwd);
 	mkdirSync(join(cwd, "meta"));
-	initializePeCollectionDatabase(join(cwd, "meta/collection.sqlite3"), { datasetId: "dataset_test", name: "Test" });
+	initializePeCollectionDatabase(join(cwd, "meta/collection.sqlite3"), {
+		datasetId: "dataset_test",
+		name: "Test",
+	});
 	return cwd;
 }
 const datasetId = "dataset_test";
@@ -126,7 +129,9 @@ describe("investment framework persistence", () => {
 			requestId: "user-click",
 		});
 		const read = await peFrameworkTool.execute("read", { operation: "read" }, undefined, undefined, ctx);
-		expect(read.details).toMatchObject({ framework: { currentVersionId: confirmed.id } });
+		expect(read.details).toMatchObject({
+			framework: { currentVersionId: confirmed.id },
+		});
 		await expect(
 			peFrameworkTool.execute(
 				"stale",
@@ -156,18 +161,34 @@ describe("investment framework persistence", () => {
 			).run(datasetId);
 		});
 		const job = enqueueResearchJob(cwd, datasetId, "分析", ["pdf", "excel"], "evidence", null);
-		const pdfId = sourceId({ docId: "pdf", location: { kind: "pdf", pageStart: 1, pageEnd: 1 } });
-		const excelId = sourceId({ docId: "excel", location: { kind: "excel", sheet: "预测", range: "B2" } });
+		const pdfId = sourceId({
+			docId: "pdf",
+			location: { kind: "pdf", pageStart: 1, pageEnd: 1 },
+		});
+		const excelId = sourceId({
+			docId: "excel",
+			location: { kind: "excel", sheet: "预测", range: "B2" },
+		});
 		expect(readResearchInput(cwd, datasetId, job.input, { docId: "pdf", page: 1 })).toMatchObject({
 			text: "原始研报文本",
 			evidenceId: pdfId,
 		});
 		expect(
-			readResearchInput(cwd, datasetId, job.input, { docId: "excel", sheet: "预测", range: "B2" }),
+			readResearchInput(cwd, datasetId, job.input, {
+				docId: "excel",
+				sheet: "预测",
+				range: "B2",
+			}),
 		).toMatchObject({ cells: [{ numeric_value: 42, evidence_id: excelId }] });
 		const verified = {
 			...content,
-			items: [{ ...content.items[0], origin: "research" as const, evidenceIds: [pdfId, excelId] }],
+			items: [
+				{
+					...content.items[0],
+					origin: "research" as const,
+					evidenceIds: [pdfId, excelId],
+				},
+			],
 		};
 		const candidate = createResearchDraft(cwd, datasetId, verified, ["pdf", "excel"], null);
 		expect(() => createResearchDraft(cwd, datasetId, verified, ["pdf"], null)).toThrow("outside");
@@ -183,6 +204,79 @@ describe("investment framework persistence", () => {
 				requestId: "changed",
 			}),
 		).toThrow("changed");
+	});
+	it("normalizes PDF tool page citations before saving while rejecting unselected or missing evidence", async () => {
+		const cwd = project();
+		withResearchDatabase(cwd, datasetId, (db) => {
+			db.prepare(
+				"INSERT INTO documents(doc_id,dataset_id,original_filename,filename_key,sha256,file_type,status,created_at,updated_at) VALUES('pdf',?,'report.pdf','report.pdf','pdf','pdf','completed','before','before')",
+			).run(datasetId);
+			db.exec(
+				"INSERT INTO pdf_pages VALUES('page','pdf',1,'原始研报文本','p1','body','{}','good','{}',100,100,0,'[]',0,0,0)",
+			);
+		});
+		const canonical = sourceId({
+			docId: "pdf",
+			location: { kind: "pdf", pageStart: 1, pageEnd: 1 },
+		});
+		const verified: FrameworkContent = {
+			...content,
+			items: [
+				{
+					...content.items[0],
+					origin: "research",
+					evidenceIds: ["page:page", canonical],
+				},
+			],
+		};
+		const ctx = { cwd } as Parameters<typeof peFrameworkTool.execute>[4];
+		await peFrameworkTool.execute(
+			"pdf-proposal",
+			{
+				operation: "propose",
+				content: verified,
+				docIds: ["pdf"],
+				expectedVersionId: null,
+			},
+			undefined,
+			undefined,
+			ctx,
+		);
+		const state = getResearchFramework(cwd, datasetId);
+		expect(state.drafts[0].content.items[0].evidenceIds).toEqual([canonical]);
+		expect(state.currentVersionId).toBeNull();
+		await expect(
+			peFrameworkTool.execute(
+				"unselected",
+				{
+					operation: "propose",
+					content: verified,
+					docIds: [],
+					expectedVersionId: null,
+				},
+				undefined,
+				undefined,
+				ctx,
+			),
+		).rejects.toThrow("outside");
+		await expect(
+			peFrameworkTool.execute(
+				"missing",
+				{
+					operation: "propose",
+					content: {
+						...verified,
+						items: [{ ...verified.items[0], evidenceIds: ["page:missing"] }],
+					},
+					docIds: ["pdf"],
+					expectedVersionId: null,
+				},
+				undefined,
+				undefined,
+				ctx,
+			),
+		).rejects.toThrow();
+		expect(getResearchFramework(cwd, datasetId).drafts).toHaveLength(1);
 	});
 	it("creates additive tables without changing parser schema or existing research notes", () => {
 		const cwd = project();
@@ -202,13 +296,22 @@ describe("investment framework persistence", () => {
 		const cwd = project();
 		const a = createResearchDraft(cwd, datasetId, content, [], null);
 		const b = createResearchDraft(cwd, datasetId, content, [], null);
-		const request = { draftId: a.id, revision: 1, expectedVersionId: null, requestId: "publish" };
+		const request = {
+			draftId: a.id,
+			revision: 1,
+			expectedVersionId: null,
+			requestId: "publish",
+		};
 		const first = publishResearchDraft(cwd, datasetId, request);
 		expect(publishResearchDraft(cwd, datasetId, request)).toEqual(first);
 		expect(() => publishResearchDraft(cwd, datasetId, { ...request, draftId: b.id })).toThrow("different input");
-		expect(() => publishResearchDraft(cwd, datasetId, { ...request, draftId: b.id, requestId: "other" })).toThrow(
-			"preserved",
-		);
+		expect(() =>
+			publishResearchDraft(cwd, datasetId, {
+				...request,
+				draftId: b.id,
+				requestId: "other",
+			}),
+		).toThrow("preserved");
 		expect(getResearchFramework(cwd, datasetId).drafts.find((entry) => entry.id === b.id)?.status).toBe("open");
 		withResearchDatabase(cwd, datasetId, (db) => {
 			expect(() => db.prepare("UPDATE research_versions SET content_json='{}'").run()).toThrow("immutable");
@@ -218,7 +321,10 @@ describe("investment framework persistence", () => {
 	it("rejects stale saves, invalid evidence, malformed and cross-project inputs", () => {
 		const cwd = project();
 		const value = createResearchDraft(cwd, datasetId, content, [], null);
-		updateResearchDraft(cwd, datasetId, value.id, 1, { ...content, title: "Edited" });
+		updateResearchDraft(cwd, datasetId, value.id, 1, {
+			...content,
+			title: "Edited",
+		});
 		expect(() => updateResearchDraft(cwd, datasetId, value.id, 1, content)).toThrow("changed");
 		expect(() => createResearchDraft(cwd, "other", content, [], null)).toThrow("does not match");
 		expect(() =>
@@ -248,7 +354,10 @@ describe("investment framework persistence", () => {
 		const changed = {
 			...base,
 			title: "New title",
-			items: base.items.map((item) => ({ ...item, claim: `${item.claim}已修改` })),
+			items: base.items.map((item) => ({
+				...item,
+				claim: `${item.claim}已修改`,
+			})),
 		};
 		const proposed = createResearchDraft(cwd, datasetId, changed, [], v1.id);
 		const v2 = publishResearchDraft(cwd, datasetId, {
@@ -306,7 +415,12 @@ describe("durable research jobs", () => {
 		expect(state.currentVersionId).toBe(v2.id);
 		expect(state.drafts.find((entry) => entry.id === draftId)?.baseVersionId).toBe(v1.id);
 		expect(() =>
-			publishResearchDraft(cwd, datasetId, { draftId, revision: 1, expectedVersionId: v2.id, requestId: "late" }),
+			publishResearchDraft(cwd, datasetId, {
+				draftId,
+				revision: 1,
+				expectedVersionId: v2.id,
+				requestId: "late",
+			}),
 		).toThrow("preserved");
 	});
 	it("runs a replaceable engine without holding a transaction and persists failures for retry", async () => {
