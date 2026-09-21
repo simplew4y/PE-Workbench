@@ -1,6 +1,7 @@
 "use client";
 import { registerAbortHandler } from "@/hooks/useKeyboardShortcuts";
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import type { ResearchCardView } from "@earendil-works/pe-boot";
 import type { AgentMessage, AssistantContentBlock, AssistantMessage, BashExecutionMessage, BlockingExtensionUiRequest, CustomMessage, ExtensionUiRequest, SessionInfo, SessionTreeNode, ToolResultMessage, UserMessage } from "@/lib/types";
 import { normalizeCustomPanelLines, parseAnsiLine } from "@/lib/ansi";
 import { asBracketedPaste, toTerminalKeyData } from "@/lib/terminal-input";
@@ -9,6 +10,8 @@ import { extractTurnWrittenFiles, type WrittenFile } from "@/lib/turn-written-fi
 import { hasGenerativeUiToolCall } from "@/lib/generative-ui/tool";
 import { MessageView } from "./MessageView";
 import { PeFrameworkConfirmation, PeResearchRail, usePeResearch } from "./PeFrameworkPanel";
+import { PeResearchNotebook, ResearchCardCapture } from "./PeResearchNotebook";
+import { getToolNamesForPreset } from "@/lib/tool-presets";
 import { getTurnFrameworkProposal } from "@/lib/framework-proposal";
 import researchStyles from "./PeFrameworkPanel.module.css";
 import { ChatInput, type ChatInputHandle } from "./ChatInput";
@@ -37,6 +40,8 @@ interface Props {
   onAttentionNeeded?: (request: BlockingExtensionUiRequest) => void;
   onSessionCreated?: (session: SessionInfo, sourceDraftKey: string) => void;
   onSessionForked?: (newSessionId: string) => void;
+  researchSourceTarget?: { sessionId: string; cardId: string; entryId: string; excerpt: string; requestId: number } | null;
+  onResearchSourceOpen?: (target: { sessionId: string; cardId: string; entryId: string; excerpt: string }) => void;
   modelsRefreshKey?: number;
   chatInputRef?: React.RefObject<ChatInputHandle | null>;
   onBranchDataChange?: (tree: SessionTreeNode[], activeLeafId: string | null, onLeafChange: (leafId: string | null) => void) => void;
@@ -189,7 +194,7 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, defaultExpanded = fa
   );
 }
 
-export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionDraftKey, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemPromptLoaderChange, onModelSessionTargetChange, onSessionStatsChange, onSessionStatsPanelOpen, onContextUsageChange, onOpenFile, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio }: Props) {
+export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionDraftKey, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, researchSourceTarget, onResearchSourceOpen, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemPromptLoaderChange, onModelSessionTargetChange, onSessionStatsChange, onSessionStatsPanelOpen, onContextUsageChange, onOpenFile, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio }: Props) {
   const { t } = useI18n();
   const isMobile = useIsMobile();
 
@@ -365,12 +370,51 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
   const hasStreamingContent = Boolean(streamState.streamingMessage?.content.length);
   const messageCwd = session?.cwd ?? newSessionCwd ?? undefined;
   const research = usePeResearch(messageCwd, `${sessionBusy}:${messages.length}`);
+  const [researchCardsRefresh, setResearchCardsRefresh] = useState(0);
+  const [initialSourceCardId] = useState(() => typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("researchCard"));
+  const activeResearchSource = researchSourceTarget?.sessionId === session?.id ? researchSourceTarget : null;
+  const sourceCardId = activeResearchSource?.cardId ?? initialSourceCardId;
+  const sourceRequestId = activeResearchSource?.requestId ?? 0;
+  const [sourceTarget, setSourceTarget] = useState<{ entryId: string; excerpt: string; requestId: number } | null>(null);
+  const sourceNavigationRef = useRef<string | null>(null);
   const messageContentRef = useRef<HTMLDivElement | null>(null);
   const promptAnchorSpacerRef = useRef<HTMLDivElement | null>(null);
   const promptAnchorSpacerHeightRef = useRef(0);
   const promptAnchorMeasureFrameRef = useRef<number | null>(null);
   const promptAnchorAdjustmentDoneRef = useRef(false);
   const promptAnchorUpdateRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    if (!activeResearchSource) return;
+    setSourceTarget({ entryId: activeResearchSource.entryId, excerpt: activeResearchSource.excerpt, requestId: activeResearchSource.requestId });
+  }, [activeResearchSource]);
+
+  useEffect(() => {
+    const sessionId = session?.id;
+    if (activeResearchSource || !sourceCardId || !sessionId || !research.project) return;
+    const controller = new AbortController();
+    void fetch(`/api/pe/research-cards?${new URLSearchParams({ datasetId: research.project.datasetId })}`, { cache: "no-store", signal: controller.signal })
+      .then(async (response) => {
+        const result = await response.json() as { cards?: ResearchCardView[]; error?: string };
+        if (!response.ok) throw new Error(result.error || "无法读取来源卡片");
+        const card = result.cards?.find((item) => item.id === sourceCardId);
+        if (card?.origin?.sessionId === sessionId) setSourceTarget({ entryId: card.origin.entryId, excerpt: card.origin.excerpt, requestId: sourceRequestId });
+      })
+      .catch((cause) => { if (!controller.signal.aborted) console.error("Failed to locate research source:", cause); });
+    return () => controller.abort();
+  }, [activeResearchSource, research.project, session?.id, sourceCardId, sourceRequestId]);
+
+  useEffect(() => {
+    if (!sourceTarget || sessionBusy) return;
+    if (entryIds.includes(sourceTarget.entryId)) {
+      sourceNavigationRef.current = null;
+      setVisibleCount(Number.MAX_SAFE_INTEGER);
+      return;
+    }
+    if (sourceNavigationRef.current === sourceTarget.entryId) return;
+    sourceNavigationRef.current = sourceTarget.entryId;
+    void handleNavigate(sourceTarget.entryId);
+  }, [entryIds, handleNavigate, sessionBusy, sourceTarget]);
 
   useLayoutEffect(() => {
     const spacer = promptAnchorSpacerRef.current;
@@ -811,7 +855,14 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
                     }
                   }
                   const writtenFiles = extractTurnWrittenFiles(turnContent, toolResultsMap, messageCwd);
-                  rendered.push(renderMessage(finalAssistantIdx, { messageOverride: finalAnswerMessage, writtenFiles }));
+                  const answerView = renderMessage(finalAssistantIdx, { messageOverride: finalAnswerMessage, writtenFiles });
+                  const answerText = finalAnswerMessage.content.filter((block) => block.type === "text").map((block) => block.text).join("\n").trim();
+                  const sourceSessionId = session?.id ?? sessionIdRef.current;
+                  if (research.project && sourceSessionId && entryIds[finalAssistantIdx] && answerText && !getAssistantErrorMessage(finalAssistant)) {
+                    rendered.push(<ResearchCardCapture key={`capture-${sourceSessionId}-${entryIds[finalAssistantIdx]}-${sourceTarget?.entryId === entryIds[finalAssistantIdx] ? sourceTarget.requestId : 0}`} project={research.project} sessionId={sourceSessionId} entryId={entryIds[finalAssistantIdx]} text={answerText}
+                      sourceHighlight={sourceTarget?.entryId === entryIds[finalAssistantIdx] ? sourceTarget.excerpt : undefined}
+                      onSaved={() => { setResearchCardsRefresh((value) => value + 1); research.setView("notebook"); }}>{answerView}</ResearchCardCapture>);
+                  } else rendered.push(answerView);
                   const proposal = getTurnFrameworkProposal(turnContent, toolResultsMap);
                   if (proposal) rendered.push(<PeFrameworkConfirmation key={`framework-${session?.id ?? sessionIdRef.current}-${proposal.draftId}-${proposal.revision}`} proposal={proposal} research={research} sessionId={session?.id ?? sessionIdRef.current} ensureEventsConnected={ensureEventsConnected} />);
                 }
@@ -885,7 +936,10 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
       )}
     </div>
     </div>
-    <PeResearchRail research={research} model={displayModelValue ?? undefined} agentUnavailable={toolPreset === "none" || modelSwitching} />
+    <PeResearchRail research={research} model={displayModelValue ?? undefined} agentUnavailable={toolPreset === "none" || modelSwitching}
+      notebook={research.project ? <PeResearchNotebook key={research.project.datasetId} project={research.project} refreshKey={researchCardsRefresh}
+        frameworkItems={research.snapshot?.framework.versions.find((version) => version.id === research.snapshot?.framework.currentVersionId)?.content.items}
+        onOpenFramework={() => research.setView("framework")} onOpenSource={onResearchSourceOpen} onSessionCreated={onSessionForked} model={displayModelValue ?? undefined} toolNames={getToolNamesForPreset(toolPreset)} agentUnavailable={toolPreset === "none" || modelSwitching || sessionBusy} /> : undefined} />
     </div>
   );
 }

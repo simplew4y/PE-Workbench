@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Popover } from "@base-ui/react/popover";
 import { BookOpen, ChartNoAxesCombined, FileText, Settings } from "lucide-react";
 import type { FrameworkContent, FrameworkState, ResearchContinuation, getPeMemoVersion, getResearchMonitor } from "@earendil-works/pe-boot";
@@ -17,7 +17,7 @@ export { frameworkReportMarkdown } from "@/lib/framework-report";
 import styles from "./PeFrameworkPanel.module.css";
 
 type Snapshot = { framework: FrameworkState; memos: ReturnType<typeof getPeMemoVersion>[]; continuations: ResearchContinuation[]; monitor: ReturnType<typeof getResearchMonitor> };
-type View = "framework" | "memo" | "tracking" | null;
+type View = "framework" | "memo" | "tracking" | "notebook" | null;
 
 export function usePeResearch(cwd: string | undefined, settledKey: string) {
   const [loaded, setLoaded] = useState<{ cwd: string; project: PeProjectSummary; snapshot: Snapshot } | null>(null);
@@ -167,8 +167,8 @@ export function PeFrameworkConfirmation({ proposal, research, sessionId, ensureE
   </div>;
 }
 
-export function PeResearchRail({ research, model, agentUnavailable = false }: {
-  research: Research; model?: { provider: string; modelId: string }; agentUnavailable?: boolean;
+export function PeResearchRail({ research, model, agentUnavailable = false, notebook }: {
+  research: Research; model?: { provider: string; modelId: string }; agentUnavailable?: boolean; notebook?: ReactNode;
 }) {
   const { project, snapshot, view, setView, error } = research;
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -177,7 +177,8 @@ export function PeResearchRail({ research, model, agentUnavailable = false }: {
   const displayed = snapshot?.framework.versions.find((entry) => entry.id === selectedVersion) ?? current;
   if (!project && !error) return null;
   const failure = error && <p role="alert">{error}<button type="button" onClick={research.refresh}>重试</button></p>;
-  return <ResearchRail selectedId={view} onSelect={(id) => setView(id === "framework" || id === "memo" || id === "tracking" ? id : null)} artifacts={[
+  return <ResearchRail selectedId={view} onSelect={(id) => setView(id === "framework" || id === "memo" || id === "tracking" || id === "notebook" ? id : null)} artifacts={[
+    ...(notebook ? [{ id: "notebook", label: "研究积累", icon: <BookOpen size={18} />, subtitle: project?.name, content: notebook, footer: false as const }] : []),
     { id: "framework", label: "投资框架", icon: <BookOpen size={18} />, subtitle: `${project?.name ?? ""}${displayed ? ` · 阅读 v${displayed.version}${displayed.id === current?.id ? " · 最新版本" : " · 历史版本"}` : ""}`,
       headerActions: <Popover.Root open={settingsOpen} onOpenChange={setSettingsOpen}>
         <Popover.Trigger aria-label="投资框架设置" title="投资框架设置"><Settings size={18} /></Popover.Trigger>

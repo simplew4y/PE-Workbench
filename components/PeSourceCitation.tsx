@@ -297,6 +297,7 @@ export function PeSourceCitation({ cwd, evidenceId, children, className, portalC
           className,
         ].filter(Boolean).join(" ")}
         data-pe-source-citation="true"
+        data-pe-evidence-id={evidenceId}
         onClick={openDrawer}
         title={typeof children === "string" ? `查看原始证据：${children}` : "查看原始证据"}
         type="button"
