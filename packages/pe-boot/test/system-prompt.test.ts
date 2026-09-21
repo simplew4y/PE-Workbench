@@ -1,4 +1,16 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+	createAgentSession,
+	createReadTool,
+	DefaultResourceLoader,
+	type ExtensionAPI,
+	ModelRuntime,
+	SessionManager,
+	SettingsManager,
+} from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildPeSystemPrompt } from "../src/system-prompt.ts";
 import { isPeConsensusEnabled } from "../src/tools/feature-flags.ts";
@@ -68,37 +80,131 @@ describe("PE system prompt", () => {
 		expect(prompt).toContain("- pe_document_open:");
 		expect(prompt).toContain("- pe_source_detail:");
 		expect(prompt).toContain("- pe_valuation_output_locate:");
-		expect(prompt).toContain("- pe_render_ui:");
+		expect(prompt).not.toContain("- pe_render_ui:");
+		expect(prompt).toContain("- pe_load_capability:");
 		expect(prompt).toContain("Preserve the internal #pe-source?evidence_id= fragment exactly");
 		expect(prompt).not.toContain("Presentation decision policy");
 		expect(prompt).not.toContain("Component capabilities");
 	});
 
-	it("keeps valuation verification and version-bound evidence rules always available", () => {
+	it("keeps global evidence and report gates without preloading task procedures", () => {
 		const prompt = buildPeSystemPrompt("/workspace");
-		expect(prompt).toContain("prepared by the background Excel pipeline");
-		expect(prompt).toContain("same doc_id throughout analysis");
-		expect(prompt).toContain("historical citations must never silently resolve to the latest version");
-		expect(prompt).toContain("call pe_valuation_output_locate before choosing an output cell");
-		expect(prompt).toContain("ranked candidate, not recalculation proof");
-		expect(prompt).toContain("Only status=verified");
-		expect(prompt).toContain("distinguish structural_status from calculation_validation.status");
-		expect(prompt).toContain("When only a screenshot, excerpt, or another analysis is available");
-		expect(prompt).toContain("do not invent workbook verification, doc_id, cells, citations, or tool results");
+		expect(prompt).toContain("same doc_id");
+		expect(prompt).toContain("historical citations");
+		expect(prompt).toContain("not fresh recalculation");
+		expect(prompt).toContain("scope=overview and status=ready");
+		expect(prompt).toContain("return rendered_report verbatim");
+		expect(prompt).toContain("pe-document-retrieval");
+		expect(prompt).toContain("pe-valuation-report");
+		expect(prompt).not.toContain("next_page_offset");
+		expect(prompt).not.toContain("repair_scope=sections");
+		expect(prompt).not.toContain("模型逻辑框架");
+		// Budget for the custom PE prompt only; SDK metadata and tool schemas are separate.
+		expect(prompt.length).toBeLessThan(5500);
 	});
 
-	it("keeps complete but natural valuation answers without forcing visual components", () => {
-		const prompt = buildPeSystemPrompt("/workspace");
-		for (const section of ["模型逻辑框架", "核心驱动因素", "盈利预测与敏感性分析", "模型核心风险点"]) {
-			expect(prompt).toContain(section);
+	it.each([false, true])("discovers lazy skills on startup and reload (consensus=%s)", async (consensus) => {
+		vi.stubEnv("PE_CONSENSUS_ENABLED", consensus ? "1" : "0");
+		const cwd = mkdtempSync(join(tmpdir(), "pe-skills-"));
+		const agentDir = join(cwd, "agent");
+		const settingsManager = SettingsManager.inMemory();
+		const loader = new DefaultResourceLoader({
+			cwd,
+			agentDir,
+			settingsManager,
+			systemPrompt: buildPeSystemPrompt(cwd),
+			noExtensions: true,
+			noSkills: true,
+			noContextFiles: true,
+			noPromptTemplates: true,
+			noThemes: true,
+			extensionFactories: [registerPeTools],
+		});
+		try {
+			await loader.reload();
+			expect(loader.getExtensions().errors).toEqual([]);
+			const { session } = await createAgentSession({
+				cwd,
+				agentDir,
+				settingsManager,
+				resourceLoader: loader,
+				modelRuntime: await ModelRuntime.create({
+					authPath: join(agentDir, "auth.json"),
+					modelsPath: null,
+					allowModelNetwork: false,
+				}),
+				sessionManager: SessionManager.inMemory(cwd),
+			});
+			try {
+				await session.bindExtensions({
+					mode: "rpc",
+					onError: (error) => {
+						throw new Error(JSON.stringify(error));
+					},
+				});
+				const expected = [
+					"pe-document-retrieval",
+					"pe-generative-ui",
+					"pe-memo",
+					"pe-research-note",
+					"pe-valuation-model-explainer",
+					"pe-valuation-report",
+					"valuation-pricing-framework",
+					...(consensus ? ["pe-consensus-divergence"] : []),
+				].sort();
+				for (const reloading of [false, true]) {
+					if (reloading) await session.reload();
+					const { skills, diagnostics } = loader.getSkills();
+					expect(diagnostics).toEqual([]);
+					expect(skills.map((skill) => skill.name).sort(), `reload=${reloading}`).toEqual(expected);
+					for (const skill of skills) {
+						expect(skill.disableModelInvocation).toBe(false);
+						expect(session.systemPrompt).toContain(`<location>${skill.filePath}</location>`);
+					}
+					expect(session.systemPrompt).not.toContain("next_page_offset");
+					expect(session.systemPrompt).not.toContain("repair_scope=sections");
+
+					// The actual read tool can load instructions; no model/API request is made.
+					const report = skills.find((skill) => skill.name === "pe-valuation-report")!;
+					const result = await createReadTool(cwd).execute("read-report", { path: report.filePath });
+					expect(result.content).toEqual(
+						expect.arrayContaining([
+							expect.objectContaining({ type: "text", text: expect.stringContaining("repair_scope=sections") }),
+						]),
+					);
+				}
+				session.setActiveToolsByName(["pe_pdf_list"]);
+				expect(session.systemPrompt).not.toContain("<available_skills>");
+				session.setActiveToolsByName(["read", "pe_pdf_list"]);
+				expect(session.systemPrompt).toContain("<available_skills>");
+			} finally {
+				session.dispose();
+			}
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
 		}
-		expect(prompt).toContain("No UI quota: complex questions can remain prose");
-		expect(prompt).toContain("interaction is optional and task-driven");
-		expect(prompt).toContain("not limited to 3-5 lines or 250 Chinese characters");
-		expect(prompt).toContain("answer narrow questions directly");
-		expect(prompt).toContain("verified inputs, the applicable formula, consistent units");
-		expect(prompt).toContain("not a live quote");
-		expect(prompt).toContain("compact superscript citation markers with accessible source labels");
-		expect(prompt).not.toMatch(/green (?:citation|source|evidence)/i);
+	});
+
+	it("keeps split references reachable and their tool names registered", () => {
+		const skillsRoot = fileURLToPath(new URL("../skills/", import.meta.url));
+		const registered = new Set<string>();
+		registerPeTools({
+			registerTool(tool: { name: string }) {
+				registered.add(tool.name);
+			},
+			on() {},
+		} as unknown as ExtensionAPI);
+		const entrypoints = ["pe-document-retrieval", "pe-valuation-model-explainer", "pe-valuation-report"];
+		const visited = new Set<string>();
+		const inspect = (path: string): void => {
+			if (visited.has(path)) return;
+			visited.add(path);
+			expect(existsSync(path), path).toBe(true);
+			const content = readFileSync(path, "utf8");
+			for (const name of content.match(/\bpe_[a-z_]+\b/g) ?? []) expect(registered.has(name), name).toBe(true);
+			for (const match of content.matchAll(/\]\(([^)]+\.md)\)/g)) inspect(resolve(dirname(path), match[1]));
+		};
+		for (const name of entrypoints) inspect(join(skillsRoot, name, "SKILL.md"));
+		expect(visited.size).toBe(6);
 	});
 });

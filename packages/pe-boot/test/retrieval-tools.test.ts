@@ -158,7 +158,7 @@ describe("PE retrieval tools", () => {
 		expect(peDatasetSearchTool.name).toBe("pe_dataset_search");
 		expect(peSourceDetailTool.name).toBe("pe_source_detail");
 		expect(buildPeSystemPrompt("/workspace")).not.toContain("- pe_dataset_search:");
-		expect(buildPeSystemPrompt("/workspace")).not.toContain("- pe_source_detail:");
+		expect(buildPeSystemPrompt("/workspace")).toContain("- pe_source_detail:");
 	});
 
 	it("searches PDF chunks and returns stable evidence IDs", () => {

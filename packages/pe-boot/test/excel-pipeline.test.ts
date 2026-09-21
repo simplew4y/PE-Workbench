@@ -88,7 +88,8 @@ describe("Excel preparation and tools", () => {
 		expect(concurrent.cachePath).toBe(prepared.cachePath);
 		expect(prepared.readablePath).toBe(join(dirname(prepared.cachePath), "readable.txt"));
 		expect(prepared.document.status).toBe("completed_with_warnings");
-		expect(prepared.warnings).toContainEqual(expect.stringContaining("not recalculated"));
+		expect(prepared.warnings).toContainEqual(expect.stringContaining("1 个公式结果暂时无法读取"));
+		expect(prepared.warnings).toContainEqual(expect.stringContaining("估值模型!B4"));
 		expect(readFileSync(prepared.readablePath, "utf8")).toContain("估值模型!B4");
 
 		const database = openPeCollectionDatabase(join(root, "meta", "collection.sqlite3"));

@@ -162,6 +162,8 @@ describe("PE Memo tools", () => {
 		const result = loadSkillsFromDir({ dir: join(packageDirectory, "skills"), source: "test" });
 		expect(result.diagnostics).toEqual([]);
 		expect(result.skills).toEqual([
+			expect.objectContaining({ name: "pe-consensus-divergence" }),
+			expect.objectContaining({ name: "pe-document-retrieval" }),
 			expect.objectContaining({
 				name: "pe-generative-ui",
 				description: expect.stringContaining("pre-registered native UI surfaces"),
@@ -172,6 +174,8 @@ describe("PE Memo tools", () => {
 			}),
 			expect.objectContaining({ name: "pe-research-note" }),
 			expect.objectContaining({ name: "pe-valuation-model-explainer" }),
+			expect.objectContaining({ name: "pe-valuation-report" }),
+			expect.objectContaining({ name: "valuation-pricing-framework" }),
 		]);
 	});
 

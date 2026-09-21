@@ -306,3 +306,43 @@ it("records only supplied simulated trade fields and reuses their request IDs", 
 		}),
 	).rejects.toThrow("Quantity and price");
 });
+
+it("normalizes returned PDF page citations for tracking, forecasts and estimates without accepting missing sources", async () => {
+	const { config, run, cwd, datasetId } = fixture();
+	withResearchDatabase(cwd, datasetId, (db) => {
+		db.prepare(
+			"INSERT INTO documents(doc_id,dataset_id,original_filename,file_type,status,created_at,updated_at) VALUES('pdf',?,'report.pdf','pdf','completed','before','before')",
+		).run(datasetId);
+		db.exec(
+			"INSERT INTO pdf_pages VALUES('identity_page','pdf',1,'Tencent 0700.HK','p1','body','{}','good','{}',100,100,0,'[]',0,0,0)",
+		);
+	});
+	const canonical = sourceId({ docId: "pdf", location: { kind: "pdf", pageStart: 1, pageEnd: 1 } });
+	const basis = { summary: "已核对公司封面；价格预测为验收假设", evidenceIds: ["page:identity_page", canonical] };
+	const result = (
+		await run({
+			operation: "configure",
+			revision: 0,
+			config: {
+				...config,
+				rule: { kind: "market" },
+				basis,
+				forecast: { bear: 80, base: 100, bull: 120, targetDate: "2027-12-31", basis },
+				valuationEstimates: [{ date: trackingMarketClock(config.code).date, price: 100, basis }],
+			},
+		})
+	).details;
+	expect(result.mutation).toBe("configured");
+	expect(result.selected?.config.basis?.evidenceIds).toEqual([canonical]);
+	expect(result.selected?.config.forecast?.basis.evidenceIds).toEqual([canonical]);
+	expect(result.selected?.config.valuationEstimates?.[0].basis.evidenceIds).toEqual([canonical]);
+	expect(result.selected?.valuation).toBeNull();
+	await expect(
+		run({
+			operation: "configure",
+			revision: 0,
+			config: { ...config, rule: { kind: "market" }, basis: { ...basis, evidenceIds: ["page:missing"] } },
+		}),
+	).rejects.toThrow();
+	expect((await run({ operation: "read" })).details.trackers).toHaveLength(1);
+});
