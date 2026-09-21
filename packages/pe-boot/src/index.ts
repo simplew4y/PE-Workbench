@@ -24,6 +24,7 @@ export {
 	sourceLocationRow,
 } from "./evidence.ts";
 export { excelParserRevision, excelPython, validatePeExcelUpload } from "./excel-processing.ts";
+export * from "./research/cards.ts";
 export * from "./research/framework.ts";
 export * from "./research/model.ts";
 export * from "./research/monitor.ts";
