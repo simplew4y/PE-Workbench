@@ -62,10 +62,13 @@ describe("PE Research Note tool", () => {
 		expect(result.diagnostics).toEqual([]);
 		expect(result.skills.map((skill) => skill.name)).toEqual([
 			"pe-consensus-divergence",
+			"pe-document-retrieval",
 			"pe-generative-ui",
 			"pe-memo",
 			"pe-research-note",
 			"pe-valuation-model-explainer",
+			"pe-valuation-report",
+			"valuation-pricing-framework",
 		]);
 		expect(result.skills.find((skill) => skill.name === "pe-research-note")?.description).toContain("Research Note");
 		expect(result.skills.find((skill) => skill.name === "pe-valuation-model-explainer")?.description).toContain(

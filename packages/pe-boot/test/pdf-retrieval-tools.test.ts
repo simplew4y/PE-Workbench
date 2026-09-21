@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -420,7 +420,9 @@ describe("PE page-level PDF retrieval", () => {
 				"pe_model_validate",
 			]),
 		);
-		expect(prompt).toContain("Preserve their page: citations");
+		expect(prompt).toContain("pe-document-retrieval");
+		const retrievalSkill = readFileSync(new URL("../skills/pe-document-retrieval/SKILL.md", import.meta.url), "utf8");
+		expect(retrievalSkill).toContain("保留 page: 引用");
 		expect(prompt).toContain("Historical citations".toLowerCase());
 	});
 

@@ -1,3 +1,4 @@
+export { getPeCapabilityTools, PE_LAZY_TOOL_NAMES, type PeCapabilityOptions } from "./capabilities.ts";
 export {
 	assertPeCollectionDataset,
 	initializePeCollectionDatabase,
