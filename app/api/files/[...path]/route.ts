@@ -248,10 +248,10 @@ function createFileBodyStream(filePath: string, range?: { start: number; end: nu
 
   return new ReadableStream<Uint8Array>({
     start(controller) {
-      fileStream.on("data", (chunk: Buffer) => {
+      fileStream.on("data", (chunk: string | Buffer) => {
         if (closed) return;
         try {
-          controller.enqueue(new Uint8Array(chunk));
+          controller.enqueue(new Uint8Array(typeof chunk === "string" ? Buffer.from(chunk) : chunk));
         } catch {
           closed = true;
           fileStream.destroy();
