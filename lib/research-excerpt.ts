@@ -3,6 +3,7 @@ import remarkParse from "remark-parse";
 import remarkRehype from "remark-rehype";
 import type { Root, RootContent } from "hast";
 import { markdownRemarkPlugins, markdownRehypePlugins, normalizeDisplayMath } from "./markdown";
+import { parsePeSourceHref } from "./pe-source";
 
 const blockTags = new Set(["p", "div", "section", "blockquote", "li", "ul", "ol", "h1", "h2", "h3", "h4", "h5", "h6", "pre", "table", "thead", "tbody", "tr", "th", "td", "br", "hr"]);
 const normalize = (value: string) => value.replace(/\s+/gu, " ").trim();
@@ -14,6 +15,7 @@ const processor = unified()
 
 function visibleText(node: Root | RootContent): string {
   if (node.type === "text") return node.value;
+  if (node.type === "element" && node.tagName === "a" && typeof node.properties.href === "string" && parsePeSourceHref(node.properties.href)) return "";
   if (!("children" in node)) return "";
   const content = node.children.map(visibleText).join("");
   return node.type === "element" && blockTags.has(node.tagName) ? "\n" + content + "\n" : content;

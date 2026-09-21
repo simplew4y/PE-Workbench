@@ -87,6 +87,7 @@ export function AppShell() {
     if (soundEnabledRef.current) playDoneSound();
   }, [playDoneSound, soundEnabledRef]);
   const [selectedSession, setSelectedSession] = useState<SessionInfo | null>(null);
+  const [researchSourceTarget, setResearchSourceTarget] = useState<{ sessionId: string; cardId: string; entryId: string; excerpt: string; requestId: number } | null>(null);
   const [runningSessionIds, setRunningSessionIds] = useState<Set<string>>(() => new Set());
   const handleRunningSessionIdsChange = useCallback((ids: Set<string>) => {
     setRunningSessionIds((previous) => {
@@ -791,6 +792,11 @@ export function AppShell() {
     hydrateSelectedSession(newSessionId);
     router.replace(`?session=${encodeURIComponent(newSessionId)}`, { scroll: false });
   }, [invalidateWorkspaceRestore, router, hydrateSelectedSession]);
+
+  const handleResearchSourceOpen = useCallback((target: { sessionId: string; cardId: string; entryId: string; excerpt: string }) => {
+    setResearchSourceTarget((current) => ({ ...target, requestId: (current?.requestId ?? 0) + 1 }));
+    if (selectedSession?.id !== target.sessionId) handleSessionForked(target.sessionId);
+  }, [handleSessionForked, selectedSession?.id]);
 
   const handleInitialRestoreDone = useCallback(() => {
     setInitialSessionRestored(true);
@@ -2094,6 +2100,8 @@ export function AppShell() {
               onAttentionNeeded={handleAttentionNeeded}
               onSessionCreated={handleSessionCreated}
               onSessionForked={handleSessionForked}
+              researchSourceTarget={researchSourceTarget}
+              onResearchSourceOpen={handleResearchSourceOpen}
               modelsRefreshKey={modelsRefreshKey}
               chatInputRef={chatInputRef}
               onBranchDataChange={handleBranchDataChange}

@@ -1,5 +1,14 @@
 .panel { padding: 22px; color: var(--text); font-size: 13px; line-height: 1.65; }
 .intro { margin: 0 0 18px; color: var(--text-muted); }
+.progress { margin-bottom: 18px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-panel); overflow-wrap: anywhere; }
+.progress h3 { margin: 0; font-size: 15px; }
+.progress h4 { margin: 12px 0 5px; font-size: 12px; }
+.progress ul { padding-left: 18px; margin: 4px 0; }
+.progress li { margin: 5px 0; }
+.progress button { text-align: left; white-space: normal; overflow-wrap: anywhere; }
+.card:focus { outline: 2px solid var(--accent); outline-offset: 3px; }
+.sourceAnswer { border-radius: 8px; outline: 2px solid var(--accent); outline-offset: 6px; }
+.sourceAnswer::highlight(research-source) { color: var(--text); background: color-mix(in srgb, var(--accent) 28%, transparent); }
 .stats { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 18px; }
 .stats div { padding: 12px; display: flex; flex-direction: column; }
 .stats div + div { border-left: 1px solid var(--border); }
@@ -15,19 +24,33 @@
 .form label { display: grid; gap: 5px; font-size: 12px; }
 .form input, .form textarea, .search, .filter { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; }
 .form textarea { resize: vertical; min-height: 90px; }
+.frameworkLinks { display: grid; gap: 7px; margin: 0; padding: 10px; border: 1px solid var(--border); border-radius: 6px; }
+.frameworkLinks label { display: flex; grid-template-columns: none; align-items: flex-start; gap: 7px; }
+.frameworkLinks input { width: auto; margin-top: 3px; accent-color: var(--accent); }
 .search { margin: 16px 0 8px; }
 .filter { margin-bottom: 14px; }
 .card { padding: 16px 0; border-top: 1px solid var(--border); overflow-wrap: anywhere; }
 .cardHeader { display: flex; gap: 9px; align-items: flex-start; }
 .cardHeader input { margin-top: 6px; accent-color: var(--accent); }
 .cardHeader h3 { margin: 0; font-size: 14px; font-weight: 600; }
-.badge { display: inline-block; margin: 6px 0; font-size: 11px; color: var(--text-muted); background: var(--bg-hover); padding: 2px 7px; border-radius: 4px; }
-.confirmed { color: var(--accent); }
+.badge { display: inline-block; margin: 6px 0; font-size: 11px; padding: 2px 7px; border: 1px solid transparent; border-radius: 4px; }
+.unverified { color: #b45309; background: color-mix(in srgb, #f59e0b 16%, var(--bg)); border-color: color-mix(in srgb, #f59e0b 32%, transparent); }
+.confirmed { color: #15803d; background: color-mix(in srgb, #22c55e 14%, var(--bg)); border-color: color-mix(in srgb, #22c55e 30%, transparent); }
+.open { color: #1d4ed8; background: color-mix(in srgb, #3b82f6 14%, var(--bg)); border-color: color-mix(in srgb, #3b82f6 30%, transparent); }
+.resolved { color: #6d28d9; background: color-mix(in srgb, #8b5cf6 14%, var(--bg)); border-color: color-mix(in srgb, #8b5cf6 30%, transparent); }
+.archived { color: var(--text-muted); background: var(--bg-hover); border-color: var(--border); }
 .body { max-height: 240px; overflow: auto; margin: 9px 0; }
 .details { margin: 10px 0; }
 .details summary { cursor: pointer; color: var(--text-muted); }
+.history { display: grid; gap: 8px; margin-top: 12px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-panel); }
+.historyHeader { display: grid; gap: 2px; }
+.revision { padding: 8px 0; border-top: 1px solid var(--border); }
+.revision summary { display: flex; justify-content: space-between; gap: 10px; cursor: pointer; color: var(--text-muted); }
+.revisionContent { max-height: 180px; overflow: auto; margin: 8px 0; padding: 8px 10px; border-left: 2px solid var(--border); background: var(--bg); }
 .evidence { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
 .link { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+.panel .sourceLink { border: 0; padding: 0; color: var(--accent); background: transparent; text-decoration: underline; text-underline-offset: 3px; }
+.panel .sourceLink:hover { background: transparent; color: var(--text); }
 .error { padding: 10px; border: 1px solid var(--border); border-radius: 6px; color: var(--text); background: var(--bg-hover); margin: 12px 0; }
 .empty { padding: 26px 0; color: var(--text-muted); }
 .continue { position: sticky; bottom: 0; padding: 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-panel); box-shadow: 0 -5px 18px -12px #0005; margin-top: 18px; }

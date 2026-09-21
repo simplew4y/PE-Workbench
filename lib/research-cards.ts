@@ -46,9 +46,18 @@ export async function readResearchCardOrigin(root: string, value: unknown): Prom
   if (!excerpt || excerpt.length > 20000 ||
     !(input.format === "rendered" ? isRenderedResearchExcerpt(original, excerpt) : original.includes(excerpt)))
     throw new ResearchError(400, "无法核对选中摘录，请重新选择原回答中的文字（最多 20000 字符）");
+  const answerEvidenceIds = researchEvidenceIds(original);
+  let evidenceIds = answerEvidenceIds;
+  if (input.evidenceIds !== undefined) {
+    if (!Array.isArray(input.evidenceIds) || input.evidenceIds.length > 100 || input.evidenceIds.some((id) => typeof id !== "string"))
+      throw new ResearchError(400, "无效的摘录资料入口");
+    evidenceIds = [...new Set(input.evidenceIds as string[])];
+    const available = new Set(answerEvidenceIds);
+    if (evidenceIds.some((id) => !available.has(id))) throw new ResearchError(400, "摘录资料入口不属于来源回答");
+  }
   return {
     origin: { sessionId: input.sessionId, entryId: input.entryId, excerpt, messageTimestamp: entry.message.timestamp ?? null },
-    evidenceIds: researchEvidenceIds(original),
+    evidenceIds,
   };
 }
 

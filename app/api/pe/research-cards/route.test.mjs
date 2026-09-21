@@ -15,6 +15,7 @@ const { createPeProject } = await jiti.import("../../../../lib/pe-project-store.
 const { GET, POST } = await jiti.import("./route.ts");
 const { cacheSessionPath } = await jiti.import("../../../../lib/session-reader.ts");
 const cardsModule = await jiti.import("../../../../lib/research-cards.ts");
+const { cleanResearchSelection } = await jiti.import("../../../../lib/research-selection.ts");
 const require = createRequire(import.meta.url);
 
 function setup(t) {
@@ -51,6 +52,13 @@ test("saves verified assistant excerpts, rejects forged/cross-project origins, p
   assert.equal((await request({ action: "update", ...card, revision: 1, status: "confirmed", datasetId: other.datasetId })).status, 404);
   const confirmed = await request({ ...card, action: "update", status: "confirmed" });
   assert.equal(confirmed.status, 200);
+  const confirmedCard = (await confirmed.json()).card;
+  const history = await GET(new Request(`http://localhost/api/pe/research-cards?datasetId=${project.datasetId}&id=${card.id}`));
+  assert.deepEqual((await history.json()).revisions.map((entry) => entry.revision), [2, 1]);
+  const restored = await request({ action: "restore", id: card.id, revision: confirmedCard.revision, targetRevision: 1 });
+  assert.equal(restored.status, 200);
+  assert.equal((await restored.json()).card.status, "unverified");
+  assert.equal((await request({ action: "restore", id: card.id, revision: confirmedCard.revision, targetRevision: 1 })).status, 409);
   assert.equal((await request({ ...card, action: "update", status: "confirmed" })).status, 409);
   const question = await request({ action: "create", kind: "question", requestId: "question", title: "现金流是否改善？", content: "查新财报", relatedCardIds: [card.id] });
   assert.equal(question.status, 201);
@@ -60,17 +68,24 @@ test("saves verified assistant excerpts, rejects forged/cross-project origins, p
 
 test("rendered selections preserve only the excerpt across emphasis, links, lists and tables", async (t) => {
   const { manager, source, create, request } = setup(t);
-  const answer = "前言不应保存。\n\n海外**收入增长**仍需核对[现金流](#pe-source?evidence_id=page%3Amissing)。\n\n- 销量增加\n- 利润待核实\n\n| 指标 | 变化 |\n| --- | --- |\n| 营收 | 上升 |\n\n结尾也不应保存。";
+  const answer = "前言不应保存。\n\n海外**收入增长**仍需核对[现金流](#pe-source?evidence_id=page%3Amissing)。\n\n另一项判断关联[另一资料](#pe-source?evidence_id=page%3Aother)。\n\n- 销量增加\n- 利润待核实\n\n| 指标 | 变化 |\n| --- | --- |\n| 营收 | 上升 |\n\n结尾也不应保存。";
   const entryId = manager.appendMessage({ role: "assistant", api: "openai-completions", provider: "test", model: "test", timestamp: Date.now(), content: [{ type: "text", text: answer }], stopReason: "stop", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } });
-  for (const [index, excerpt] of ["海外收入增长仍需核对现金流。", "销量增加\n利润待核实", "指标\t变化\n营收\t上升"].entries()) {
-    const response = await request({ ...create, requestId: "selection-" + index, source: { ...source, entryId, excerpt, format: "rendered" } });
+  assert.equal(cleanResearchSelection("海外收入增长仍需核对查看原始证据：现金流。", ["查看原始证据：现金流"]), "海外收入增长仍需核对。");
+  const selections = [
+    { excerpt: "海外收入增长仍需核对。", evidenceIds: ["page:missing"] },
+    { excerpt: "销量增加\n利润待核实", evidenceIds: [] },
+    { excerpt: "指标\t变化\n营收\t上升", evidenceIds: [] },
+  ];
+  for (const [index, selection] of selections.entries()) {
+    const response = await request({ ...create, requestId: "selection-" + index, source: { ...source, entryId, ...selection, format: "rendered" } });
     assert.equal(response.status, 201, await response.clone().text());
     const { card } = await response.json();
-    assert.equal(card.content, excerpt);
-    assert.equal(card.origin.excerpt, excerpt);
+    assert.equal(card.content, selection.excerpt);
+    assert.equal(card.origin.excerpt, selection.excerpt);
     assert.doesNotMatch(card.content, /前言|结尾/);
-    assert.deepEqual(card.evidenceIds, ["page:missing"]);
+    assert.deepEqual(card.evidenceIds, selection.evidenceIds);
   }
+  assert.equal((await request({ ...create, requestId: "forged-evidence", source: { ...source, entryId, excerpt: selections[0].excerpt, evidenceIds: ["page:forged"], format: "rendered" } })).status, 400);
   for (const excerpt of ["", "收入增长已证实", "销量增加 结尾也不应保存。", undefined]) {
     assert.equal((await request({ ...create, source: { ...source, entryId, excerpt, format: "rendered" } })).status, 400);
   }
