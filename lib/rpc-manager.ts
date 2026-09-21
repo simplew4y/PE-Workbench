@@ -1,6 +1,6 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { ProviderConfig } from "@earendil-works/pi-coding-agent";
-import { buildPeSystemPrompt, registerPeTools } from "@earendil-works/pe-boot";
+import { buildPeSystemPrompt, PE_LAZY_TOOL_NAMES, registerPeTools } from "@earendil-works/pe-boot";
 import { createAgentSessionFromServices, createAgentSessionServices, getAgentDir, initTheme, SessionManager, SettingsManager, Theme, type ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import { KeybindingsManager as TuiKeybindingsManager, TUI_KEYBINDINGS } from "@earendil-works/pi-tui";
 import { randomUUID } from "crypto";
@@ -128,6 +128,10 @@ export class ModelSelectionError extends Error {
   readonly code = "session_model_change_failed";
 }
 
+interface CapabilityToolPolicy {
+  allowedTools?: readonly string[];
+}
+
 interface PlatformProviderState {
   current?: ProviderConfig;
 }
@@ -162,16 +166,16 @@ class PlainTextTheme extends Theme {
 const PLAIN_TEXT_THEME = new PlainTextTheme();
 const CUSTOM_UI_KEYBINDINGS = new TuiKeybindingsManager(TUI_KEYBINDINGS);
 
-function withExtensionTools(session: AgentSessionLike, toolNames: string[]): string[] {
+function withExtensionTools(session: AgentSessionLike, toolNames: string[], pausedExtensions: string[] = []): string[] {
   if (toolNames.length === 0) return [];
-
-  const codingToolNames = new Set(CODING_TOOL_NAMES);
-  const extensionToolNames = session
-    .getAllTools()
-    .map((t) => t.name)
-    .filter((name) => !codingToolNames.has(name));
-
-  return [...new Set([...toolNames, ...extensionToolNames])];
+  const available = new Set(session.getAllTools().map((tool) => tool.name));
+  // Presets select coding tools. Explicit lists containing extensions are exact.
+  if (toolNames.some((name) => !CODING_TOOL_NAMES.includes(name))) {
+    return [...new Set(toolNames)].filter((name) => available.has(name));
+  }
+  const extensionToolNames = [...session.getActiveToolNames(), ...pausedExtensions]
+    .filter((name) => !CODING_TOOL_NAMES.includes(name) && available.has(name));
+  return [...new Set([...toolNames, ...extensionToolNames])].filter((name) => available.has(name));
 }
 
 // ============================================================================
@@ -195,6 +199,7 @@ export class AgentSessionWrapper {
   private extensionBindingPromise: Promise<void> | null = null;
   private extensionBindingError: unknown = null;
   private forceEmptySystemPrompt = false;
+  private pausedExtensionTools: string[] = [];
   private unsubscribe: (() => void) | null = null;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private onDestroyCallback: (() => void) | null = null;
@@ -206,7 +211,9 @@ export class AgentSessionWrapper {
   constructor(
     public readonly inner: AgentSessionLike,
     private readonly platformProviderState: PlatformProviderState = {},
-  ) {}
+    pausedExtensionTools: string[] = [],
+    private readonly capabilityToolPolicy: CapabilityToolPolicy = {},
+  ) { this.pausedExtensionTools = pausedExtensionTools; }
 
   /** Apply an explicit account setting to this session, including a new provider. */
   async applyModelSource(options: RpcSessionStartOptions, commit: () => void = () => {}) {
@@ -383,7 +390,8 @@ export class AgentSessionWrapper {
       || type === "steer"
       || type === "follow_up"
       || type === "get_commands"
-      || type === "get_state";
+      || type === "get_state"
+      || type === "set_tools";
   }
 
   private async withFinalRunningNotification<T>(operation: () => Promise<T>): Promise<T> {
@@ -787,8 +795,15 @@ export class AgentSessionWrapper {
 
       case "set_tools": {
         const toolNames = command.toolNames as string[];
+        if (this.isRunning()) throw new Error("请等待当前任务结束后再切换工具");
+        if (toolNames.length === 0 && this.inner.getActiveToolNames().length > 0) {
+          this.pausedExtensionTools = this.inner.getActiveToolNames().filter((name) => !CODING_TOOL_NAMES.includes(name));
+        }
+        this.capabilityToolPolicy.allowedTools = toolNames.length === 0 || toolNames.some((name) => !CODING_TOOL_NAMES.includes(name))
+          ? toolNames : undefined;
         this.setForceEmptySystemPrompt(toolNames.length === 0);
-        this.inner.setActiveToolsByName(withExtensionTools(this.inner, toolNames));
+        this.inner.setActiveToolsByName(withExtensionTools(this.inner, toolNames, this.pausedExtensionTools));
+        if (toolNames.length > 0) this.pausedExtensionTools = [];
         this.applyForcedEmptySystemPrompt();
         return null;
       }
@@ -798,7 +813,8 @@ export class AgentSessionWrapper {
         this.extensionStatuses.clear();
         this.resetExtensionWidgetsForReload();
         this.syncProjectTrust();
-        await this.inner.reload();
+        const activeToolNames = this.inner.getActiveToolNames();
+        await this.inner.reload({ beforeSessionStart: () => this.inner.setActiveToolsByName(activeToolNames) });
         if (typeof this.inner.bindExtensions !== "function") {
           this.inner.extensionRunner.setUIContext?.(this.createExtensionUiContext(), "rpc");
         }
@@ -1438,8 +1454,10 @@ export class AgentSessionWrapper {
         this.extensionStatuses.clear();
         this.resetExtensionWidgetsForReload();
         this.syncProjectTrust();
+        const activeToolNames = this.inner.getActiveToolNames();
         await this.inner.reload({
           beforeSessionStart: () => {
+            this.inner.setActiveToolsByName(activeToolNames);
             this.inner.extensionRunner.setUIContext?.(this.createExtensionUiContext(), "rpc");
           },
         });
@@ -1685,19 +1703,14 @@ export async function startRpcSession(
     initTheme();
     const agentDir = getAgentDir();
 
-    // Determine which tools to pass based on requested toolNames.
-    // Since v0.68.0, session creation expects string[] tool names instead of Tool[] instances.
-    let toolsOption: string[] | undefined;
-    if (toolNames !== undefined) {
-      // toolNames === [] -> "all off" (an empty allow-list disables every tool).
-      // Otherwise DO NOT pass a builtin-only allow-list: passing CODING_TOOL_NAMES
-      // set allowedToolNames to coding builtins only, which filtered every
-      // extension/package-provided tool (e.g. subagents, web access) out of the
-      // tool registry — so they were unavailable in Pi Web sessions even though the
-      // `pi` CLI keeps them. Leaving the allow-list unset lets the SDK register all
-      // tools (and activate extension tools); we narrow the ACTIVE set below.
-      toolsOption = toolNames.length === 0 ? [] : undefined;
-    }
+    // Coding presets change activation only. An explicit list containing extension
+    // names is a hard SDK allow-list; capabilities cannot escape it.
+    const toolsOption = toolNames?.some((name) => !CODING_TOOL_NAMES.includes(name))
+      ? toolNames : undefined;
+
+    const capabilityToolPolicy: CapabilityToolPolicy = {
+      allowedTools: toolNames?.length === 0 ? [] : toolsOption,
+    };
 
     // Build services first so extension-registered providers are available
     // before the SDK restores the saved model from the session file.
@@ -1716,7 +1729,10 @@ export async function startRpcSession(
           (pi) => {
             if (platformProviderState.current) pi.registerProvider("pe-platform", platformProviderState.current);
           },
-          registerPeTools,
+          (pi) => registerPeTools(pi, {
+            initialCapabilities: toolNames?.includes("pe_render_ui") ? ["pe-generative-ui"] : undefined,
+            canActivateTool: (name) => !capabilityToolPolicy.allowedTools || capabilityToolPolicy.allowedTools.includes(name),
+          }),
           registerStockTrackingWorker,
           createProjectCommandBashExtension({
             cwd: sessionCwd,
@@ -1768,14 +1784,16 @@ export async function startRpcSession(
     );
     if (persistedPreferences.modelDefaultChanged) invalidateModelsCache();
 
-    // If specific tool names were requested (non-empty), set the active tools to the
-    // requested builtin coding tools PLUS all extension/package tools, so installed
-    // extensions stay usable in Pi Web just like in the `pi` CLI.
-    if (toolNames && toolNames.length > 0) {
+    // Preserve extension activation, including dormant tools owned by capabilities.
+    // Empty is an active-set choice, so a later preset can restore the same tools.
+    const pausedExtensionTools = toolNames?.length === 0
+      ? inner.getActiveToolNames().filter((name) => !CODING_TOOL_NAMES.includes(name) && (process.env.PE_LAZY_UI_ENABLED?.trim() === "0" || !PE_LAZY_TOOL_NAMES.includes(name)))
+      : [];
+    if (toolNames !== undefined) {
       inner.setActiveToolsByName(withExtensionTools(inner, toolNames));
     }
 
-    const wrapper = new AgentSessionWrapper(inner, platformProviderState);
+    const wrapper = new AgentSessionWrapper(inner, platformProviderState, pausedExtensionTools, capabilityToolPolicy);
     // When all tools are disabled, clear the system prompt entirely.
     // pi's buildSystemPrompt always produces a non-empty prompt even with no tools;
     // keep this forced after extension resource discovery and reloads as well.
