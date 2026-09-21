@@ -22,6 +22,7 @@ export interface ResearchCard {
 	status: ResearchCardStatus;
 	evidenceIds: string[];
 	relatedCardIds: string[];
+	frameworkItemIds: string[];
 	origin: ResearchCardOrigin | null;
 	revision: number;
 	archived: boolean;
@@ -33,8 +34,20 @@ export interface ResearchCardEvidence {
 	available: boolean;
 	citation: string | null;
 }
+export interface ResearchCardFrameworkItem {
+	id: string;
+	available: boolean;
+	kind: "thesis" | "hypothesis" | "metric" | "event" | "question" | null;
+	subject: string | null;
+}
 export interface ResearchCardView extends ResearchCard {
 	evidence: ResearchCardEvidence[];
+	frameworkItems: ResearchCardFrameworkItem[];
+}
+export interface ResearchCardRevision {
+	revision: number;
+	card: ResearchCard;
+	current: boolean;
 }
 export interface CreateResearchCard {
 	requestId: string;
@@ -43,6 +56,7 @@ export interface CreateResearchCard {
 	content: string;
 	evidenceIds: string[];
 	relatedCardIds: string[];
+	frameworkItemIds?: string[];
 	origin: ResearchCardOrigin | null;
 }
 
@@ -66,7 +80,8 @@ CREATE TABLE IF NOT EXISTS research_card_revisions (
 
 function cardFrom(row: SqlRow | undefined): ResearchCard {
 	if (!row) throw new ResearchError(404, "研究卡片不存在或不属于当前项目");
-	return JSON.parse(String(row.card_json)) as ResearchCard;
+	const card = JSON.parse(String(row.card_json)) as ResearchCard;
+	return { ...card, frameworkItemIds: card.frameworkItemIds ?? [] };
 }
 function text(value: unknown, name: string, max: number): string {
 	if (typeof value !== "string" || !value.trim() || value.length > max)
@@ -87,12 +102,36 @@ function relatedCards(db: DatabaseSync, datasetId: string, selected: string[]): 
 		cardFrom(db.prepare("SELECT card_json FROM research_cards WHERE dataset_id=? AND card_id=?").get(datasetId, id)),
 	);
 }
+function currentFrameworkItems(db: DatabaseSync, datasetId: string) {
+	const row = db
+		.prepare(`SELECT v.content_json FROM research_frameworks f
+			JOIN research_versions v ON v.version_id=f.current_version_id AND v.dataset_id=f.dataset_id
+			WHERE f.dataset_id=?`)
+		.get(datasetId);
+	if (!row) return [];
+	return (
+		JSON.parse(String(row.content_json)) as {
+			items: Array<{ id: string; kind: ResearchCardFrameworkItem["kind"]; subject: string }>;
+		}
+	).items;
+}
+function checkedFrameworkItemIds(db: DatabaseSync, datasetId: string, value: unknown): string[] {
+	const selected = ids(value, 20);
+	const available = new Set(currentFrameworkItems(db, datasetId).map((item) => item.id));
+	if (selected.some((id) => !available.has(id))) throw new ResearchError(409, "投资框架条目已变化，请刷新后重新关联");
+	return selected;
+}
 function view(db: DatabaseSync, datasetId: string, card: ResearchCard): ResearchCardView {
+	const items = new Map(currentFrameworkItems(db, datasetId).map((item) => [item.id, item]));
 	return {
 		...card,
 		evidence: card.evidenceIds.map((id) => {
 			const record = resolvePeEvidenceRecord(db, datasetId, id);
 			return { id, available: !!record, citation: record?.citation ?? null };
+		}),
+		frameworkItems: card.frameworkItemIds.map((id) => {
+			const item = items.get(id);
+			return { id, available: !!item, kind: item?.kind ?? null, subject: item?.subject ?? null };
 		}),
 	};
 }
@@ -106,6 +145,69 @@ export function listResearchCards(cwd: string, datasetId: string): ResearchCardV
 	);
 }
 
+export function listResearchCardRevisions(cwd: string, datasetId: string, id: string): ResearchCardRevision[] {
+	return withCards(cwd, datasetId, (db) => {
+		const current = cardFrom(
+			db.prepare("SELECT card_json FROM research_cards WHERE dataset_id=? AND card_id=?").get(datasetId, id),
+		);
+		return db
+			.prepare(`SELECT r.card_json FROM research_card_revisions r
+				JOIN research_cards c ON c.card_id=r.card_id
+				WHERE c.dataset_id=? AND r.card_id=? ORDER BY r.revision DESC`)
+			.all(datasetId, id)
+			.map((row) => {
+				const card = cardFrom(row);
+				return { revision: card.revision, card, current: card.revision === current.revision };
+			});
+	});
+}
+
+export function restoreResearchCardRevision(
+	cwd: string,
+	datasetId: string,
+	id: string,
+	currentRevision: number,
+	targetRevision: number,
+): ResearchCardView {
+	if (
+		!Number.isSafeInteger(currentRevision) ||
+		currentRevision < 1 ||
+		!Number.isSafeInteger(targetRevision) ||
+		targetRevision < 1
+	)
+		throw new ResearchError(400, "无效的卡片版本");
+	return withCards(cwd, datasetId, (db) =>
+		researchTransaction(db, () => {
+			const previous = cardFrom(
+				db.prepare("SELECT card_json FROM research_cards WHERE dataset_id=? AND card_id=?").get(datasetId, id),
+			);
+			if (previous.revision !== currentRevision) throw new ResearchError(409, "卡片已被更新，请刷新后再试");
+			const target = cardFrom(
+				db
+					.prepare(`SELECT r.card_json FROM research_card_revisions r
+				JOIN research_cards c ON c.card_id=r.card_id
+				WHERE c.dataset_id=? AND r.card_id=? AND r.revision=?`)
+					.get(datasetId, id, targetRevision),
+			);
+			const card: ResearchCard = {
+				...previous,
+				title: target.title,
+				content: target.content,
+				status: previous.kind === "note" ? "unverified" : "open",
+				frameworkItemIds: target.frameworkItemIds,
+				revision: currentRevision + 1,
+				updatedAt: new Date().toISOString(),
+			};
+			const json = JSON.stringify(card);
+			db.prepare(
+				"UPDATE research_cards SET card_json=?,revision=?,updated_at=? WHERE dataset_id=? AND card_id=?",
+			).run(json, card.revision, card.updatedAt, datasetId, id);
+			db.prepare("INSERT INTO research_card_revisions VALUES(?,?,?)").run(id, card.revision, json);
+			return view(db, datasetId, card);
+		}),
+	);
+}
+
 export function createResearchCard(cwd: string, datasetId: string, input: CreateResearchCard): ResearchCardView {
 	const requestId = text(input.requestId, "请求标识", 128);
 	if (input.kind !== "note" && input.kind !== "question") throw new ResearchError(400, "无效的卡片类型");
@@ -113,6 +215,7 @@ export function createResearchCard(cwd: string, datasetId: string, input: Create
 	const content = text(input.content, "内容", 20000);
 	const evidenceIds = ids(input.evidenceIds, 100);
 	const relatedCardIds = ids(input.relatedCardIds, 20);
+	const requestedFrameworkItemIds = ids(input.frameworkItemIds ?? [], 20);
 	const origin =
 		input.origin === null
 			? null
@@ -125,9 +228,18 @@ export function createResearchCard(cwd: string, datasetId: string, input: Create
 							? input.origin.messageTimestamp
 							: null,
 				};
-	const requestJson = JSON.stringify({ kind: input.kind, title, content, evidenceIds, relatedCardIds, origin });
 	return withCards(cwd, datasetId, (db) =>
 		researchTransaction(db, () => {
+			const frameworkItemIds = checkedFrameworkItemIds(db, datasetId, requestedFrameworkItemIds);
+			const requestJson = JSON.stringify({
+				kind: input.kind,
+				title,
+				content,
+				evidenceIds,
+				relatedCardIds,
+				frameworkItemIds,
+				origin,
+			});
 			const previous = db
 				.prepare("SELECT * FROM research_cards WHERE dataset_id=? AND request_id=?")
 				.get(datasetId, requestId);
@@ -150,6 +262,7 @@ export function createResearchCard(cwd: string, datasetId: string, input: Create
 				status: input.kind === "note" ? "unverified" : "open",
 				evidenceIds: allEvidenceIds,
 				relatedCardIds,
+				frameworkItemIds,
 				origin,
 				revision: 1,
 				archived: false,
@@ -177,10 +290,17 @@ export function updateResearchCard(
 	datasetId: string,
 	id: string,
 	revision: number,
-	input: { title: string; content: string; status: ResearchCardStatus; archived: boolean },
+	input: {
+		title: string;
+		content: string;
+		status: ResearchCardStatus;
+		archived: boolean;
+		frameworkItemIds?: string[];
+	},
 ): ResearchCardView {
 	const title = text(input.title, "标题", 200);
 	const content = text(input.content, "内容", 20000);
+	const requestedFrameworkItemIds = input.frameworkItemIds === undefined ? null : ids(input.frameworkItemIds, 20);
 	if (!Number.isSafeInteger(revision) || revision < 1 || typeof input.archived !== "boolean")
 		throw new ResearchError(400, "无效的卡片版本或归档状态");
 	return withCards(cwd, datasetId, (db) =>
@@ -191,12 +311,22 @@ export function updateResearchCard(
 			if (previous.revision !== revision) throw new ResearchError(409, "卡片已被更新，请刷新后再试");
 			if (!(previous.kind === "note" ? ["unverified", "confirmed"] : ["open", "resolved"]).includes(input.status))
 				throw new ResearchError(400, "无效的确认状态");
+			let frameworkItemIds = previous.frameworkItemIds;
+			if (requestedFrameworkItemIds !== null) {
+				checkedFrameworkItemIds(
+					db,
+					datasetId,
+					requestedFrameworkItemIds.filter((id) => !previous.frameworkItemIds.includes(id)),
+				);
+				frameworkItemIds = requestedFrameworkItemIds;
+			}
 			const card: ResearchCard = {
 				...previous,
 				title,
 				content,
 				status: input.status,
 				archived: input.archived,
+				frameworkItemIds,
 				revision: revision + 1,
 				updatedAt: new Date().toISOString(),
 			};

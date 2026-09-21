@@ -10,6 +10,8 @@ import {
 	listResearchCards,
 	updateResearchCard,
 } from "../src/research/cards.ts";
+import { createResearchDraft, publishResearchDraft } from "../src/research/framework.ts";
+import type { FrameworkContent } from "../src/research/model.ts";
 import { withResearchDatabase } from "../src/research/storage.ts";
 import { sourceId } from "../src/source.ts";
 
@@ -30,6 +32,34 @@ const input: CreateResearchCard = {
 	relatedCardIds: [],
 	origin: { sessionId: "first-session", entryId: "answer", excerpt: "需求恢复尚待核实", messageTimestamp: 123 },
 };
+const framework: FrameworkContent = {
+	title: "投资框架",
+	objective: "验证需求恢复与盈利质量",
+	horizon: "未来三年",
+	items: [
+		{
+			id: "demand-recovery",
+			kind: "hypothesis",
+			claim: "需求可能恢复",
+			rationale: "用户提出的待验证假设",
+			subject: "需求恢复",
+			verification: "核对销量与订单",
+			invalidation: "销量持续下降",
+			origin: "user",
+			evidenceIds: [],
+		},
+	],
+	coverageGaps: [],
+};
+function publishFramework(cwd: string, content = framework, expectedVersionId: string | null = null) {
+	const draft = createResearchDraft(cwd, "cards", content, [], expectedVersionId);
+	return publishResearchDraft(cwd, "cards", {
+		draftId: draft.id,
+		revision: draft.revision,
+		expectedVersionId,
+		requestId: `publish-${draft.id}`,
+	});
+}
 afterEach(() => {
 	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
@@ -43,6 +73,38 @@ describe("project research cards", () => {
 		expect(createResearchCard(cwd, "cards", input).id).toBe(card.id);
 		expect(() => createResearchCard(cwd, "cards", { ...input, title: "different" })).toThrow("其他内容");
 		expect(listResearchCards(cwd, "cards")).toHaveLength(1);
+	});
+	it("links cards to current framework items and preserves stale links after framework changes", () => {
+		const cwd = project();
+		const firstVersion = publishFramework(cwd);
+		const card = createResearchCard(cwd, "cards", { ...input, frameworkItemIds: ["demand-recovery"] });
+		expect(card.frameworkItems).toEqual([
+			{
+				id: "demand-recovery",
+				available: true,
+				kind: "hypothesis",
+				subject: "需求恢复",
+			},
+		]);
+		expect(() =>
+			createResearchCard(cwd, "cards", { ...input, requestId: "bad-link", frameworkItemIds: ["missing"] }),
+		).toThrow("框架条目已变化");
+		const current = publishFramework(
+			cwd,
+			{ ...framework, items: [{ ...framework.items[0], id: "replacement" }] },
+			firstVersion.id,
+		);
+		expect(current.version).toBe(2);
+		const stale = listResearchCards(cwd, "cards")[0];
+		expect(stale.frameworkItems).toEqual([{ id: "demand-recovery", available: false, kind: null, subject: null }]);
+		const confirmed = updateResearchCard(cwd, "cards", stale.id, stale.revision, { ...stale, status: "confirmed" });
+		expect(confirmed.frameworkItemIds).toEqual(["demand-recovery"]);
+		expect(() =>
+			updateResearchCard(cwd, "cards", confirmed.id, confirmed.revision, {
+				...confirmed,
+				frameworkItemIds: ["missing"],
+			}),
+		).toThrow("框架条目已变化");
 	});
 	it("keeps original excerpts and previous revisions while rejecting stale edits and invalid status", () => {
 		const cwd = project();
