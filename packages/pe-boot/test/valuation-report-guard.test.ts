@@ -260,6 +260,10 @@ describe("valuation report final-message guard", () => {
 		"请分析这个模型中的 EPS",
 		"analyze this model's EPS",
 		"请概括这个 Excel 文件",
+		"分析估值模型的预测逻辑，追到独立假设",
+		"请分析估值模型，告诉我收入怎么预测的",
+		"分析估值模型后生成投资框架",
+		"Explain this valuation model's model mechanics",
 	])("does not intercept excluded user intent: %s", async (prompt) => {
 		const run = harness();
 		await run.begin(prompt);
@@ -298,6 +302,7 @@ describe("valuation report final-message guard", () => {
 		"请分析估值模型，重点解释后续跟踪指标和风险。",
 		"请生成完整估值报告，同时建立股票追踪表。",
 		"Write a complete valuation report and configure stock tracking.",
+		"请解释预测逻辑并生成完整估值报告",
 	])("still requires report validation for report intent: %s", async (prompt) => {
 		const run = harness();
 		await run.begin(prompt);

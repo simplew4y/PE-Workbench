@@ -54,10 +54,17 @@ export {
 	locatePeValuationOutputs,
 	type PeValuationOutputResult,
 	peValuationOutputTool,
-	type ValuationOutputCandidate,
 } from "./tools/valuation-output.ts";
 export { buildPeValuationReport, peValuationReportTool } from "./tools/valuation-report.ts";
 export { inspectPeWorkbooks, peWorkbookInspectTool } from "./tools/workbook-inspect.ts";
+export { peWorkbookSearchTool } from "./tools/workbook-search.ts";
 export * from "./tracking.ts";
 export * from "./tracking-market.ts";
 export { fetchWindSnapshot, listWindSnapshots, queryWind, type WindQuery } from "./trusted-sources.ts";
+export {
+	readWorkbookDocument,
+	readWorkbookFile,
+	type WorkbookRequest,
+	WorkbookRequestProperties,
+	WorkbookRequestSchema,
+} from "./workbook-reader.ts";

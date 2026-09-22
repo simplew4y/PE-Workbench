@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 import PDFDocument from "pdfkit";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { preparePeDocument, registerPeDocuments, resolvePeEvidenceSource } from "../src/documents.ts";
-import { parseSourceId, sourceId, sourceUrl } from "../src/source.ts";
+import { parseSourceId, sourceId } from "../src/source.ts";
 import { getPeExcelRange } from "../src/tools/excel-range.ts";
 import { tracePeFormula } from "../src/tools/formula-trace.ts";
 import { resolvePeValuationDate } from "../src/tools/valuation-date.ts";
@@ -238,10 +238,20 @@ describe("on-demand documents and file citations", () => {
 		).rejects.toMatchObject({ status: 404 });
 	});
 
-	it("keeps full workbook values, formulas, date evidence, and native-searchable source links", async () => {
+	it("keeps workbook navigation compact and reads full source values, formulas and selected date context", async () => {
 		const root = project();
 		const docId = upload(root, "model.xlsx");
-		expect(inspectPeWorkbooks(root)).toMatchObject({ workbooks: [expect.objectContaining({ prepared: false })] });
+		expect(inspectPeWorkbooks(root)).toMatchObject({
+			workbooks: [
+				expect.objectContaining({
+					prepared: true,
+					sheets: expect.arrayContaining([
+						expect.objectContaining({ name: "Valuation", state: "visible" }),
+						expect.objectContaining({ name: "Hidden assumptions", state: "hidden" }),
+					]),
+				}),
+			],
+		});
 		const prepared = await preparePeDocument(root, { docId });
 		const id = sourceId({ docId, location: { kind: "excel", sheet: "Valuation", range: "B7" } });
 		const { payload } = await resolvePeEvidenceSource(root, id);
@@ -251,8 +261,12 @@ describe("on-demand documents and file citations", () => {
 				expect.objectContaining({ cell_ref: "B7", formula: "=B5/10", cached_value: "120" }),
 			]),
 		});
-		expect(readFileSync(prepared.readablePath, "utf8")).toContain(sourceUrl(id));
-		expect(readFileSync(prepared.readablePath, "utf8")).toContain("x".repeat(5100));
+		const navigation = readFileSync(prepared.readablePath, "utf8");
+		expect(navigation).toContain("Valuation");
+		expect(navigation).not.toContain("x".repeat(5100));
+		expect(getPeExcelRange(root, { docId, sheetName: "Valuation", cellRange: "A10" })).toMatchObject({
+			cells: [expect.objectContaining({ raw_value: `Long original note: ${"x".repeat(5100)}` })],
+		});
 		expect(getPeExcelRange(root, { docId, sheetName: "Valuation", cellRange: "B5:B7" })).toMatchObject({
 			matching_cell_count: 3,
 		});
@@ -260,16 +274,20 @@ describe("on-demand documents and file citations", () => {
 			complete: true,
 			node_count: 4,
 		});
-		const output = locatePeValuationOutputs(root, { docId });
-		expect(output.selected_output).toMatchObject({ cell_ref: "B7", evidence_id: id });
+		const output = locatePeValuationOutputs(root, { docId, query: "Target Price" });
+		expect(output).toMatchObject({
+			status: "search_results",
+			matches: [expect.objectContaining({ cell_ref: "A7", raw_value: "Target Price" })],
+		});
+		expect(output).not.toHaveProperty("selected_output");
 		expect(
 			resolvePeValuationDate(root, {
 				docId,
-				outputSheet: "Valuation",
-				outputCellRef: "B7",
-				outputCandidateId: output.selected_candidate_id,
+				dateSource: { sheet: "Valuation", cell: "B1", text: "2026-08-31T00:00:00" },
+				labelSource: { sheet: "Valuation", cell: "A1", text: "Valuation Date" },
+				valuationDate: "2026-08-31",
 			}),
-		).toMatchObject({ status: "verified", valuation_date: "2026-08-31" });
+		).toMatchObject({ status: "inferred", valuation_date: "2026-08-31" });
 	});
 
 	it.each([

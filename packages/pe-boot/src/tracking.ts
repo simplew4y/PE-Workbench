@@ -5,7 +5,9 @@ import { resolvePeEvidenceRecord, resolvePeEvidenceSources } from "./evidence.ts
 import { ResearchError } from "./research/model.ts";
 import { researchTransaction, withResearchDatabase } from "./research/storage.ts";
 import { type PeSourcePayload, parseSourceId, sourceId } from "./source.ts";
+import { readExcelCellsInRange } from "./tools/excel-cells.ts";
 import { fetchTrackingMarketData } from "./tracking-market.ts";
+import { readWorkbookContextSource, type WorkbookFactContext } from "./workbook-context.ts";
 
 export type TrackingRule =
 	| { kind: "market" }
@@ -19,6 +21,7 @@ export type TrackingRule =
 			label: string;
 			period: string;
 			unit: string;
+			context?: WorkbookFactContext;
 			multipliers: { bear: number; base: number; bull: number };
 			minValue: number;
 			maxValue: number;
@@ -299,6 +302,9 @@ function validateConfig(value: unknown): StockTrackerInput {
 			!text(r.label) ||
 			!text(r.period) ||
 			!text(r.unit) ||
+			!r.context?.label ||
+			!r.context.period ||
+			!r.context.unit ||
 			!r.multipliers ||
 			!ordered(r.multipliers) ||
 			!positive(r.minValue) ||
@@ -306,7 +312,7 @@ function validateConfig(value: unknown): StockTrackerInput {
 			r.minValue > r.maxValue ||
 			(r.maxChangePercent !== undefined && !positive(r.maxChangePercent))
 		)
-			invalid("Cell binding requires exact label, period, unit, positive multipliers and value bounds");
+			invalid("Cell binding requires label, period and unit source cells, positive multipliers and value bounds");
 		const units: Record<string, string[]> = {
 			CNY: ["cny/share", "cny/股", "人民币/股", "人民币元/股", "元/股", "人民币每股", "每股人民币", "每股元"],
 			HKD: ["hkd/share", "hkd/股", "港币/股", "港元/股", "港币每股", "港元每股", "每股港币", "每股港元"],
@@ -613,21 +619,24 @@ function validateTargetSource(db: DatabaseSync, datasetId: string, price: number
 		!/^[A-Z]{1,3}[1-9][0-9]{0,6}$/u.test(reference.location.range)
 	)
 		invalid("Model target must cite one exact Excel target-price cell");
-	const cell = db
-		.prepare(`SELECT c.* FROM excel_cells c JOIN documents d ON d.doc_id=c.doc_id
-		WHERE c.dataset_id=? AND c.doc_id=? AND c.sheet_name=? AND c.cell_ref=?
-		AND d.dataset_id=? AND d.deleted_at IS NULL AND d.status IN ('completed','completed_with_warnings')`)
-		.get(datasetId, reference.docId, reference.location.sheet, reference.location.range, datasetId);
-	if (!cell || !positive(cell.numeric_value) || Math.abs(cell.numeric_value - price) > Math.max(1, price) * 1e-8)
-		invalid("Model target does not match the cited source cell value");
+	const cell = readExcelCellsInRange(
+		db,
+		datasetId,
+		reference.docId,
+		reference.location.sheet,
+		reference.location.range,
+		1,
+	)[0];
 	if (
-		cell.is_formula &&
+		cell?.is_formula &&
 		(cell.formula_cache_status !== "present" ||
 			!text(cell.cached_value, 1000) ||
 			!positive(Number(cell.cached_value)) ||
-			Math.abs(Number(cell.cached_value) - price) > Math.max(1, price) * 1e-8)
+			Math.abs(Number(cell.cached_value) - Number(cell.numeric_value)) > Math.max(1, price) * 1e-8)
 	)
 		invalid("Model target formula requires a matching numeric cache");
+	if (!cell || !positive(cell.numeric_value) || Math.abs(cell.numeric_value - price) > Math.max(1, price) * 1e-8)
+		invalid("Model target does not match the cited source cell value");
 	return reference.docId;
 }
 
@@ -669,22 +678,12 @@ function updateValuation(db: DatabaseSync, datasetId: string, trackerId: string,
 				.get(datasetId, String(row.logical_doc_id));
 			if (!doc || !["completed", "completed_with_warnings"].includes(String(doc.status)))
 				throw new Error("最新模型尚未完成解析，保留上一有效估值");
-			const cell = db
-				.prepare("SELECT * FROM excel_cells WHERE dataset_id=? AND doc_id=? AND sheet_name=? AND cell_ref=?")
-				.get(datasetId, String(doc.doc_id), rule.sheet, rule.cell);
-			const norm = (value: unknown) =>
-				String(value ?? "")
-					.normalize("NFKC")
-					.trim()
-					.replaceAll(/\s+/gu, " ")
-					.toLowerCase();
-			if (
-				!cell ||
-				![cell.row_label, cell.col_label].some((label) => norm(label) === norm(rule.label)) ||
-				norm(cell.period) !== norm(rule.period) ||
-				norm(cell.unit) !== norm(rule.unit)
-			)
-				throw new Error("模型单元格的标签、期间或单位与绑定不一致，保留上一有效估值");
+			if (!rule.context?.label || !rule.context.period || !rule.context.unit)
+				throw new Error("请重新确认模型标签、期间和单位的来源单元格，保留上一有效估值");
+			for (const source of [rule.context.label, rule.context.period, rule.context.unit])
+				readWorkbookContextSource(db, datasetId, String(doc.doc_id), source);
+			const cell = readExcelCellsInRange(db, datasetId, String(doc.doc_id), rule.sheet, rule.cell, 1)[0];
+			if (!cell) throw new Error("模型绑定单元格不存在，保留上一有效估值");
 			if (cell.is_formula && (cell.formula_cache_status !== "present" || !text(cell.cached_value, 1000)))
 				throw new Error("模型公式缺少可用缓存，保留上一有效估值");
 			if (!positive(cell.numeric_value)) throw new Error("模型单元格不是有效正数，保留上一有效估值");

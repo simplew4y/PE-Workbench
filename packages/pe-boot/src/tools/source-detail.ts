@@ -1,8 +1,8 @@
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { resolvePeEvidenceSource } from "../evidence.ts";
+import { resolvePeEvidenceReference, resolvePeEvidenceSource } from "../evidence.ts";
+import { readWorkbookDocument } from "../workbook-reader.ts";
 import {
-	booleanValue,
 	evidenceLocator,
 	numberValue,
 	openPeDataset,
@@ -12,6 +12,7 @@ import {
 	sourceMarkdownCitation,
 	textValue,
 } from "./database.ts";
+import { excelCellDetail, readExcelCellsByBounds } from "./excel-cells.ts";
 import { clipText, normalizeText } from "./search-utils.ts";
 
 const DEFAULT_MAX_CHARS = 6_000;
@@ -91,32 +92,6 @@ function parseCellRange(cellRange: string): [number, number, number, number] | u
 	];
 }
 
-function cellDetail(row: SqlRow): ExcelCellDetail {
-	const cell: ExcelCellDetail = {
-		cell_id: textValue(row, "cell_id") ?? "",
-		sheet_name: textValue(row, "sheet_name") ?? "",
-		cell_ref: textValue(row, "cell_ref") ?? "",
-		row_index: numberValue(row, "row_index") ?? 0,
-		col_index: numberValue(row, "col_index") ?? 0,
-		is_formula: booleanValue(row, "is_formula"),
-	};
-	for (const [source, target] of [
-		["display_value", "display_value"],
-		["raw_value", "raw_value"],
-		["formula", "formula"],
-		["row_label", "row_label"],
-		["col_label", "col_label"],
-		["period", "period"],
-		["unit", "unit"],
-	] as const) {
-		const value = textValue(row, source);
-		if (value) cell[target] = value;
-	}
-	const numericValue = numberValue(row, "numeric_value");
-	if (numericValue !== undefined) cell.numeric_value = numericValue;
-	return cell;
-}
-
 function cellsByBounds(
 	database: ReturnType<typeof openPeDataset>["database"],
 	datasetId: string,
@@ -128,24 +103,19 @@ function cellsByBounds(
 	columnEnd: number,
 	maxCells: number,
 ): ExcelCellDetail[] {
-	const rows = database
-		.prepare(
-			`SELECT * FROM excel_cells
-			 WHERE dataset_id = ? AND doc_id = ? AND sheet_name = ?
-			   AND row_index BETWEEN ? AND ? AND col_index BETWEEN ? AND ?
-			 ORDER BY row_index, col_index LIMIT ?`,
-		)
-		.all(
-			datasetId,
-			docId,
-			sheetName,
-			Math.max(1, rowStart),
-			Math.max(1, rowEnd),
-			Math.max(1, columnStart),
-			Math.max(1, columnEnd),
-			maxCells,
-		) as SqlRow[];
-	return rows.map(cellDetail);
+	return readExcelCellsByBounds(
+		database,
+		datasetId,
+		docId,
+		sheetName,
+		{
+			rowStart: Math.max(1, rowStart),
+			rowEnd: Math.max(1, rowEnd),
+			columnStart: Math.max(1, columnStart),
+			columnEnd: Math.max(1, columnEnd),
+		},
+		maxCells,
+	);
 }
 
 function cellsInRange(
@@ -276,108 +246,6 @@ function chunkDetail(
 	return detail;
 }
 
-function factDetail(
-	connection: ReturnType<typeof openPeDataset>,
-	evidenceId: string,
-	factId: string,
-	mode: SourceDetailMode,
-	contextRadius: number,
-	maxCells: number,
-): Record<string, unknown> {
-	const row = connection.database
-		.prepare(
-			`SELECT f.*, f.cell_ref AS cell_range, d.original_filename, d.source_relpath,
-			        d.file_type, d.doc_type, d.document_date, d.version_no
-			 FROM metric_facts f
-			 JOIN documents d ON d.doc_id = f.doc_id
-			 WHERE f.fact_id = ? AND f.dataset_id = ? AND ${activeDocumentPredicate()}`,
-		)
-		.get(factId, connection.datasetId) as SqlRow | undefined;
-	if (!row) throw new Error(`metric fact not found in the current dataset: ${factId}`);
-	const resolvedMode = mode === "auto" ? "excel_window" : mode;
-	const detail: Record<string, unknown> = {
-		...baseDetail(connection.datasetId, evidenceId, row, resolvedMode),
-		metric: {
-			name: textValue(row, "metric_name"),
-			period: textValue(row, "period"),
-			value_text: textValue(row, "value_text"),
-			value_numeric: numberValue(row, "value_numeric"),
-			unit: textValue(row, "unit"),
-			formula: textValue(row, "formula"),
-			confidence: numberValue(row, "confidence"),
-		},
-	};
-	if (resolvedMode === "meta") return detail;
-
-	const cell = connection.database
-		.prepare(
-			"SELECT row_index, col_index FROM excel_cells WHERE dataset_id = ? AND doc_id = ? AND sheet_name = ? AND cell_ref = ?",
-		)
-		.get(
-			connection.datasetId,
-			textValue(row, "doc_id") ?? "",
-			textValue(row, "sheet_name") ?? "",
-			textValue(row, "cell_ref") ?? "",
-		) as SqlRow | undefined;
-	if (cell) {
-		const rowIndex = numberValue(cell, "row_index") ?? 1;
-		const columnIndex = numberValue(cell, "col_index") ?? 1;
-		detail.excel_cells = cellsByBounds(
-			connection.database,
-			connection.datasetId,
-			textValue(row, "doc_id") ?? "",
-			textValue(row, "sheet_name") ?? "",
-			rowIndex - contextRadius,
-			columnIndex - 5,
-			rowIndex + contextRadius,
-			columnIndex + 5,
-			maxCells,
-		);
-	}
-	return detail;
-}
-
-function rawCellDetail(
-	connection: ReturnType<typeof openPeDataset>,
-	evidenceId: string,
-	cellId: string,
-	mode: SourceDetailMode,
-	contextRadius: number,
-	maxCells: number,
-): Record<string, unknown> {
-	const row = connection.database
-		.prepare(
-			`SELECT c.*, c.cell_ref AS cell_range, d.original_filename, d.source_relpath,
-			        d.file_type, d.doc_type, d.document_date, d.version_no
-			 FROM excel_cells c
-			 JOIN documents d ON d.doc_id = c.doc_id
-			 WHERE c.cell_id = ? AND c.dataset_id = ? AND ${activeDocumentPredicate()}`,
-		)
-		.get(cellId, connection.datasetId) as SqlRow | undefined;
-	if (!row) throw new Error(`Excel cell not found in the current dataset: ${cellId}`);
-	const resolvedMode = mode === "auto" ? "excel_window" : mode;
-	const detail: Record<string, unknown> = {
-		...baseDetail(connection.datasetId, evidenceId, row, resolvedMode),
-		cell: cellDetail(row),
-	};
-	if (resolvedMode !== "meta") {
-		const rowIndex = numberValue(row, "row_index") ?? 1;
-		const columnIndex = numberValue(row, "col_index") ?? 1;
-		detail.excel_cells = cellsByBounds(
-			connection.database,
-			connection.datasetId,
-			textValue(row, "doc_id") ?? "",
-			textValue(row, "sheet_name") ?? "",
-			rowIndex - contextRadius,
-			columnIndex - 5,
-			rowIndex + contextRadius,
-			columnIndex + 5,
-			maxCells,
-		);
-	}
-	return detail;
-}
-
 export function getPeSourceDetail(
 	cwd: string,
 	options: PeSourceDetailOptions,
@@ -400,8 +268,26 @@ export function getPeSourceDetail(
 		if (kind === "chunk") {
 			return chunkDetail(connection, evidenceId, rawId, mode, contextRadius, maxChars, maxCells);
 		}
-		if (kind === "fact") return factDetail(connection, evidenceId, rawId, mode, contextRadius, maxCells);
-		if (kind === "cell") return rawCellDetail(connection, evidenceId, rawId, mode, contextRadius, maxCells);
+		if (kind === "fact" || kind === "cell" || kind === "source") {
+			const reference = resolvePeEvidenceReference(cwd, evidenceId);
+			if (reference.location.kind !== "excel")
+				throw new Error("Use the shared source resolver for this evidence type");
+			const result = readWorkbookDocument(connection.database, connection.datasetId, reference.docId, {
+				action: "read",
+				sheet: reference.location.sheet,
+				range: reference.location.range,
+				limit: maxCells,
+			});
+			const cells = (result.cells as SqlRow[]).map(excelCellDetail);
+			if (!cells.length) throw new Error("Source cells were not found in the original workbook");
+			return {
+				...result,
+				dataset_id: connection.datasetId,
+				evidence_id: evidenceId,
+				cell: cells[0],
+				excel_cells: cells,
+			};
+		}
 		throw new Error(`unsupported evidence type: ${kind}`);
 	} finally {
 		connection.database.close();

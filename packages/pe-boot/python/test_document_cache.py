@@ -17,7 +17,7 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.utils.datetime import CALENDAR_MAC_1904
 from openpyxl.workbook.defined_name import DefinedName
 
-import workbook as workbook_parser
+import workbook_reader
 
 
 class DocumentCacheTest(unittest.TestCase):
@@ -50,25 +50,30 @@ class DocumentCacheTest(unittest.TestCase):
 
     def test_keeps_1904_dates_named_ranges_and_forecasts_separate(self):
         result = self.parse()
-        candidates = result['tables']['valuation_date_candidates']
-        rows = sorted((row['role'], row['normalized_date'], row['cell_ref'])
-                      for row in candidates if row['source_type'] == 'workbook_cell')
-        self.assertEqual(sorted(rows, key=lambda row: row[2]), [
-            ('valuation_date', '2025-06-30', 'B1'), ('forecast_period', None, 'B2'),
-            ('target_horizon_end', '2026-06-30', 'B3')])
-        self.assertEqual([row['normalized_date'] for row in candidates if row['source_type'] == 'defined_name'], ['2025-06-30'])
-        metadata = json.loads(result['tables']['excel_workbooks'][0]['metadata_json'])
-        self.assertTrue(metadata['date_epoch'].startswith('1904-01-01'))
-        self.assertEqual(result['document_date'], '2025-06-30')
+        # Preparation stores navigation, not inferred financial dates or all cells.
+        self.assertEqual(result['tables']['valuation_date_candidates'], [])
+        self.assertEqual(result['tables']['excel_cells'], [])
+        self.assertEqual(result['document_date'], '')
+        cells = workbook_reader.read_workbook(self.source, {
+            'action': 'read', 'sheet': 'Model', 'range': 'B1:B4',
+        }, navigation=result['navigation'])['cells']
+        self.assertEqual([cell['value'] for cell in cells], [
+            '2025-06-30T00:00:00', '2030E', '2026-06-30T00:00:00', '=DATE(2025,6,30)',
+        ])
+        self.assertEqual(cells[3]['formula_cache_status'], 'missing')
+        name = result['navigation']['defined_names'][0]
+        self.assertEqual(name['name'], 'Valuation_Date')
+        self.assertEqual(name['destinations'], [['Model', '$B$1']])
 
-    def test_refresh_preserves_cell_ids_and_original_even_after_a_parser_failure(self):
+    def test_refresh_preserves_navigation_and_original_even_after_a_parser_failure(self):
         first = self.parse()
         checksum = hashlib.sha256(self.source.read_bytes()).hexdigest()
-        with patch.object(workbook_parser, '_parse_loaded_workbook', side_effect=RuntimeError('refresh failed')):
+        with patch.object(workbook_reader, 'inspect_workbook', side_effect=RuntimeError('refresh failed')):
             with self.assertRaisesRegex(RuntimeError, 'refresh failed'):
-                workbook_parser.parse_workbook(dataset_id='dataset-1', doc_id='a' * 40, path=self.source)
+                workbook_reader.navigation_artifact(self.source, 'dataset-1', 'a' * 40)
         second = self.parse('r2')
         self.assertEqual(first['tables'], second['tables'])
+        self.assertEqual(first['navigation'], second['navigation'])
         self.assertEqual(first['doc_id'], second['doc_id'])
         self.assertEqual(hashlib.sha256(self.source.read_bytes()).hexdigest(), checksum)
 
@@ -78,11 +83,14 @@ class DocumentCacheTest(unittest.TestCase):
         workbook.save(self.source)
         workbook.close()
         result = self.parse()
-        rows = sorted((row for row in result['tables']['valuation_date_candidates'] if row['cell_ref'] == 'B1'), key=lambda row: row['source_type'])
-        self.assertEqual([row['source_type'] for row in rows], ['defined_name', 'workbook_cell'])
-        for row in rows:
-            self.assertEqual(row['rejection_reason'], 'date_assertion_unconfirmed')
-            self.assertEqual(json.loads(row['metadata_json'])['assertion_status'], 'unconfirmed')
+        self.assertEqual(result['tables']['valuation_date_candidates'], [])
+        self.assertEqual(result['navigation']['defined_names'][0]['destinations'], [['Model', '$B$1']])
+        cells = workbook_reader.read_workbook(self.source, {
+            'action': 'read', 'sheet': 'Model', 'range': 'A1:B1',
+        }, navigation=result['navigation'])['cells']
+        self.assertEqual(cells[0]['value'], 'Valuation Date not confirmed')
+        self.assertEqual(cells[1]['value'], '2025-06-30T00:00:00')
+        self.assertNotIn('assertion_status', cells[1])
 
 
 if __name__ == '__main__':

@@ -45,6 +45,7 @@ export interface ResearchInput {
 	version: number;
 	parserVersion: string | null;
 	readyAt: string;
+	sourceChecksum?: string;
 }
 export interface FrameworkDraft {
 	id: string;

@@ -16,6 +16,7 @@ import {
 	type TrackingMarketProvider,
 	trackingMarketClock,
 } from "../src/tracking.ts";
+import { writeWorkbookFixture } from "./workbook-source-fixture.ts";
 
 const roots: string[] = [];
 const datasetId = "tracking_test";
@@ -123,10 +124,17 @@ function model(root: string, docId = "doc1", version = 1, value = 10, unit = "HK
 		db.prepare(
 			"INSERT INTO documents(doc_id,dataset_id,original_filename,logical_doc_id,version_no,is_current,file_type,status,created_at,updated_at) VALUES(?,?,?,'series1',?,1,'xlsx','completed',?,?)",
 		).run(docId, datasetId, "model.xlsx", version, new Date().toISOString(), new Date().toISOString());
-		db.prepare(
-			"INSERT INTO excel_cells(cell_id,dataset_id,doc_id,sheet_name,cell_ref,row_index,col_index,value_type,numeric_value,row_label,period,unit) VALUES(?,?,?,'Valuation','B2',2,2,'number',?,'EPS','2027E',?)",
-		).run(`${docId}_b2`, datasetId, docId, value, unit);
 	});
+	modelSource(root, docId, value, unit);
+}
+function modelSource(root: string, docId: string, value: number | string, unit = "HKD/share") {
+	writeWorkbookFixture(root, docId, [
+		{ sheet: "Valuation", cell: "A2", value: "EPS" },
+		{ sheet: "Valuation", cell: "B1", value: "2027E" },
+		{ sheet: "Valuation", cell: "B2", value },
+		{ sheet: "Valuation", cell: "C2", value: unit },
+		{ sheet: "Cover", cell: "A1", value: "Tencent 0700.HK" },
+	]);
 }
 function cellConfig(): StockTrackerInput {
 	return {
@@ -139,6 +147,11 @@ function cellConfig(): StockTrackerInput {
 			label: "EPS",
 			period: "2027E",
 			unit: "HKD/share",
+			context: {
+				label: { sheet: "Valuation", cell: "A2", text: "EPS" },
+				period: { sheet: "Valuation", cell: "B1", text: "2027E" },
+				unit: { sheet: "Valuation", cell: "C2", text: "HKD/share" },
+			},
 			multipliers: { bear: 8, base: 13, bull: 16 },
 			minValue: 1,
 			maxValue: 30,
@@ -256,13 +269,6 @@ it("persists independent stocks without a published research framework and enfor
 it("tracks market prices and simulated P&L without a model target, then adds a target without losing history", async () => {
 	const root = project();
 	model(root);
-	withResearchDatabase(root, datasetId, (db) =>
-		db
-			.prepare(
-				"INSERT INTO excel_cells(cell_id,dataset_id,doc_id,sheet_name,cell_ref,row_index,col_index,value_type,raw_value) VALUES('cover',?,'doc1','Cover','A1',1,1,'text','Tencent 0700.HK')",
-			)
-			.run(datasetId),
-	);
 	const identity = sourceId({ docId: "doc1", location: { kind: "excel", sheet: "Cover", range: "A1" } });
 	const input: StockTrackerInput = {
 		...config(),
@@ -817,9 +823,7 @@ it("rejects made-up target values, future source dates, bad caches and invalid f
 			0,
 		),
 	).toThrow("ordered range");
-	withResearchDatabase(root, datasetId, (db) =>
-		db.prepare("UPDATE excel_cells SET is_formula=1,formula_cache_status='missing' WHERE doc_id='model'").run(),
-	);
+	modelSource(root, "model", "=140");
 	expect(() => saveStockTracker(root, datasetId, { ...config(), rule }, 0)).toThrow("numeric cache");
 	expect(getStockTracking(root, datasetId).trackers).toHaveLength(0);
 });
@@ -853,27 +857,17 @@ it("retains the last valid model on mismatched units, missing caches, bounds and
 	model(root, "doc2", 2, 12, "CNY/share");
 	let result = await refreshStockTracker(root, datasetId, first.id, signal(), provider);
 	expect(result.valuation?.base).toBe(130);
-	expect(result.error).toContain("单位");
+	expect(result.error).toContain("Source context changed");
 	expect(result.marketError).toBeNull();
 	expect(result.valuationStatus).toBe("stale");
-	withResearchDatabase(root, datasetId, (db) =>
-		db
-			.prepare(
-				"UPDATE excel_cells SET unit='HKD/share',is_formula=1,formula='=6*2',formula_cache_status='missing' WHERE doc_id='doc2'",
-			)
-			.run(),
-	);
+	modelSource(root, "doc2", "=6*2");
 	result = await refreshStockTracker(root, datasetId, first.id, signal(), provider);
 	expect(result.error).toContain("缓存");
 	expect(result.valuations).toHaveLength(1);
-	withResearchDatabase(root, datasetId, (db) =>
-		db.prepare("UPDATE excel_cells SET is_formula=0,numeric_value=40 WHERE doc_id='doc2'").run(),
-	);
+	modelSource(root, "doc2", 40);
 	result = await refreshStockTracker(root, datasetId, first.id, signal(), provider);
 	expect(result.error).toContain("范围");
-	withResearchDatabase(root, datasetId, (db) =>
-		db.prepare("UPDATE excel_cells SET numeric_value=20 WHERE doc_id='doc2'").run(),
-	);
+	modelSource(root, "doc2", 20);
 	result = await refreshStockTracker(root, datasetId, first.id, signal(), provider);
 	expect(result.error).toContain("幅度");
 	expect(result.valuation?.base).toBe(130);

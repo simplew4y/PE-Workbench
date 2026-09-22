@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
-import { type ExcelBounds, parseExcelCellRange } from "../source.ts";
+import { type ExcelBounds, excelColumnLabel, parseExcelCellRange } from "../source.ts";
+import { readWorkbookCells, readWorkbookDocument } from "../workbook-reader.ts";
 import {
 	booleanValue,
 	numberValue,
@@ -25,12 +26,21 @@ export interface ExcelCellDetail {
 	formula?: string;
 	cached_value?: string;
 	number_format?: string;
+	value_type?: string;
+	sheet_state?: string;
+	hidden_row?: boolean;
+	hidden_column?: boolean;
+	merged_range?: string;
 	row_label?: string;
 	col_label?: string;
 	period?: string;
 	unit?: string;
 	formula_type?: string;
 	formula_cache_status?: string;
+	style?: Record<string, unknown>;
+	comment?: { author: string; text: string } | null;
+	matched_fields?: Array<"value" | "comment">;
+	conditional_formatting?: boolean;
 	period_context?: ExcelSemanticContext;
 	unit_context?: ExcelSemanticContext;
 	is_formula: boolean;
@@ -47,6 +57,7 @@ export type ExcelRangeBounds = ExcelBounds;
 export { parseExcelCellRange };
 
 export function excelCellDetail(row: SqlRow): ExcelCellDetail {
+	const source = row as Record<string, unknown>;
 	const cellId = textValue(row, "cell_id") ?? "";
 	const evidenceId = sourceEvidenceId(row);
 	const cell: ExcelCellDetail = {
@@ -59,6 +70,9 @@ export function excelCellDetail(row: SqlRow): ExcelCellDetail {
 		row_index: numberValue(row, "row_index") ?? 0,
 		col_index: numberValue(row, "col_index") ?? 0,
 		is_formula: booleanValue(row, "is_formula"),
+		style: source.style as ExcelCellDetail["style"],
+		comment: source.comment as ExcelCellDetail["comment"],
+		matched_fields: source.matched_fields as ExcelCellDetail["matched_fields"],
 	};
 	for (const [source, target] of [
 		["display_value", "display_value"],
@@ -66,6 +80,7 @@ export function excelCellDetail(row: SqlRow): ExcelCellDetail {
 		["formula", "formula"],
 		["cached_value", "cached_value"],
 		["number_format", "number_format"],
+		["value_type", "value_type"],
 		["row_label", "row_label"],
 		["col_label", "col_label"],
 		["period", "period"],
@@ -73,8 +88,9 @@ export function excelCellDetail(row: SqlRow): ExcelCellDetail {
 		["formula_type", "formula_type"],
 		["formula_cache_status", "formula_cache_status"],
 	] as const) {
-		const value = textValue(row, source);
-		if (value) cell[target] = value;
+		const value = row[source];
+		if (typeof value === "string" && (value || ["raw_value", "display_value", "cached_value"].includes(source)))
+			cell[target] = value;
 	}
 	const numericValue = numberValue(row, "numeric_value");
 	if (numericValue !== undefined) cell.numeric_value = numericValue;
@@ -82,6 +98,12 @@ export function excelCellDetail(row: SqlRow): ExcelCellDetail {
 	if (metadataText) {
 		try {
 			const metadata = JSON.parse(metadataText) as Record<string, unknown>;
+			for (const key of ["sheet_state", "merged_range"] as const) {
+				if (typeof metadata[key] === "string") cell[key] = metadata[key];
+			}
+			for (const key of ["hidden_row", "hidden_column", "conditional_formatting"] as const) {
+				if (typeof metadata[key] === "boolean") cell[key] = metadata[key];
+			}
 			for (const key of ["period_context", "unit_context"] as const) {
 				const value = metadata[key];
 				if (!value || typeof value !== "object") continue;
@@ -121,28 +143,7 @@ export function readExcelCellsByBounds(
 	bounds: ExcelRangeBounds,
 	maxCells: number,
 ): ExcelCellDetail[] {
-	const rows = database
-		.prepare(
-			`SELECT c.*, c.cell_ref AS cell_range,
-			        d.original_filename, d.source_relpath, d.file_type, d.doc_type,
-			        d.document_date, d.version_no
-			 FROM excel_cells c
-			 JOIN documents d ON d.doc_id = c.doc_id
-			 WHERE c.dataset_id = ? AND c.doc_id = ? AND c.sheet_name = ?
-			   AND c.row_index BETWEEN ? AND ? AND c.col_index BETWEEN ? AND ?
-			   AND d.deleted_at IS NULL
-			 ORDER BY c.row_index, c.col_index LIMIT ?`,
-		)
-		.all(
-			datasetId,
-			docId,
-			sheetName,
-			bounds.rowStart,
-			bounds.rowEnd,
-			bounds.columnStart,
-			bounds.columnEnd,
-			maxCells,
-		) as SqlRow[];
+	const rows = readWorkbookCells(database, datasetId, docId, sheetName, bounds, maxCells);
 	return rows.map(excelCellDetail);
 }
 
@@ -165,13 +166,9 @@ export function countExcelCellsByBounds(
 	sheetName: string,
 	bounds: ExcelRangeBounds,
 ): number {
-	const row = database
-		.prepare(
-			`SELECT COUNT(*) AS cell_count
-			 FROM excel_cells
-			 WHERE dataset_id = ? AND doc_id = ? AND sheet_name = ?
-			   AND row_index BETWEEN ? AND ? AND col_index BETWEEN ? AND ?`,
-		)
-		.get(datasetId, docId, sheetName, bounds.rowStart, bounds.rowEnd, bounds.columnStart, bounds.columnEnd) as SqlRow;
-	return numberValue(row, "cell_count") ?? 0;
+	const range = `${excelColumnLabel(bounds.columnStart)}${bounds.rowStart}:${excelColumnLabel(bounds.columnEnd)}${bounds.rowEnd}`;
+	return Number(
+		readWorkbookDocument(database, datasetId, docId, { action: "read", sheet: sheetName, range, limit: 1 })
+			.matching_cell_count,
+	);
 }

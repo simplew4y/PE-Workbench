@@ -113,19 +113,8 @@ export function resolvePeEvidenceRecord(
 	if (location.kind === "excel") {
 		const bounds = parseExcelCellRange(location.range);
 		if (!bounds || !["xlsx", "xlsm"].includes(String(document.file_type))) return undefined;
-		const cell = database
-			.prepare(`SELECT 1 FROM excel_cells WHERE dataset_id=? AND doc_id=? AND sheet_name=?
-				AND row_index BETWEEN ? AND ? AND col_index BETWEEN ? AND ? LIMIT 1`)
-			.get(
-				datasetId,
-				reference.docId,
-				location.sheet,
-				bounds.rowStart,
-				bounds.rowEnd,
-				bounds.columnStart,
-				bounds.columnEnd,
-			);
-		if (!cell) return undefined;
+		if (readExcelCellsByBounds(database, datasetId, reference.docId, location.sheet, bounds, 1).length === 0)
+			return undefined;
 	} else if (location.kind === "pdf") {
 		if (document.file_type !== "pdf") return undefined;
 		const count = database

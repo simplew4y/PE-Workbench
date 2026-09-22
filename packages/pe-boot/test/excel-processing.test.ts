@@ -11,13 +11,17 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { initializePeCollectionDatabase, openPeCollectionDatabase } from "../src/collection-schema.ts";
 import { PeSourceError, preparePeDocument, registerPeDocuments } from "../src/documents.ts";
+import { resolvePeEvidenceRecord, resolvePeEvidenceReference } from "../src/evidence.ts";
 import { EXCEL_TABLES, excelParserRevision, excelPython } from "../src/excel-processing.ts";
 import type { SqlRow } from "../src/tools/database.ts";
+import { getPeExcelRange } from "../src/tools/excel-range.ts";
+import { formulaTraceIsStructurallyComplete, tracePeFormula } from "../src/tools/formula-trace.ts";
+import { readWorkbookDocument, readWorkbookFile } from "../src/workbook-reader.ts";
 
 const fixtureBytes = readFileSync(new URL("./fixtures/excel-parity.xlsx", import.meta.url));
 const roots: string[] = [];
@@ -190,61 +194,94 @@ describe("immutable Excel registration and shared preparation", () => {
 		}
 	});
 
-	it("publishes every structured table and full readable text, then reuses one immutable generation", async () => {
+	it("publishes navigation without full cell materialization and reads original values on demand", async () => {
 		const { root, databasePath } = fixture();
 		const document = register(root);
 		const prepared = await preparePeDocument(root, { docId: String(document.doc_id) });
-		const cached = await preparePeDocument(root, { path: "raw/Model.xlsx" });
-		expect(cached.cachePath).toBe(prepared.cachePath);
-		expect(prepared.document.status).toBe("completed_with_warnings");
-		expect(prepared.warnings).toEqual([
-			"文件已上传，16 个公式结果暂时无法读取，相关数据可能不完整。请用 Excel 重新计算并保存后上传；若仍有错误，请检查公式及外部数据。位置：Hidden assumptions!B2、Formula cases!B1、Formula cases!C1、Formula cases!E1、Formula cases!F1 等。",
-		]);
+		expect((await preparePeDocument(root, { path: "raw/Model.xlsx" })).cachePath).toBe(prepared.cachePath);
 		const readable = readFileSync(prepared.readablePath, "utf8");
-		expect(readable).toContain("x".repeat(5100));
-		expect(readable).toContain('formula="=SUM(B3:B4)"');
-		expect(readable).toContain("source%3A");
+		expect(readable).toContain("Sheet: Valuation");
+		expect(readable).not.toContain("x".repeat(5100));
+		expect(existsSync(join(dirname(prepared.cachePath), "workbook.json"))).toBe(false);
+		expect(existsSync(join(dirname(prepared.cachePath), "text-index.json"))).toBe(true);
 		const database = openPeCollectionDatabase(databasePath);
 		try {
-			for (const table of EXCEL_TABLES)
-				expect(
-					Number(database.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE doc_id=?`).get(document.doc_id)?.n),
-				).toBeGreaterThan(0);
-			expect(
-				database.prepare("SELECT attempt FROM processing_jobs WHERE doc_id=?").get(document.doc_id)?.attempt,
-			).toBe(1);
-			expect(
-				database
-					.prepare(
-						"SELECT cached_value, formula FROM excel_cells WHERE doc_id=? AND sheet_name='Valuation' AND cell_ref='B7'",
-					)
-					.get(document.doc_id),
-			).toMatchObject({ cached_value: "120", formula: "=B5/10" });
-			expect(
-				database
-					.prepare("SELECT * FROM evidence_locations WHERE doc_id=? AND evidence_id LIKE 'fact:%'")
-					.all(document.doc_id).length,
-			).toBeGreaterThan(0);
+			for (const table of ["excel_cells", "excel_formula_references", "valuation_date_candidates", "metric_facts"])
+				expect(database.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get()?.n).toBe(0);
+			const result = readWorkbookDocument(database, "dataset", String(document.doc_id), {
+				action: "read",
+				sheet: "Valuation",
+				range: "B7",
+			});
+			const cell = (result.cells as SqlRow[])[0];
+			expect(cell).toMatchObject({ cached_value: "120", formula: "=B5/10" });
+			expect(resolvePeEvidenceRecord(database, "dataset", String(cell.evidence_id))).toBeDefined();
+			const search = readWorkbookDocument(database, "dataset", String(document.doc_id), {
+				action: "search",
+				query: "Long original note",
+			});
+			expect((search.cells as SqlRow[])[0].raw_value).toContain("x".repeat(5100));
+			expect(search.index_used).toBe(true);
 			expect(database.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
 		} finally {
 			database.close();
 		}
+		const ranges = [
+			{ sheet: "Valuation", range: "B7" },
+			{ sheet: "Hidden assumptions", range: "B1" },
+		];
+		const firstPage = getPeExcelRange(root, { docId: String(document.doc_id), ranges, maxCells: 1 });
+		expect(firstPage).toMatchObject({ matching_cell_count: 2, next_offset: 1, complete: false });
+		const lastPage = getPeExcelRange(root, { docId: String(document.doc_id), ranges, maxCells: 1, offset: 1 });
+		expect(lastPage).toMatchObject({
+			complete: true,
+			next_offset: null,
+			cells: [{ sheet_state: "veryHidden", numeric_value: 2 }],
+		});
+		const trace = tracePeFormula(root, { docId: String(document.doc_id), sheetName: "Formula cases", cellRef: "A2" });
+		const input = trace.nodes.find((node) => node.sheet_name === "Hidden assumptions" && node.cell_ref === "B1");
+		expect(input).toMatchObject({ depth: 1, numeric_value: 2, sheet_state: "veryHidden" });
+		expect(trace.edges.find((edge) => edge.defined_name === "Input_Growth")?.target_cell_ids).toContain(
+			input?.cell_id,
+		);
+		expect(trace.issues).toContainEqual(
+			expect.objectContaining({
+				code: "formula_cache_unavailable",
+				source_sheet: "Formula cases",
+				source_cell_ref: "A2",
+			}),
+		);
+		expect(formulaTraceIsStructurallyComplete(trace)).toBe(true);
 	}, 20_000);
 
 	it("repairs missing artifacts and table rows without changing version or legacy evidence IDs", async () => {
 		const { root, databasePath } = fixture();
 		const document = register(root);
-		const first = await preparePeDocument(root, { docId: String(document.doc_id) });
 		const database = openPeCollectionDatabase(databasePath);
+		database
+			.prepare(
+				"INSERT INTO excel_cells(cell_id,dataset_id,doc_id,sheet_name,cell_ref,row_index,col_index,value_type) VALUES('oldcell','dataset',?,'Valuation','B7',7,2,'formula')",
+			)
+			.run(document.doc_id);
+		database
+			.prepare(
+				"INSERT INTO metric_facts(fact_id,dataset_id,doc_id,metric_name,sheet_name,cell_ref) VALUES('oldfact','dataset',?,'Target Price','Valuation','B7')",
+			)
+			.run(document.doc_id);
+		const first = await preparePeDocument(root, { docId: String(document.doc_id) });
 		const before = database
 			.prepare("SELECT evidence_id FROM evidence_locations WHERE doc_id=? ORDER BY evidence_id")
 			.all(document.doc_id);
+		expect(before).toHaveLength(2);
+		for (const id of ["cell:oldcell", "fact:oldfact"])
+			expect(resolvePeEvidenceReference(root, id)).toEqual({
+				docId: document.doc_id,
+				location: { kind: "excel", sheet: "Valuation", range: "B7" },
+			});
 		rmSync(first.readablePath);
 		const second = await preparePeDocument(root, { docId: String(document.doc_id) });
 		expect(second.cachePath).not.toBe(first.cachePath);
-		database
-			.prepare("DELETE FROM excel_cells WHERE doc_id=? AND sheet_name='Valuation' AND cell_ref='B7'")
-			.run(document.doc_id);
+		database.prepare("DELETE FROM excel_sheets WHERE doc_id=? AND sheet_name='Valuation'").run(document.doc_id);
 		const third = await preparePeDocument(root, { docId: String(document.doc_id) });
 		try {
 			expect(third.cachePath).not.toBe(second.cachePath);
@@ -336,7 +373,12 @@ describe("immutable Excel registration and shared preparation", () => {
 		const { root } = fixture();
 		const document = register(root);
 		const prepared = await preparePeDocument(root, { docId: String(document.doc_id) });
+		const request = { action: "read", sheet: "Valuation", range: "B7" } as const;
+		readWorkbookFile(prepared.filePath, request, String(document.checksum));
 		writeFileSync(prepared.filePath, "modified");
+		expect(() => readWorkbookFile(prepared.filePath, request, String(document.checksum))).toThrow(
+			"Original file changed",
+		);
 		await expect(preparePeDocument(root, { docId: String(document.doc_id) })).rejects.toMatchObject({ status: 409 });
 		rmSync(prepared.filePath);
 		await expect(preparePeDocument(root, { docId: String(document.doc_id) })).rejects.toMatchObject({ status: 404 });
