@@ -145,6 +145,13 @@ describe("PE system prompt", () => {
 					},
 				});
 				const expected = [
+					"investment-framework-builder",
+					"business-driver-model",
+					"independent-investment-case",
+					"expectations-valuation",
+					"falsification-monitoring",
+					"framework-reviewer",
+					"valuation-model-review",
 					"pe-document-retrieval",
 					"pe-financial-model-reader",
 					"pe-financial-model-understanding",
@@ -199,7 +206,12 @@ describe("PE system prompt", () => {
 			},
 			on() {},
 		} as unknown as ExtensionAPI);
-		const entrypoints = ["pe-document-retrieval", "pe-valuation-model-explainer", "pe-valuation-report"];
+		const entrypoints = [
+			"pe-document-retrieval",
+			"pe-valuation-model-explainer",
+			"pe-valuation-report",
+			"investment-framework-builder",
+		];
 		const visited = new Set<string>();
 		// These entrypoints are registered by the web host and the restricted research engine.
 		const otherEntrypoints = new Set(["pe_session_workbook", "pe_research_read", "pe_research_submit"]);

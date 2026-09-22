@@ -60,6 +60,35 @@ const pinned = (messages: AgentMessage[]) =>
 	messages.filter((message) => message.role === "custom" && message.customType === "pe-capability-instructions");
 
 describe("PE capability runtime", () => {
+	it("loads research stages with shared state once, restores them, and preserves host permissions", async () => {
+		const allowed = ["pe_load_capability", "pe_excel_range", "pe_formula_trace"];
+		const h = await setup({}, { allowedToolNames: allowed });
+		for (const stage of [
+			"business-driver-model",
+			"independent-investment-case",
+			"expectations-valuation",
+			"falsification-monitoring",
+			"framework-reviewer",
+		]) {
+			h.setResponses([load(["investment-framework-builder", stage]), fauxAssistantMessage("done")]);
+			await h.session.prompt(`Load research stage: ${stage}`);
+			const instructions = getMessageText(
+				pinned(await h.session.extensionRunner.emitContext(h.session.messages))[0],
+			);
+			expect(instructions).toContain(`${stage}/SKILL.md`);
+			expect(instructions).toContain("investment-framework-builder/SKILL.md");
+			expect(instructions.match(/<workflow_file path=.*references\/state-contract.md/g)).toHaveLength(1);
+			expect(instructions).not.toContain("pe-valuation-report/SKILL.md");
+			expect(h.session.getActiveToolNames().sort()).toEqual([...allowed].sort());
+		}
+		await h.session.reload();
+		const restored = getMessageText(pinned(await h.session.extensionRunner.emitContext(h.session.messages))[0]);
+		expect(restored).toContain("framework-reviewer/SKILL.md");
+		expect(restored).toContain("valuation-model-review/references/model-understanding.md");
+		expect(restored).not.toMatch(/<workflow_file path=.*expectations-valuation\/SKILL.md/);
+		expect(h.eventsOfType("tool_execution_end").every((event) => !event.isError)).toBe(true);
+	});
+
 	it("loads model understanding and research without report instructions or widening a read-only host", async () => {
 		const allowed = ["pe_load_capability", "pe_excel_range", "pe_formula_trace"];
 		const h = await setup({}, { allowedToolNames: allowed });

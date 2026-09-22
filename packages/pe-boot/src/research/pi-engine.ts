@@ -169,7 +169,7 @@ export function createPiResearchEngine(
 					}),
 					resourceLoaderOptions: {
 						noExtensions: true,
-						noSkills: false,
+						noSkills: true,
 						additionalSkillPaths: skillPaths,
 						noPromptTemplates: true,
 						noThemes: true,
