@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { resolvePeEvidenceRecord } from "../evidence.ts";
+import { excelParserRevision } from "../excel-processing.ts";
 import { parseSourceId } from "../source.ts";
 import type { SqlRow } from "../tools/database.ts";
 import {
@@ -49,18 +50,21 @@ export function captureResearchInputs(database: DatabaseSync, datasetId: string,
 		const row = database
 			.prepare("SELECT * FROM documents WHERE dataset_id=? AND doc_id=? AND deleted_at IS NULL")
 			.get(datasetId, docId);
+		const workbook = row?.file_type === "xlsx" || row?.file_type === "xlsm";
 		if (
 			!row ||
 			(!["pdf", "xlsx", "xlsm"].includes(String(row.file_type)) &&
 				!(row.file_type === "txt" && row.parser_name === "wind_snapshot")) ||
-			!["completed", "completed_with_warnings"].includes(String(row.status))
+			(!workbook && !["completed", "completed_with_warnings"].includes(String(row.status)))
 		)
 			throw new ResearchError(409, `Document version is not ready for research: ${docId}`);
 		return {
 			docId,
 			version: Number(row.version_no),
-			parserVersion: row.parser_version as string | null,
-			readyAt: String(row.updated_at),
+			parserVersion: workbook ? excelParserRevision() : (row.parser_version as string | null),
+			// Source workbooks are versioned at registration; query cache writes do not change the input.
+			readyAt: String(workbook ? row.created_at : row.updated_at),
+			...(workbook ? { sourceChecksum: String(row.sha256 || row.checksum) } : {}),
 		};
 	});
 }

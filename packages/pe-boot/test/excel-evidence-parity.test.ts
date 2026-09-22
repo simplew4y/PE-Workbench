@@ -10,26 +10,15 @@ import { preparePeDocument, registerPeDocuments } from "../src/documents.ts";
 import { resolvePeEvidenceSource } from "../src/evidence.ts";
 import { EXCEL_TABLES, excelPython } from "../src/excel-processing.ts";
 import { parseSourceId, sourceId } from "../src/source.ts";
+import type { ExcelCellDetail } from "../src/tools/excel-cells.ts";
 import { getPeExcelRange } from "../src/tools/excel-range.ts";
 import { tracePeFormula } from "../src/tools/formula-trace.ts";
 import { getPeMemoVersion, savePeMemo } from "../src/tools/memo-storage.ts";
-import { validatePeModel } from "../src/tools/model-validate.ts";
 import { savePeResearchNote } from "../src/tools/research-note-storage.ts";
-import { resolvePeValuationDate } from "../src/tools/valuation-date.ts";
-import { locatePeValuationOutputs } from "../src/tools/valuation-output.ts";
 import { inspectPeWorkbooks } from "../src/tools/workbook-inspect.ts";
-import { financialParitySnapshot, withoutInferredFinancialContext } from "./financial-parity-support.ts";
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
 const directories: string[] = [];
-const tools = {
-	getPeExcelRange,
-	tracePeFormula,
-	validatePeModel,
-	resolvePeValuationDate,
-	locatePeValuationOutputs,
-	inspectPeWorkbooks,
-};
 
 function project(): string {
 	const root = mkdtempSync(join(tmpdir(), "pe-excel-parity-"));
@@ -67,160 +56,81 @@ afterEach(() => {
 });
 
 describe("Excel parity and immutable evidence on the shared PDF schema", () => {
-	it("excludes only inferred context while detecting changes to original evidence", () => {
-		const cell = {
-			cell_ref: "B7",
-			raw_value: "=B5/10",
-			formula: "=B5/10",
-			cached_value: "120",
-			numeric_value: 120,
-			number_format: '"CNY/share" 0.00',
-			evidence_id: "source:original",
-			row_label: "Target Price",
-			period: "2026",
-			unit: "per_share",
-		};
-		const corrected = { ...cell, period: "", unit: "CNY/share", unit_context: { status: "inferred" } };
-		expect(withoutInferredFinancialContext(corrected)).toEqual(withoutInferredFinancialContext(cell));
-		for (const [field, value] of Object.entries({
-			cell_ref: "B8",
-			raw_value: "=B5/100",
-			formula: "=B5/100",
-			cached_value: "12",
-			numeric_value: 12,
-			number_format: "0.0%",
-			evidence_id: "source:different",
-			row_label: "Current Price",
-		})) {
-			expect(withoutInferredFinancialContext({ ...corrected, [field]: value }), field).not.toEqual(
-				withoutInferredFinancialContext(cell),
-			);
-		}
-	});
-
-	it("preserves original values, formulas and evidence while inferred annotations evolve", async () => {
+	it("preserves every historical source value and formula without full materialization", async () => {
 		const root = project();
 		const docId = register(root);
 		const prepared = await preparePeDocument(root, { docId });
-		const expectedWarnings = [
-			"文件已上传，16 个公式结果暂时无法读取，相关数据可能不完整。请用 Excel 重新计算并保存后上传；若仍有错误，请检查公式及外部数据。位置：Hidden assumptions!B2、Formula cases!B1、Formula cases!C1、Formula cases!E1、Formula cases!F1 等。",
-		];
-		expect(prepared.warnings).toEqual(expectedWarnings);
 		expect(prepared.document.status).toBe("completed_with_warnings");
-		expect(inspectPeWorkbooks(root, { docId }).workbooks).toEqual([
-			expect.objectContaining({ doc_id: docId, status: "completed_with_warnings" }),
-		]);
-		const readable = readFileSync(prepared.readablePath, "utf8");
-		expect(readable.split("\n").filter((line) => line.startsWith("Warning: "))).toEqual(
-			expectedWarnings.map((warning) => `Warning: ${warning}`),
-		);
+		expect(prepared.warnings).toEqual([expect.stringContaining("16")]);
 		const database = new DatabaseSync(join(root, "meta/collection.sqlite3"));
-		const candidates = database
-			.prepare(
-				"SELECT evidence_id,sheet_name,cell_ref FROM valuation_date_candidates WHERE doc_id=? AND evidence_id IS NOT NULL",
-			)
-			.all(docId);
-		database.close();
-		expect(candidates).toHaveLength(6);
-		for (const candidate of candidates) {
-			const evidence = String(candidate.evidence_id);
-			expect(parseSourceId(evidence)).toEqual({
-				docId,
-				location: { kind: "excel", sheet: candidate.sheet_name, range: candidate.cell_ref },
-			});
-			const preview = await resolvePeEvidenceSource(root, evidence);
-			expect(preview.payload).toMatchObject({
-				kind: "excel",
-				doc_id: docId,
-				sheet_name: candidate.sheet_name,
-				cell_range: candidate.cell_ref,
-			});
+		try {
+			for (const table of ["excel_cells", "excel_formula_references", "metric_facts", "valuation_date_candidates"])
+				expect(database.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE doc_id=?`).get(docId)).toEqual({
+					count: 0,
+				});
+		} finally {
+			database.close();
 		}
-		const actual = financialParitySnapshot(root, docId, tools, prepared.readablePath, expectedWarnings);
-		// Generated with original parser AND original tools at a2870ae2902e1cc52343b9e94e227601839f7fa6.
 		const expected = JSON.parse(readFileSync(join(fixtures, "excel-parity-main.json"), "utf8")) as {
-			readable_sha256: string;
-			tables: Record<string, { count: number; sha256: string }>;
-			inspect: unknown;
-			ranges: unknown[];
-			outputs: { candidates: Record<string, unknown>[]; cross_check_nodes: Record<string, unknown>[] };
-			traces: { root: { sheet_name: string; cell_ref: string } }[];
-			dates: { output_context: { sheet_name: string; cell_ref: string; valuation_output_candidate_id: string } }[];
+			ranges: Array<{ sheet: { name: string }; cell_range: string; cells: ExcelCellDetail[] }>;
 		};
-		// This digest covers every original cell's raw value, cache, formula,
-		// location and citation. Never regenerate it for a semantic parser change.
-		expect(actual.readable_sha256).toBe(expected.readable_sha256);
-		const tables = actual.tables as Record<string, { count: number; sha256: string }>;
-		for (const table of [
-			"excel_sheets",
-			"excel_regions",
-			"excel_defined_names",
-			"excel_formula_references",
-			"valuation_date_candidates",
-		]) {
-			expect(tables[table], table).toEqual(expected.tables[table]);
-		}
-		expect(tables.excel_workbooks.count).toBe(expected.tables.excel_workbooks.count);
-		expect(tables.excel_cells.count).toBe(expected.tables.excel_cells.count);
-		// The old excel_cells/metric_facts hashes embed the incorrect inferred
-		// periods and units. Compare all source fields rather than blessing those
-		// errors or replacing the large historical snapshot.
-		expect(withoutInferredFinancialContext(actual.ranges)).toEqual(withoutInferredFinancialContext(expected.ranges));
-		expect(withoutInferredFinancialContext(actual.inspect)).toEqual(
-			withoutInferredFinancialContext(expected.inspect),
-		);
-		const outputs = locatePeValuationOutputs(root, { docId });
-		for (const candidate of expected.outputs.candidates) {
-			const current = outputs.candidates.find(
-				(item) => item.sheet_name === candidate.sheet_name && item.cell_ref === candidate.cell_ref,
-			);
-			expect(current, `${candidate.sheet_name}!${candidate.cell_ref}`).toBeDefined();
-			if (!current) throw new Error("Missing original output candidate");
-			for (const field of [
-				"candidate_id",
-				"sheet_name",
-				"cell_ref",
-				"display_value",
-				"numeric_value",
-				"formula",
-				"cached_value",
-				"formula_cache_status",
-				"number_format",
-				"evidence_ids",
-				"citations",
-				"markdown_citations",
-			]) {
-				expect(current[field as keyof typeof current], field).toEqual(candidate[field]);
+		for (const previous of expected.ranges) {
+			const current = getPeExcelRange(root, {
+				docId,
+				sheetName: previous.sheet.name,
+				cellRange: previous.cell_range,
+				maxCells: 1000,
+			});
+			const cells = current.cells as ExcelCellDetail[];
+			expect(cells).toHaveLength(previous.cells.length);
+			for (const oldCell of previous.cells) {
+				const cell = cells.find((item) => item.cell_ref === oldCell.cell_ref);
+				expect(cell, `${previous.sheet.name}!${oldCell.cell_ref}`).toBeDefined();
+				for (const key of [
+					"cell_ref",
+					"row_index",
+					"col_index",
+					"raw_value",
+					"numeric_value",
+					"cached_value",
+					"number_format",
+					"is_formula",
+					"formula_type",
+					"formula_cache_status",
+				] as const)
+					expect(cell?.[key], `${previous.sheet.name}!${oldCell.cell_ref}:${key}`).toEqual(oldCell[key]);
+				// A data-table object has attributes rather than an executable expression; raw_value above preserves them.
+				if (oldCell.formula_type !== "data_table") expect(cell?.formula).toEqual(oldCell.formula);
+				expect(parseSourceId(cell?.evidence_id ?? "")).toEqual({
+					docId,
+					location: { kind: "excel", sheet: previous.sheet.name, range: oldCell.cell_ref },
+				});
 			}
 		}
-		for (const node of expected.outputs.cross_check_nodes) {
-			expect(outputs.cross_check_nodes).toEqual(expect.arrayContaining([expect.objectContaining(node)]));
-		}
-		// Trace and date evidence are checked against explicit historical roots;
-		// a broader output inventory is allowed to change which root ranks first.
-		const traces = expected.traces.map(({ root: node }) =>
-			tools.tracePeFormula(root, { docId, sheetName: node.sheet_name, cellRef: node.cell_ref }),
-		);
-		expect(withoutInferredFinancialContext(traces)).toEqual(withoutInferredFinancialContext(expected.traces));
-		const dates = expected.dates.map(({ output_context: context }) =>
-			tools.resolvePeValuationDate(root, {
-				docId,
-				outputSheet: context.sheet_name,
-				outputCellRef: context.cell_ref,
-				outputCandidateId: context.valuation_output_candidate_id,
-			}),
-		);
-		expect(withoutInferredFinancialContext(dates)).toEqual(withoutInferredFinancialContext(expected.dates));
+		const longNote = getPeExcelRange(root, { docId, sheetName: "Valuation", cellRange: "A10" })
+			.cells as ExcelCellDetail[];
+		expect(longNote[0].display_value).toHaveLength(5120);
+		expect(tracePeFormula(root, { docId, sheetName: "Valuation", cellRef: "B7" })).toMatchObject({
+			complete: true,
+			node_count: 4,
+		});
+		expect(inspectPeWorkbooks(root, { docId })).toMatchObject({
+			workbooks: [expect.objectContaining({ sheet_count: 7, formula_count: 19 })],
+		});
 	}, 30_000);
 
 	it("resolves blank ranges, old versions and legacy cells after every disposable cache is removed", async () => {
 		const root = project();
 		const firstId = register(root);
 		const first = await preparePeDocument(root, { docId: firstId });
+		const cell = (
+			getPeExcelRange(root, { docId: firstId, sheetName: "Valuation", cellRange: "B3" }).cells as ExcelCellDetail[]
+		)[0];
+		// Existing pre-reader citations retain their durable location after disposable tables disappear.
 		const database = new DatabaseSync(join(root, "meta/collection.sqlite3"));
-		const cell = database
-			.prepare("SELECT cell_id FROM excel_cells WHERE doc_id=? AND sheet_name='Valuation' AND cell_ref='B3'")
-			.get(firstId);
+		database
+			.prepare("INSERT INTO evidence_locations(evidence_id,doc_id,sheet_name,cell_range) VALUES(?,?,?,?)")
+			.run(`cell:${cell.cell_id}`, firstId, "Valuation", "B3");
 		database.close();
 		const newFile = join(root, "next.xlsx");
 		const generated = spawnSync(excelPython(), [join(fixtures, "create_excel_parity.py"), newFile, "900"], {

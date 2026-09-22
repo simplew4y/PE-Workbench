@@ -16,6 +16,8 @@ const retrievalTools = [
 	"pe_pdf_read",
 	"pe_document_open",
 	"pe_workbook_inspect",
+	"pe_workbook_search",
+	"pe_excel_render",
 	"pe_excel_range",
 	"pe_source_detail",
 ];
@@ -23,6 +25,26 @@ const modelTools = ["pe_formula_trace", "pe_valuation_output_locate", "pe_valuat
 
 // Package-owned paths: models select IDs, never executable paths.
 export const PE_CAPABILITIES: readonly PeCapability[] = [
+	{
+		id: "pe-financial-model-reader",
+		description: "定向读取工作簿的原值、公式、批注与格式，不做投资判断",
+		files: ["pe-financial-model-reader/SKILL.md"],
+		tools: ["pe_workbook_inspect", "pe_workbook_search", "pe_excel_range", "pe_formula_trace", "pe_excel_render"],
+	},
+	{
+		id: "pe-financial-model-understanding",
+		description: "从预测结果追到独立假设，解释收入、成本、现金流和估值的实际建模逻辑",
+		dependencies: ["pe-financial-model-reader"],
+		files: ["pe-financial-model-understanding/SKILL.md"],
+		tools: [],
+	},
+	{
+		id: "pe-investment-research",
+		description: "把模型假设和其他证据变成待验证的投资判断、反证条件与跟踪问题",
+		dependencies: ["pe-financial-model-understanding"],
+		files: ["pe-investment-research/SKILL.md"],
+		tools: ["pe_investment_framework", "pe_trusted_source"],
+	},
 	{
 		id: "pe-document-retrieval",
 		description: "检索项目 PDF、Excel、Office 和文本",
@@ -32,6 +54,7 @@ export const PE_CAPABILITIES: readonly PeCapability[] = [
 	{
 		id: "pe-valuation-model-explainer",
 		description: "解释估值模型、截图或公式；按需读取核验参考",
+		dependencies: ["pe-financial-model-understanding"],
 		files: ["pe-valuation-model-explainer/SKILL.md"],
 		tools: modelTools,
 	},

@@ -61,6 +61,8 @@ describe("PE system prompt", () => {
 			expect(registered.includes("pe_consensus_cards")).toBe(enabled);
 			expect(buildPeSystemPrompt("/workspace").includes("- pe_consensus_cards:")).toBe(enabled);
 			expect(discover?.().skillPaths.some((path) => path.includes("pe-consensus-divergence"))).toBe(enabled);
+			expect(discover?.().skillPaths.some((path) => path.includes("pe-financial-model-reader"))).toBe(true);
+			expect(discover?.().skillPaths.some((path) => path.includes("pe-valuation-model-explainer"))).toBe(true);
 			expect(registered).toEqual(expect.arrayContaining(["pe_pdf_list", "pe_pdf_search", "pe_excel_range"]));
 		},
 	);
@@ -144,6 +146,9 @@ describe("PE system prompt", () => {
 				});
 				const expected = [
 					"pe-document-retrieval",
+					"pe-financial-model-reader",
+					"pe-financial-model-understanding",
+					"pe-investment-research",
 					"pe-generative-ui",
 					"pe-memo",
 					"pe-research-note",
@@ -196,15 +201,19 @@ describe("PE system prompt", () => {
 		} as unknown as ExtensionAPI);
 		const entrypoints = ["pe-document-retrieval", "pe-valuation-model-explainer", "pe-valuation-report"];
 		const visited = new Set<string>();
+		// These entrypoints are registered by the web host and the restricted research engine.
+		const otherEntrypoints = new Set(["pe_session_workbook", "pe_research_read", "pe_research_submit"]);
 		const inspect = (path: string): void => {
 			if (visited.has(path)) return;
 			visited.add(path);
 			expect(existsSync(path), path).toBe(true);
 			const content = readFileSync(path, "utf8");
-			for (const name of content.match(/\bpe_[a-z_]+\b/g) ?? []) expect(registered.has(name), name).toBe(true);
+			for (const name of content.match(/\bpe_[a-z_]+\b/g) ?? [])
+				expect(registered.has(name) || otherEntrypoints.has(name), name).toBe(true);
 			for (const match of content.matchAll(/\]\(([^)]+\.md)\)/g)) inspect(resolve(dirname(path), match[1]));
 		};
 		for (const name of entrypoints) inspect(join(skillsRoot, name, "SKILL.md"));
-		expect(visited.size).toBe(6);
+		for (const skill of ["pe-financial-model-reader", "pe-financial-model-understanding", "pe-investment-research"])
+			expect(visited.has(join(skillsRoot, skill, "SKILL.md"))).toBe(true);
 	});
 });

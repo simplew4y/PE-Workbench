@@ -9,6 +9,7 @@ import {
 	type StockTrackerSummary,
 	saveStockTrackerWithSources,
 } from "../tracking.ts";
+import { workbookFactContextSchema } from "../workbook-context.ts";
 import { openPeDataset } from "./database.ts";
 
 const date = Type.String({ pattern: "^\\d{4}-\\d{2}-\\d{2}$", description: "An absolute calendar date, YYYY-MM-DD." });
@@ -97,11 +98,12 @@ const config = Type.Object({
 			cell: Type.String({ pattern: "^[A-Z]{1,3}[1-9][0-9]{0,6}$" }),
 			label: Type.String({ minLength: 1, maxLength: 200 }),
 			period: Type.String({ minLength: 1, maxLength: 200 }),
+			context: Type.Optional(workbookFactContextSchema),
 			unit: Type.String({
 				minLength: 1,
 				maxLength: 200,
 				description:
-					"Exact source-cell unit, explicitly the stock currency per share; e.g. HKD/share. Unknown currency or total earnings cannot be guessed.",
+					"Agent-interpreted unit supported by context.unit, explicitly the stock currency per share; e.g. HKD/share. Cite the original unit text or number format.",
 			}),
 			multipliers: Type.Object(scenarios),
 			minValue: value,

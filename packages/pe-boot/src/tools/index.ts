@@ -8,6 +8,7 @@ import { peDatasetSearchTool } from "./dataset-search.ts";
 import { peDocumentOpenTool } from "./document-open.ts";
 import { peEvidenceDetailTool } from "./evidence-detail.ts";
 import { peExcelRangeTool } from "./excel-range.ts";
+import { peExcelRenderTool } from "./excel-render.ts";
 import { isPeConsensusEnabled } from "./feature-flags.ts";
 import { peFormulaTraceTool } from "./formula-trace.ts";
 import { peFrameworkTool } from "./framework.ts";
@@ -25,6 +26,7 @@ import { peValuationDateTool } from "./valuation-date.ts";
 import { peValuationOutputTool } from "./valuation-output.ts";
 import { peValuationReportTool } from "./valuation-report.ts";
 import { peWorkbookInspectTool } from "./workbook-inspect.ts";
+import { peWorkbookSearchTool } from "./workbook-search.ts";
 
 //注册所有pe工具
 export function registerPeTools(pi: ExtensionAPI, options: PeCapabilityOptions = {}): void {
@@ -40,6 +42,8 @@ export function registerPeTools(pi: ExtensionAPI, options: PeCapabilityOptions =
 	pi.registerTool(pePdfReadTool);
 	pi.registerTool(peDocumentOpenTool);
 	pi.registerTool(peWorkbookInspectTool);
+	pi.registerTool(peWorkbookSearchTool);
+	pi.registerTool(peExcelRenderTool);
 	pi.registerTool(peExcelRangeTool);
 	pi.registerTool(peFormulaTraceTool);
 	pi.registerTool(peSourceDetailTool);

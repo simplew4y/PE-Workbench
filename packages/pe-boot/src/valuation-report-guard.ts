@@ -6,6 +6,8 @@ import { openPeDataset, type SqlRow } from "./tools/database.ts";
 const WORKBOOK_TOOLS = new Set([
 	"pe_document_open",
 	"pe_workbook_inspect",
+	"pe_workbook_search",
+	"pe_excel_render",
 	"pe_excel_range",
 	"pe_formula_trace",
 	"pe_valuation_output_locate",
@@ -121,6 +123,14 @@ function isOverviewRequest(text: string, imageCount: number): boolean {
 		);
 	// Creating/refreshing a tracker may require model analysis, but is not itself an overall valuation report.
 	if (trackingOperation && !explicitReport) return false;
+	// Mechanics and framework research have their own deliverables, not a valuation-report gate.
+	if (
+		!explicitReport &&
+		/(?:投资框架|建模逻辑|预测逻辑|独立假设|底层假设|预测.{0,8}(?:怎么|如何)|怎么.{0,8}预测)|\b(?:investment framework|model mechanics|forecast logic|independent assumptions)\b/iu.test(
+			text,
+		)
+	)
+		return false;
 	if (imageCount > 0 && !/(?:excel|工作簿|\.xlsx\b|\.xlsm\b)/iu.test(text)) return false;
 	if (
 		/(?:比较|对比|compare|comparison).{0,40}(?:模型|工作簿|workbooks?|models?)|(?:多个|两个|两份|多份|multiple|two|both).{0,20}(?:模型|工作簿|models?|workbooks?)/iu.test(

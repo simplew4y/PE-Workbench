@@ -60,6 +60,22 @@ const pinned = (messages: AgentMessage[]) =>
 	messages.filter((message) => message.role === "custom" && message.customType === "pe-capability-instructions");
 
 describe("PE capability runtime", () => {
+	it("loads model understanding and research without report instructions or widening a read-only host", async () => {
+		const allowed = ["pe_load_capability", "pe_excel_range", "pe_formula_trace"];
+		const h = await setup({}, { allowedToolNames: allowed });
+		h.setResponses([
+			load(["pe-investment-research", "pe-financial-model-understanding"]),
+			fauxAssistantMessage("done"),
+		]);
+		await h.session.prompt("Explain forecasts and prepare research questions");
+		const instructions = getMessageText(pinned(await h.session.extensionRunner.emitContext(h.session.messages))[0]);
+		for (const name of ["pe-financial-model-reader", "pe-financial-model-understanding", "pe-investment-research"])
+			expect(instructions.match(new RegExp(`<workflow_file path=.*${name}/SKILL.md`, "g"))).toHaveLength(1);
+		expect(instructions).not.toContain("pe-valuation-report/SKILL.md");
+		expect(h.session.getActiveToolNames().sort()).toEqual([...allowed].sort());
+		expect(h.eventsOfType("tool_execution_end").every((event) => !event.isError)).toBe(true);
+	});
+
 	it("delays UI schemas, then adds the native tool and its instructions on the next real agent turn", async () => {
 		const h = await setup();
 		expect(h.session.getActiveToolNames()).not.toContain("pe_render_ui");

@@ -8,7 +8,7 @@ export const peDocumentOpenTool = defineTool({
 	name: "pe_document_open",
 	label: "PE Document Open",
 	description:
-		"Open one uploaded Excel, text, CSV, DOCX, or PPTX file by filename or immutable doc_id. Reuses Excel upload processing or prepares a disposable text view with versioned source citations. Rebuilds missing caches. Use native read/grep on readable_path. Use pe_pdf_search and pe_pdf_read for PDFs.",
+		"Open one uploaded Excel, text, CSV, DOCX, or PPTX file by filename or immutable doc_id. Returns Excel navigation or a disposable text view for other formats with versioned source citations. Rebuilds missing caches. For Excel use pe_workbook_search and pe_excel_range; readable_path contains navigation only. For other formats use read/grep. Use pe_pdf_search and pe_pdf_read for PDFs.",
 	promptSnippet:
 		"Prepare one selected workbook or text/Office document for native read/grep, with citations pinned to its original version and location",
 	parameters: Type.Object({
@@ -33,8 +33,9 @@ export const peDocumentOpenTool = defineTool({
 			filename: sourceFilename(prepared.document),
 			readable_path: relative(ctx.cwd, prepared.readablePath).replaceAll("\\", "/"),
 			warnings: prepared.warnings,
-			next_step:
-				"Use native read or grep (or bash with rg) on readable_path. Copy exact source citation links beside material claims. Use pe_source_detail to verify a location; use pe_excel_range for workbook cell values and formulas.",
+			next_step: ["xlsx", "xlsm"].includes(String(prepared.document.file_type))
+				? "readable_path contains navigation only. Search with pe_workbook_search, then use pe_excel_range and pe_formula_trace on the original workbook. Continue paginated results; infer periods and units from cited source context."
+				: "Use native read or grep on readable_path. Copy exact source citation links beside material claims. Use pe_source_detail to verify a location.",
 		};
 		return { content: [{ type: "text", text: JSON.stringify(result) }], details: result };
 	},

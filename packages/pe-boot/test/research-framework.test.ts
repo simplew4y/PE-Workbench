@@ -1,4 +1,5 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -144,42 +145,73 @@ describe("investment framework persistence", () => {
 	});
 	it("reads selected PDF and Excel versions, validates citations and detects changed preparation", () => {
 		const cwd = project();
+		const workbookBytes = readFileSync(new URL("./fixtures/excel-parity.xlsx", import.meta.url));
+		mkdirSync(join(cwd, "raw"));
+		writeFileSync(join(cwd, "raw/report.xlsx"), workbookBytes);
 		withResearchDatabase(cwd, datasetId, (db) => {
 			for (const [id, extension] of [
 				["pdf", "pdf"],
 				["excel", "xlsx"],
 			]) {
 				db.prepare(
-					"INSERT INTO documents(doc_id,dataset_id,original_filename,filename_key,sha256,file_type,status,created_at,updated_at) VALUES(?,?,?,?,?,?,'completed','before','before')",
-				).run(id, datasetId, `report.${extension}`, `report.${extension}`, id, extension);
+					"INSERT INTO documents(doc_id,dataset_id,original_filename,filename_key,sha256,file_type,raw_path,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,'completed','before','before')",
+				).run(
+					id,
+					datasetId,
+					`report.${extension}`,
+					`report.${extension}`,
+					id === "excel" ? createHash("sha256").update(workbookBytes).digest("hex") : id,
+					extension,
+					`raw/report.${extension}`,
+				);
 			}
 			db.exec(
 				"INSERT INTO pdf_pages VALUES('page','pdf',1,'原始研报文本','p1','body','{}','good','{}',100,100,0,'[]',0,0,0)",
 			);
-			db.prepare(
-				"INSERT INTO excel_cells(cell_id,dataset_id,doc_id,sheet_name,cell_ref,row_index,col_index,value_type,numeric_value,display_value) VALUES('cell',?,'excel','预测','B2',2,2,'number',42,'42')",
-			).run(datasetId);
 		});
 		const job = enqueueResearchJob(cwd, datasetId, "分析", ["pdf", "excel"], "evidence", null);
-		const pdfId = sourceId({
-			docId: "pdf",
-			location: { kind: "pdf", pageStart: 1, pageEnd: 1 },
-		});
-		const excelId = sourceId({
-			docId: "excel",
-			location: { kind: "excel", sheet: "预测", range: "B2" },
-		});
+		const pdfId = sourceId({ docId: "pdf", location: { kind: "pdf", pageStart: 1, pageEnd: 1 } });
+		const excelId = sourceId({ docId: "excel", location: { kind: "excel", sheet: "Valuation", range: "B7" } });
 		expect(readResearchInput(cwd, datasetId, job.input, { docId: "pdf", page: 1 })).toMatchObject({
 			text: "原始研报文本",
 			evidenceId: pdfId,
 		});
 		expect(
-			readResearchInput(cwd, datasetId, job.input, {
-				docId: "excel",
-				sheet: "预测",
-				range: "B2",
-			}),
-		).toMatchObject({ cells: [{ numeric_value: 42, evidence_id: excelId }] });
+			readResearchInput(cwd, datasetId, job.input, { docId: "excel", sheet: "Valuation", range: "B7" }),
+		).toMatchObject({ cells: [{ numeric_value: 120, formula: "=B5/10", evidence_id: excelId }] });
+		for (const status of ["processing", "failed"]) {
+			withResearchDatabase(cwd, datasetId, (db) =>
+				db
+					.prepare(
+						"UPDATE documents SET updated_at='cache-rebuilt',parser_version='new-cache',status=? WHERE doc_id='excel'",
+					)
+					.run(status),
+			);
+			expect(
+				readResearchInput(cwd, datasetId, job.input, {
+					docId: "excel",
+					action: "read",
+					sheet: "Valuation",
+					range: "B7",
+				}),
+			).toMatchObject({ cells: [{ numeric_value: 120, evidence_id: excelId }] });
+		}
+		withResearchDatabase(cwd, datasetId, (db) =>
+			db.exec("UPDATE documents SET version_no=version_no+1 WHERE doc_id='excel'"),
+		);
+		expect(() => readResearchInput(cwd, datasetId, job.input, { docId: "excel" })).toThrow("changed");
+		withResearchDatabase(cwd, datasetId, (db) =>
+			db.exec("UPDATE documents SET version_no=version_no-1,sha256='different-source' WHERE doc_id='excel'"),
+		);
+		expect(() => readResearchInput(cwd, datasetId, job.input, { docId: "excel" })).toThrow("changed");
+		withResearchDatabase(cwd, datasetId, (db) =>
+			db
+				.prepare("UPDATE documents SET sha256=? WHERE doc_id='excel'")
+				.run(createHash("sha256").update(workbookBytes).digest("hex")),
+		);
+		writeFileSync(join(cwd, "raw/report.xlsx"), Buffer.concat([workbookBytes, Buffer.from("changed")]));
+		expect(() => readResearchInput(cwd, datasetId, job.input, { docId: "excel" })).toThrow("changed");
+		writeFileSync(join(cwd, "raw/report.xlsx"), workbookBytes);
 		const verified = {
 			...content,
 			items: [

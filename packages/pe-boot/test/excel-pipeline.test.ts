@@ -76,7 +76,7 @@ afterEach(() => {
 });
 
 describe("Excel preparation and tools", () => {
-	it("parses once into human-readable artifacts without chunks", async () => {
+	it("prepares navigation once and reads formulas from the source", async () => {
 		const { root, workbook } = fixture();
 		const registered = registerPeDocuments(root, "dataset-excel", [{ name: "估值模型.xlsx", bytes: workbook }]);
 		const docId = String(registered.documents[0].doc_id);
@@ -88,9 +88,10 @@ describe("Excel preparation and tools", () => {
 		expect(concurrent.cachePath).toBe(prepared.cachePath);
 		expect(prepared.readablePath).toBe(join(dirname(prepared.cachePath), "readable.txt"));
 		expect(prepared.document.status).toBe("completed_with_warnings");
-		expect(prepared.warnings).toContainEqual(expect.stringContaining("1 个公式结果暂时无法读取"));
-		expect(prepared.warnings).toContainEqual(expect.stringContaining("估值模型!B4"));
-		expect(readFileSync(prepared.readablePath, "utf8")).toContain("估值模型!B4");
+		expect(prepared.warnings).toContainEqual(expect.stringContaining("公式"));
+		expect(readFileSync(prepared.readablePath, "utf8")).toContain("估值模型");
+		expect(readFileSync(prepared.readablePath, "utf8")).not.toContain("=B2*B3");
+		expect(existsSync(join(dirname(prepared.cachePath), "text-index.json"))).toBe(true);
 
 		const database = openPeCollectionDatabase(join(root, "meta", "collection.sqlite3"));
 		try {
@@ -99,7 +100,10 @@ describe("Excel preparation and tools", () => {
 			});
 			expect(
 				database.prepare("SELECT COUNT(*) AS count FROM excel_formula_references WHERE doc_id=?").get(docId),
-			).toEqual({ count: 2 });
+			).toEqual({ count: 0 });
+			expect(database.prepare("SELECT COUNT(*) AS count FROM excel_cells WHERE doc_id=?").get(docId)).toEqual({
+				count: 0,
+			});
 			expect(database.prepare("SELECT attempt,status FROM processing_jobs WHERE doc_id=?").get(docId)).toEqual({
 				attempt: 1,
 				status: "completed",
@@ -107,8 +111,7 @@ describe("Excel preparation and tools", () => {
 			const dateEvidence = database
 				.prepare("SELECT evidence_id FROM valuation_date_candidates WHERE doc_id=? AND evidence_id IS NOT NULL")
 				.all(docId) as Array<{ evidence_id: string }>;
-			expect(dateEvidence.length).toBeGreaterThan(0);
-			expect(dateEvidence.every((row) => parseSourceId(row.evidence_id) !== undefined)).toBe(true);
+			expect(dateEvidence).toEqual([]);
 			expect(database.prepare("SELECT 1 FROM sqlite_master WHERE name='chunks'").get()).toBeUndefined();
 		} finally {
 			database.close();
@@ -136,27 +139,24 @@ describe("Excel preparation and tools", () => {
 		expect(trace.nodes.map((node) => node.cell_ref)).toEqual(expect.arrayContaining(["B2", "B3", "B4"]));
 		expect(trace.edges).toHaveLength(2);
 
-		const valuation = locatePeValuationOutputs(root, { docId });
-		const targetPrice = valuation.candidates.find((candidate) => candidate.cell_ref === "B4");
+		const valuation = locatePeValuationOutputs(root, { docId, query: "目标价" });
+		const targetPrice = valuation.matches.find((candidate) => candidate.cell_ref === "A4");
 		expect(targetPrice).toMatchObject({
-			semantic_role: "target_price",
 			sheet_name: "估值模型",
-			formula: "=B2*B3",
+			raw_value: "目标价",
 		});
-		expect(parseSourceId(targetPrice?.evidence_ids[0] ?? "")).toEqual({
+		expect(parseSourceId(targetPrice?.evidence_id ?? "")).toEqual({
 			docId,
-			location: { kind: "excel", sheet: "估值模型", range: "B4" },
+			location: { kind: "excel", sheet: "估值模型", range: "A4" },
 		});
 
-		const valuationDate = resolvePeValuationDate(root, { docId });
-		expect(valuationDate).toMatchObject({
-			valuation_date: "2026-09-07",
-			selected_role: "valuation_date",
-		});
+		const valuationDate = resolvePeValuationDate(root, { docId, query: "估值日" });
+		expect(valuationDate.source_cells).toEqual([expect.objectContaining({ cell_ref: "D1", raw_value: "估值日" })]);
+		expect(valuationDate.valuation_date).toBeUndefined();
 		const validation = validatePeModel(root, { docId });
 		expect(validation).toMatchObject({
 			dataset_id: "dataset-excel",
-			document: { doc_id: docId, filename: "估值模型.xlsx" },
+			document: { doc_id: docId },
 			valuation_output_validation: { status: "not_run" },
 			valuation_date_validation: { status: "not_run" },
 			calculation_validation: { status: "not_run", cached_values_recalculated: false },

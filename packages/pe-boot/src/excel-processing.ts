@@ -47,6 +47,7 @@ interface WorkbookResult {
 	tables: Record<ExcelTable, SqlRow[]>;
 	blocks?: DocumentBlock[];
 	text?: string;
+	navigation?: Record<string, unknown>;
 }
 
 interface DocumentBlock {
@@ -65,6 +66,7 @@ interface WorkbookManifest {
 	row_counts: Record<ExcelTable, number>;
 	workbook_sha256: string;
 	readable_sha256: string;
+	text_index_sha256?: string;
 }
 
 export interface PreparedWorkbook {
@@ -101,14 +103,13 @@ export async function verifyPeOriginal(filePath: string, checksum: string, signa
 }
 
 export function excelParserRevision(): string {
-	const hash = createHash("sha256").update("pe-excel-json-v1\0readable-utf8-v4\0");
+	const hash = createHash("sha256").update("pe-workbook-reader-v1\0");
 	for (const filename of [
 		"parse_workbook.py",
 		"validate_workbook.py",
-		"workbook.py",
+		"workbook_reader.py",
+		"render_workbook.py",
 		"excel_formula_parser.py",
-		"excel_units.py",
-		"excel_date_candidates.py",
 		"requirements.txt",
 	])
 		hash.update(readFileSync(join(readerRoot, filename)));
@@ -129,7 +130,7 @@ function validateResult(value: unknown, document: SqlRow, revision: string, data
 		value.revision !== revision ||
 		value.source_sha256 !== document.sha256 ||
 		(excel
-			? value.parser_name !== "openpyxl" || value.parser_version !== "3.1.5"
+			? value.parser_name !== "workbook_reader" || value.parser_version !== "1"
 			: value.parser_version !== "1" ||
 				value.parser_name !== (["docx", "pptx"].includes(String(document.file_type)) ? "stdlib_ooxml" : "text")) ||
 		typeof value.document_date !== "string" ||
@@ -180,19 +181,13 @@ function validateResult(value: unknown, document: SqlRow, revision: string, data
 	}
 	const result = value as unknown as WorkbookResult;
 	if (result.tables.excel_workbooks.length !== 1) throw new Error("Parser must return exactly one workbook");
-	const sheets = new Set(result.tables.excel_sheets.map((row) => row.sheet_name));
-	const cells = new Set<string>();
-	for (const row of result.tables.excel_cells) {
-		const expected = createHash("sha256")
-			.update(`${document.doc_id}\0${row.sheet_name}\0${row.cell_ref}`)
-			.digest("hex")
-			.slice(0, 40);
-		if (row.cell_id !== expected || !sheets.has(row.sheet_name) || cells.has(expected))
-			throw new Error("Invalid workbook cell identity");
-		cells.add(expected);
-	}
-	for (const row of result.tables.excel_formula_references)
-		if (!cells.has(String(row.source_cell_id))) throw new Error("Formula reference has no source cell");
+	for (const table of [
+		"excel_cells",
+		"excel_formula_references",
+		"valuation_date_candidates",
+		"metric_facts",
+	] as const)
+		if (result.tables[table].length) throw new Error(`Navigation preparation must not materialize ${table}`);
 	return result;
 }
 
@@ -222,7 +217,10 @@ function cachedWorkbook(
 			realpathSync(readablePath) !== readablePath
 		)
 			return undefined;
-		const workbookPath = join(generationDirectory, "workbook.json");
+		const workbookPath = join(
+			generationDirectory,
+			document.file_type === "xlsx" || document.file_type === "xlsm" ? "navigation.json" : "workbook.json",
+		);
 		if (realpathSync(workbookPath) !== workbookPath) return undefined;
 		const manifest: unknown = JSON.parse(readFileSync(cachePath, "utf8"));
 		if (
@@ -243,6 +241,14 @@ function cachedWorkbook(
 			createHash("sha256").update(readFileSync(readablePath)).digest("hex") !== manifest.readable_sha256
 		)
 			return undefined;
+		if (document.file_type === "xlsx" || document.file_type === "xlsm") {
+			const textIndex = join(generationDirectory, "text-index.json");
+			if (
+				realpathSync(textIndex) !== textIndex ||
+				createHash("sha256").update(readFileSync(textIndex)).digest("hex") !== manifest.text_index_sha256
+			)
+				return undefined;
+		}
 		for (const table of EXCEL_TABLES) {
 			const count = database
 				.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE doc_id=?`)
@@ -332,6 +338,8 @@ function runParser(
 		"--modified-at",
 		statSync(filePath).mtime.toISOString(),
 	];
+	if (document.file_type === "xlsx" || document.file_type === "xlsm")
+		args.push("--text-index-output", join(dirname(output), "text-index.json"));
 	return new Promise((resolveParser, reject) => {
 		signal.throwIfAborted();
 		const child = spawn(excelPython(), args, { stdio: ["ignore", "ignore", "pipe"] });
@@ -397,6 +405,15 @@ function publish(
 				.get(document.doc_id, document.sha256)
 		)
 			throw new Error("Workbook version was removed during preparation");
+		// Preserve historical citation locations before replacing the old materialized tables.
+		for (const [table, prefix, id] of [
+			["excel_cells", "cell", "cell_id"],
+			["metric_facts", "fact", "fact_id"],
+		] as const)
+			database
+				.prepare(`INSERT OR IGNORE INTO evidence_locations (evidence_id,doc_id,sheet_name,cell_range)
+				SELECT ? || ':' || ${id},doc_id,sheet_name,cell_ref FROM ${table} WHERE doc_id=?`)
+				.run(prefix, document.doc_id);
 		for (const table of [...EXCEL_TABLES].reverse())
 			database.prepare(`DELETE FROM ${table} WHERE doc_id=?`).run(document.doc_id);
 		for (const table of EXCEL_TABLES) {
@@ -408,13 +425,6 @@ function publish(
 			);
 			for (const row of rows) statement.run(...columns.map((column) => row[column] ?? null));
 		}
-		const evidence = database.prepare(
-			"INSERT OR IGNORE INTO evidence_locations (evidence_id,doc_id,sheet_name,cell_range) VALUES (?,?,?,?)",
-		);
-		for (const row of result.tables.excel_cells)
-			evidence.run(`cell:${row.cell_id}`, document.doc_id, row.sheet_name, row.cell_ref);
-		for (const row of result.tables.metric_facts)
-			evidence.run(`fact:${row.fact_id}`, document.doc_id, row.sheet_name, row.cell_ref);
 		const rel = (file: string) => relative(workspaceRoot, join(directory, file)).replaceAll("\\", "/");
 		const now = new Date().toISOString();
 		database
@@ -525,7 +535,7 @@ export async function prepareWorkbook(
 		}
 		stage = join(directory, `.${ownerId}.tmp`);
 		mkdirSync(stage);
-		const output = join(stage, "workbook.json");
+		const output = join(stage, excel ? "navigation.json" : "workbook.json");
 		await runParser(filePath, output, document, revision, controller.signal);
 		controller.signal.throwIfAborted();
 		const result = validateResult(JSON.parse(readFileSync(output, "utf8")) as unknown, document, revision, database);
@@ -536,20 +546,6 @@ export async function prepareWorkbook(
 		];
 		for (const sheet of result.tables.excel_sheets)
 			lines.push(`Sheet: ${sheet.sheet_name} | ${sheet.used_range || "empty"} | ${sheet.sheet_state}`);
-		for (const cell of [...result.tables.excel_cells].sort(
-			(left, right) =>
-				Buffer.compare(
-					Buffer.from(String(left.sheet_name), "utf8"),
-					Buffer.from(String(right.sheet_name), "utf8"),
-				) ||
-				Number(left.row_index) - Number(right.row_index) ||
-				Number(left.col_index) - Number(right.col_index),
-		)) {
-			const row: SqlRow = { ...document, ...cell };
-			lines.push(
-				`${document.original_filename} ${cell.sheet_name}!${cell.cell_ref} | value=${JSON.stringify(cell.raw_value ?? "")} | cached=${JSON.stringify(cell.cached_value ?? "")} | formula=${JSON.stringify(cell.formula ?? "")} | ${sourceMarkdownCitation(row, sourceEvidenceId(row))}`,
-			);
-		}
 		if (result.text !== undefined) {
 			for (const [index, line] of result.text.split("\n").entries()) {
 				const row = { ...document, line_start: index + 1, line_end: index + 1 };
@@ -577,6 +573,13 @@ export async function prepareWorkbook(
 			>,
 			workbook_sha256: createHash("sha256").update(readFileSync(output)).digest("hex"),
 			readable_sha256: createHash("sha256").update(readable).digest("hex"),
+			...(excel
+				? {
+						text_index_sha256: createHash("sha256")
+							.update(readFileSync(join(stage, "text-index.json")))
+							.digest("hex"),
+					}
+				: {}),
 		};
 		writeFileSync(join(stage, "manifest.json"), JSON.stringify(manifest), { flag: "wx", mode: 0o600 });
 		// Generations are immutable. Only the transaction below changes the visible pointer.

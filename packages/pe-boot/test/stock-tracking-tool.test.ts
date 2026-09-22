@@ -15,6 +15,7 @@ import {
 	saveStockTrackerWithSources,
 	trackingMarketClock,
 } from "../src/tracking.ts";
+import { writeWorkbookFixture } from "./workbook-source-fixture.ts";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -40,12 +41,16 @@ function fixture() {
 		);
 		insert.run("model", datasetId, "model.xlsx", "series_model", "2026-01-01", "2026-01-01");
 		db.prepare(
-			"INSERT INTO excel_cells(cell_id,dataset_id,doc_id,sheet_name,cell_ref,row_index,col_index,value_type,numeric_value,row_label,period,unit) VALUES('model_cell',?,'model','Valuation','B2',2,2,'number',10,'EPS','2027E','HKD/share')",
-		).run(datasetId);
-		db.prepare(
 			"INSERT INTO documents(doc_id,dataset_id,original_filename,file_type,status,created_at,updated_at) VALUES('notes',?,'notes.md','md','completed','2026-01-01','2026-01-01')",
 		).run(datasetId);
 	});
+	writeWorkbookFixture(cwd, "model", [
+		{ sheet: "Valuation", cell: "A2", value: "EPS" },
+		{ sheet: "Valuation", cell: "B1", value: "2027E" },
+		{ sheet: "Valuation", cell: "B2", value: 10 },
+		{ sheet: "Valuation", cell: "C2", value: "HKD/share" },
+		{ sheet: "Cover", cell: "A1", value: "Tencent 0700.HK" },
+	]);
 	const basis = {
 		summary: "原模型EPS为10 HKD/股；8/10/12倍及观察期限为分析师情景假设。",
 		evidenceIds: [sourceId({ docId: "model", location: { kind: "excel", sheet: "Valuation", range: "B2" } })],
@@ -65,6 +70,11 @@ function fixture() {
 			label: "EPS",
 			period: "2027E",
 			unit: "HKD/share",
+			context: {
+				label: { sheet: "Valuation", cell: "A2", text: "EPS" },
+				period: { sheet: "Valuation", cell: "B1", text: "2027E" },
+				unit: { sheet: "Valuation", cell: "C2", text: "HKD/share" },
+			},
 			multipliers: { bear: 8, base: 10, bull: 12 },
 			minValue: 1,
 			maxValue: 20,
@@ -150,14 +160,7 @@ it("lets the agent discover its project documents and configure sourced rules wi
 });
 
 it("lets the agent create market tracking from identity evidence without inventing model targets", async () => {
-	const { config, run, cwd, datasetId } = fixture();
-	withResearchDatabase(cwd, datasetId, (db) =>
-		db
-			.prepare(
-				"INSERT INTO excel_cells(cell_id,dataset_id,doc_id,sheet_name,cell_ref,row_index,col_index,value_type,raw_value) VALUES('identity',?,'model','Cover','A1',1,1,'text','Tencent 0700.HK')",
-			)
-			.run(datasetId),
-	);
+	const { config, run } = fixture();
 	const basis = {
 		summary: "公司封面确认证券；模型无目标价",
 		evidenceIds: [sourceId({ docId: "model", location: { kind: "excel", sheet: "Cover", range: "A1" } })],
