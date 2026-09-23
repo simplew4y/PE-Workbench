@@ -101,6 +101,21 @@ it("renders one cell as a short line instead of a ~1 KB record and keeps the evi
 	expect(withoutIds.summary.bytes).toBeLessThan(rendered.summary.bytes / 2);
 });
 
+it("tells attachment readers to cite by coordinates instead of inventing evidence ids", () => {
+	const raw = { ...syntheticCell(0, true) } as Record<string, unknown>;
+	delete raw.evidence_id;
+	delete raw.markdown_citation;
+	delete raw.cell_id;
+	const rendered = formatWorkbookCellsText(
+		{ attachment_id: "att-1", cells: [raw], matching_cell_count: 1, offset: 0, complete: true },
+		{ filename: "att-1", includeEvidenceIds: false, citation: "coordinates" },
+	);
+	expect(rendered.text).toContain('cite cells as "att-1 <sheet>!<cell>"; this attachment has no project evidence ids');
+	expect(rendered.text).not.toContain("include_evidence_ids");
+	expect(rendered.text).not.toContain("evidence_id");
+	expect(rendered.text).toContain("B1\t123.5\t=A1*2\tfmt=#,##0.0");
+});
+
 it("never shows formula text as a value when the saved result is missing or errored", () => {
 	const missing = {
 		...syntheticCell(0, true),

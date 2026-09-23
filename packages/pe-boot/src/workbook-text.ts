@@ -17,6 +17,11 @@ export interface WorkbookTextOptions {
 	maxBytes?: number;
 	/** Emit a `source:` evidence ID per cell. Defaults to true. */
 	includeEvidenceIds?: boolean;
+	/**
+	 * How the model should cite cells. `evidence_id` (default) explains the source: template;
+	 * `coordinates` is for session attachments that have no project evidence ids at all.
+	 */
+	citation?: "evidence_id" | "coordinates";
 	/** Emit static font/fill colors per cell. Defaults to false. */
 	includeStyle?: boolean;
 	/** Document label used in the header, such as the original filename. */
@@ -214,6 +219,8 @@ function documentHeader(result: Row, options: WorkbookTextOptions): string {
 }
 
 function citationRule(options: WorkbookTextOptions, filename: string): string {
+	if (options.citation === "coordinates")
+		return `cite cells as "${filename} <sheet>!<cell>"; this attachment has no project evidence ids, do not invent any.`;
 	if (options.includeEvidenceIds === false)
 		return "evidence ids omitted to save context; before citing, re-read the decisive cells (ranges accepts scattered cells) with include_evidence_ids=true.";
 	return `cite a cell as [${filename} <sheet>!<cell>](#pe-source?evidence_id=<evidence_id>); keep evidence_id verbatim.`;
