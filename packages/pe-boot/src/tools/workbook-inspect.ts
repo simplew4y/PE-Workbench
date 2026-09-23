@@ -2,6 +2,7 @@ import { defineTool } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { preparePeDocument } from "../documents.ts";
 import { readWorkbookDocument, type WorkbookRequest, WorkbookRequestProperties } from "../workbook-reader.ts";
+import { formatWorkbookInspectText } from "../workbook-text.ts";
 import { openPeDataset, type SqlRow, sourceFilename } from "./database.ts";
 
 export const PE_WORKBOOK_INSPECT_PROMPT_SNIPPET =
@@ -149,7 +150,14 @@ export const peWorkbookInspectTool = defineTool({
 		sheet: WorkbookRequestProperties.sheet,
 		section: WorkbookRequestProperties.section,
 		offset: WorkbookRequestProperties.offset,
-		limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 200 })),
+		limit: Type.Optional(
+			Type.Integer({
+				minimum: 1,
+				maximum: 200,
+				description:
+					"Items per page for the selected section. Defaults to 50; output is also capped by a text budget.",
+			}),
+		),
 		include_hidden_sheets: Type.Optional(
 			Type.Boolean({ description: "Include hidden and very-hidden worksheets. Defaults to true." }),
 		),
@@ -178,9 +186,10 @@ export const peWorkbookInspectTool = defineTool({
 			await preparePeDocument(ctx.cwd, { docId: selectedDocId, datasetId: params.dataset_id }, signal);
 		}
 		const result = inspectPeWorkbooks(ctx.cwd, options, signal);
+		const rendered = formatWorkbookInspectText(result);
 		return {
-			content: [{ type: "text", text: JSON.stringify(result) }],
-			details: result,
+			content: [{ type: "text", text: rendered.text }],
+			details: { ...result, model_text: rendered.summary },
 		};
 	},
 });

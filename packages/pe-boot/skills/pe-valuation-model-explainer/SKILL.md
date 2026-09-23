@@ -32,7 +32,7 @@ description: 根据模型证据解释估值结果、关键假设、经营驱动�
 
 默认中文。集中比较数字时用紧凑表格，正文解释含义，不重复所有数字。
 
-重要数字和判断使用工具原样返回的 `markdown_citation`，保留 `#pe-source?evidence_id=`；不要展示裸 source ID 或编造链接。chat 附件用文件名和具体坐标。引用必须支持该项结论，推断明确标出。
+重要数字和判断附引用：工具直接返回 `markdown_citation` 时原样使用；Excel 读取工具返回的是 `evidence_id`，按 `[<文件名> <sheet>!<cell>](#pe-source?evidence_id=<evidence_id>)` 组成，ID 原样复制。保留 `#pe-source?evidence_id=`；不要展示裸 source ID 或编造链接。chat 附件用文件名和具体坐标。引用必须支持该项结论，推断明确标出。
 
 项目中用户要求整体估值模型报告、且有 `pe_valuation_report` 时，读取 [报告提交说明](references/report-delivery.md)，通过工具校验后交付。单项问答、chat 附件和投资框架生成不套用该报告流程；框架任务用自己的结构化提交工具。
 

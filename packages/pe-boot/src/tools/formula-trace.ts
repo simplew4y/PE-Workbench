@@ -2,11 +2,13 @@ import { defineTool } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { preparePeDocument } from "../documents.ts";
 import { readWorkbookDocument } from "../workbook-reader.ts";
-import { openPeDataset, type SqlRow } from "./database.ts";
+import { formatWorkbookTraceText } from "../workbook-text.ts";
+import { openPeDataset, type SqlRow, sourceFilename } from "./database.ts";
 import { type ExcelCellDetail, excelCellDetail, parseExcelCellRange } from "./excel-cells.ts";
 
 const DEFAULT_MAX_DEPTH = 8;
-const DEFAULT_MAX_NODES = 200;
+const DEFAULT_MAX_NODES = 120;
+const MAX_NODES = 500;
 
 export const PE_FORMULA_TRACE_PROMPT_SNIPPET =
 	"Trace a selected Excel output cell upstream by reading original formulas on demand with explicit unresolved-link and cache warnings";
@@ -52,6 +54,7 @@ export interface FormulaTraceIssue {
 export interface PeFormulaTraceResult {
 	dataset_id: string;
 	doc_id: string;
+	document?: { doc_id: string; filename: string; version_no?: number };
 	root: { sheet_name: string; cell_ref: string };
 	direction: "upstream";
 	complete: boolean;
@@ -76,6 +79,11 @@ export function tracePeFormula(
 	const connection = openPeDataset(cwd, options.datasetId);
 	try {
 		signal?.throwIfAborted();
+		const document = connection.database
+			.prepare(
+				"SELECT doc_id, original_filename, source_relpath, version_no FROM documents WHERE dataset_id=? AND doc_id=?",
+			)
+			.get(connection.datasetId, options.docId) as SqlRow | undefined;
 		const result = readWorkbookDocument(connection.database, connection.datasetId, options.docId, {
 			action: "trace",
 			sheet: options.sheetName,
@@ -125,6 +133,15 @@ export function tracePeFormula(
 			...result,
 			dataset_id: connection.datasetId,
 			doc_id: options.docId,
+			...(document
+				? {
+						document: {
+							doc_id: options.docId,
+							filename: sourceFilename(document),
+							version_no: Number(document.version_no),
+						},
+					}
+				: {}),
 			root: { sheet_name: options.sheetName, cell_ref: options.cellRef },
 			direction: "upstream",
 			complete: result.complete === true,
@@ -146,7 +163,7 @@ export const peFormulaTraceTool = defineTool({
 	name: "pe_formula_trace",
 	label: "PE Formula Trace",
 	description:
-		"Trace one selected Excel cell upstream by parsing the original formulas on demand. Returns cited nodes, edges, cache warnings, unresolved links, cycles, and truncation status.",
+		"Trace one selected Excel cell upstream by parsing the original formulas on demand. Returns compact node lines (cell, saved value, formula, notes with depth, evidence_id) grouped by sheet, then edges, cache warnings, unresolved links, cycles and pending work, under a text budget. Range references such as SUM(A1:A200) or lookup tables expand to every cell; start with a small max_depth and trace intermediate cells instead of raising max_nodes.",
 	promptSnippet: PE_FORMULA_TRACE_PROMPT_SNIPPET,
 	parameters: Type.Object({
 		doc_id: Type.String({ description: "Exact active workbook document ID.", minLength: 1 }),
@@ -156,14 +173,21 @@ export const peFormulaTraceTool = defineTool({
 			Type.String({ description: "Optional dataset ID. It must match the dataset bound to the current workspace." }),
 		),
 		max_depth: Type.Optional(
-			Type.Integer({ description: "Maximum upstream depth. Defaults to 8; maximum 20.", minimum: 0, maximum: 20 }),
+			Type.Integer({
+				description: `Maximum upstream depth. Defaults to ${DEFAULT_MAX_DEPTH}; maximum 20.`,
+				minimum: 0,
+				maximum: 20,
+			}),
 		),
 		max_nodes: Type.Optional(
 			Type.Integer({
-				description: "Maximum returned cells. Defaults to 200; maximum 1000.",
+				description: `Maximum traced cells. Defaults to ${DEFAULT_MAX_NODES}; maximum ${MAX_NODES}. The text budget may show fewer.`,
 				minimum: 1,
-				maximum: 1_000,
+				maximum: MAX_NODES,
 			}),
+		),
+		include_evidence_ids: Type.Optional(
+			Type.Boolean({ description: "Emit a source: evidence_id per traced cell. Defaults to true." }),
 		),
 	}),
 	async execute(_toolCallId, params, signal, _onUpdate, ctx) {
@@ -180,9 +204,12 @@ export const peFormulaTraceTool = defineTool({
 			},
 			signal,
 		);
+		const rendered = formatWorkbookTraceText(result as unknown as Record<string, unknown>, {
+			includeEvidenceIds: params.include_evidence_ids !== false,
+		});
 		return {
-			content: [{ type: "text", text: JSON.stringify(result) }],
-			details: result,
+			content: [{ type: "text", text: rendered.text }],
+			details: { ...result, model_text: rendered.summary },
 		};
 	},
 });

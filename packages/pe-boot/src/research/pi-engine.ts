@@ -15,6 +15,7 @@ import { sourceId } from "../source.ts";
 import { openPeDataset } from "../tools/database.ts";
 import { readWindSnapshot } from "../trusted-sources.ts";
 import { readWorkbookDocument, type WorkbookRequest, WorkbookRequestProperties } from "../workbook-reader.ts";
+import { formatWorkbookResultText } from "../workbook-text.ts";
 import { captureResearchInputs } from "./framework.ts";
 import { type FrameworkContent, FrameworkContentSchema, ResearchError, validateFrameworkContent } from "./model.ts";
 import type { ResearchEngine, ResearchJobInput } from "./watch.ts";
@@ -28,6 +29,12 @@ const ReadSchema = Type.Object({
 	page: Type.Optional(Type.Integer({ minimum: 1 })),
 	lineStart: Type.Optional(Type.Integer({ minimum: 1 })),
 	lineEnd: Type.Optional(Type.Integer({ minimum: 1 })),
+	include_evidence_ids: Type.Optional(
+		Type.Boolean({
+			description:
+				"Workbook cells only. Emit a source: evidence_id per cell. Defaults to true for search and trace, false for read; re-read decisive cells with true before citing.",
+		}),
+	),
 });
 
 export function readResearchInput(
@@ -124,18 +131,27 @@ export function createPiResearchEngine(
 					name: "pe_research_read",
 					label: "Read selected research evidence",
 					description:
-						"Read this run's immutable inputs. For workbooks: inspect navigation, search text, read ranges with offset/limit, trace formula sources, or render a local range. Follow next_offset until complete; infer metrics, periods and units from source context. PDF uses page; Wind uses lineStart/lineEnd.",
+						"Read this run's immutable inputs. For workbooks: inspect navigation, search text, read ranges with offset/limit, trace formula sources, or render a local range. Workbook output is compact tab-separated lines under a text budget; read header rows and label columns first, then narrow numeric bands. Follow next_offset until complete; infer metrics, periods and units from source context. PDF uses page; Wind uses lineStart/lineEnd.",
 					parameters: ReadSchema,
 					async execute(_id, params) {
 						signal.throwIfAborted();
-						const result = readResearchInput(cwd, datasetId, input, params);
-						onProgress?.(`读取证据：${JSON.stringify(params)}`);
+						const { include_evidence_ids: includeEvidenceIds, ...request } = params;
+						const result = readResearchInput(cwd, datasetId, input, request);
+						onProgress?.(`读取证据：${JSON.stringify(request)}`);
 						const { image, ...data } = result as Record<string, unknown>;
 						const images =
 							image && typeof image === "object" && "data" in image && typeof image.data === "string"
 								? [{ type: "image" as const, mimeType: "image/png", data: image.data }]
 								: [];
-						return { content: [{ type: "text", text: JSON.stringify(data) }, ...images], details: {} };
+						const workbook = data.file_type === "xlsx" || data.file_type === "xlsm";
+						const action = request.action ?? (request.range || request.ranges ? "read" : "inspect");
+						const text = workbook
+							? formatWorkbookResultText(data, {
+									docId: request.docId,
+									includeEvidenceIds: includeEvidenceIds ?? action !== "read",
+								}).text
+							: JSON.stringify(data);
+						return { content: [{ type: "text", text }, ...images], details: {} };
 					},
 				}),
 				defineTool({

@@ -16,6 +16,7 @@
 		"./source": { "types": "./dist/source.d.ts", "import": "./dist/source.js", "default": "./dist/source.js" },
 		"./evidence": { "types": "./dist/evidence.d.ts", "import": "./dist/evidence.js", "default": "./dist/evidence.js" }
 		,"./workbook-reader": { "types": "./dist/workbook-reader.d.ts", "import": "./dist/workbook-reader.js", "default": "./dist/workbook-reader.js" }
+		,"./workbook-text": { "types": "./dist/workbook-text.d.ts", "import": "./dist/workbook-text.js", "default": "./dist/workbook-text.js" }
 	},
 	"bin": {
 		"pe-boot": "dist/cli.js"

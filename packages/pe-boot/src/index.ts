@@ -68,3 +68,13 @@ export {
 	WorkbookRequestProperties,
 	WorkbookRequestSchema,
 } from "./workbook-reader.ts";
+export {
+	DEFAULT_WORKBOOK_TEXT_BYTES,
+	formatWorkbookCellsText,
+	formatWorkbookInspectText,
+	formatWorkbookResultText,
+	formatWorkbookTraceText,
+	type WorkbookTextOptions,
+	type WorkbookTextResult,
+	type WorkbookTextSummary,
+} from "./workbook-text.ts";

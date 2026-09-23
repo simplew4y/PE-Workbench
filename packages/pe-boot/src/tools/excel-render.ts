@@ -25,7 +25,8 @@ export const peExcelRenderTool = defineTool({
 				range: params.range,
 			});
 			const rendered = image as { type: "image"; mimeType: string; data: string };
-			return { content: [{ type: "text", text: JSON.stringify(result) }, rendered], details: result };
+			const summary = `rendered ${String(result.sheet)}!${String(result.range)} via ${String(result.renderer ?? "LibreOffice")} (doc_id=${params.doc_id}). ${String(result.instruction ?? "")}`;
+			return { content: [{ type: "text", text: summary }, rendered], details: result };
 		} finally {
 			database.close();
 		}

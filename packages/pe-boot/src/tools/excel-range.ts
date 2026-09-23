@@ -2,14 +2,15 @@ import { defineTool } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { preparePeDocument } from "../documents.ts";
 import { readWorkbookDocument, WorkbookRequestProperties } from "../workbook-reader.ts";
+import { formatWorkbookCellsText } from "../workbook-text.ts";
 import { numberValue, openPeDataset, type SqlRow, sourceFilename, textValue } from "./database.ts";
 import { excelCellDetail, parseExcelCellRange } from "./excel-cells.ts";
 
 const DEFAULT_MAX_CELLS = 200;
-const MAX_CELLS = 1_000;
+const MAX_CELLS = 500;
 
 export const PE_EXCEL_RANGE_PROMPT_SNIPPET =
-	"Read original Excel cells, formulas, saved values and formats with citations and continuation offsets; interpret units from source context";
+	"Read original Excel cells, formulas, saved values and formats as compact text with continuation offsets; interpret units from source context";
 
 export interface PeExcelRangeOptions {
 	docId: string;
@@ -50,6 +51,17 @@ export function getPeExcelRange(
 			)
 			.get(connection.datasetId, docId) as SqlRow | undefined;
 		if (!document) throw new Error(`active document not found in the current dataset: ${docId}`);
+		const documentInfo = {
+			doc_id: textValue(document, "doc_id"),
+			logical_doc_id: textValue(document, "logical_doc_id"),
+			filename: sourceFilename(document),
+			file_type: textValue(document, "file_type"),
+			doc_type: textValue(document, "doc_type"),
+			document_date: textValue(document, "document_date"),
+			version_no: numberValue(document, "version_no"),
+			parser_name: textValue(document, "parser_name"),
+			parser_version: textValue(document, "parser_version"),
+		};
 		if (options.ranges?.length) {
 			const result = readWorkbookDocument(connection.database, connection.datasetId, docId, {
 				action: "read",
@@ -59,8 +71,12 @@ export function getPeExcelRange(
 			});
 			return {
 				...result,
+				dataset_id: connection.datasetId,
+				document: documentInfo,
 				cells: (result.cells as SqlRow[]).map(excelCellDetail),
 				truncated: result.complete !== true,
+				answer_contract:
+					"Treat formulas and cached values as distinct fields. Cite decisive cells with their evidence_id. A present cache is not proof that Excel recalculated it recently.",
 			};
 		}
 		if (!bounds) throw new Error("A valid cell_range is required");
@@ -88,17 +104,7 @@ export function getPeExcelRange(
 		return {
 			...result,
 			dataset_id: connection.datasetId,
-			document: {
-				doc_id: textValue(document, "doc_id"),
-				logical_doc_id: textValue(document, "logical_doc_id"),
-				filename: sourceFilename(document),
-				file_type: textValue(document, "file_type"),
-				doc_type: textValue(document, "doc_type"),
-				document_date: textValue(document, "document_date"),
-				version_no: numberValue(document, "version_no"),
-				parser_name: textValue(document, "parser_name"),
-				parser_version: textValue(document, "parser_version"),
-			},
+			document: documentInfo,
 			sheet: {
 				name: textValue(sheet, "sheet_name"),
 				index: numberValue(sheet, "sheet_index"),
@@ -120,7 +126,7 @@ export function getPeExcelRange(
 			truncated: result.complete !== true,
 			cells,
 			answer_contract:
-				"Treat formulas and cached values as distinct fields. Cite decisive cells with their markdown_citation. A present cache is not proof that Excel recalculated it recently.",
+				"Treat formulas and cached values as distinct fields. Cite decisive cells with their evidence_id. A present cache is not proof that Excel recalculated it recently.",
 		};
 	} finally {
 		connection.database.close();
@@ -131,7 +137,7 @@ export const peExcelRangeTool = defineTool({
 	name: "pe_excel_range",
 	label: "PE Excel Range",
 	description:
-		"Read an exact A1 range from the original workbook. Returns values, formulas, static font/fill colors, comments, formats and citations, including styled or annotated blank cells. Conditional formatting is not evaluated. Continue with next_offset until complete; unread cells are not blank. Interpret units and periods from nearby source text.",
+		"Read an exact A1 range from the original workbook as compact tab-separated lines: cell, saved value, formula, notes (format, cache status, hidden/merged, comment). Output is capped by a text budget (about 32 KB); read header rows and label columns first, then narrow numeric bands, instead of whole sheets. Continue with next_offset until complete; unread or budget-omitted cells are not blank. Re-read decisive cells with include_evidence_ids=true to collect citation ids; set include_style=true only when colors matter. Conditional formatting is not evaluated. Interpret units and periods from nearby source text.",
 	promptSnippet: PE_EXCEL_RANGE_PROMPT_SNIPPET,
 	parameters: Type.Object({
 		doc_id: Type.String({
@@ -154,13 +160,21 @@ export const peExcelRangeTool = defineTool({
 		),
 		max_cells: Type.Optional(
 			Type.Integer({
-				description:
-					"Maximum source cells returned, including styled/annotated blanks. Defaults to 200; maximum 1000.",
+				description: `Maximum source cells returned, including styled/annotated blanks. Defaults to ${DEFAULT_MAX_CELLS}; maximum ${MAX_CELLS}. The text budget may return fewer; follow next_offset.`,
 				minimum: 1,
 				maximum: MAX_CELLS,
 			}),
 		),
 		offset: Type.Optional(Type.Integer({ minimum: 0, description: "Continuation offset returned as next_offset." })),
+		include_style: Type.Optional(
+			Type.Boolean({ description: "Add static font/fill colors and bold/italic to notes. Defaults to false." }),
+		),
+		include_evidence_ids: Type.Optional(
+			Type.Boolean({
+				description:
+					"Emit a source: evidence_id per cell. Defaults to false because ids cost more context than the cell itself; after locating the decisive cells, re-read just those (ranges accepts scattered cells) with true to collect citations.",
+			}),
+		),
 	}),
 	async execute(_toolCallId, params, signal, _onUpdate, ctx) {
 		await preparePeDocument(ctx.cwd, { docId: params.doc_id, datasetId: params.dataset_id }, signal);
@@ -177,9 +191,13 @@ export const peExcelRangeTool = defineTool({
 			},
 			signal,
 		);
+		const rendered = formatWorkbookCellsText(result, {
+			includeStyle: params.include_style === true,
+			includeEvidenceIds: params.include_evidence_ids === true,
+		});
 		return {
-			content: [{ type: "text", text: JSON.stringify(result) }],
-			details: result,
+			content: [{ type: "text", text: rendered.text }],
+			details: { ...result, model_text: rendered.summary },
 		};
 	},
 });
