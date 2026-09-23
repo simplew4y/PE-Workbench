@@ -21,6 +21,9 @@ import { type FrameworkContent, FrameworkContentSchema, ResearchError, validateF
 import type { ResearchEngine, ResearchJobInput } from "./watch.ts";
 
 const MAX_RESEARCH_TURNS = 40;
+// The research session runs without compaction, so an overflow ends the run with no draft.
+// Keep each evidence read to half the interactive budget: 40 turns must fit one context window.
+const RESEARCH_READ_TEXT_BYTES = 16 * 1024;
 
 const ReadSchema = Type.Object({
 	...WorkbookRequestProperties,
@@ -149,6 +152,7 @@ export function createPiResearchEngine(
 							? formatWorkbookResultText(data, {
 									docId: request.docId,
 									includeEvidenceIds: includeEvidenceIds ?? action !== "read",
+									maxBytes: RESEARCH_READ_TEXT_BYTES,
 								}).text
 							: JSON.stringify(data);
 						return { content: [{ type: "text", text }, ...images], details: {} };

@@ -2,6 +2,7 @@ import { defineTool } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { resolvePeEvidenceReference, resolvePeEvidenceSource } from "../evidence.ts";
 import { readWorkbookDocument } from "../workbook-reader.ts";
+import { formatWorkbookEvidenceText } from "../workbook-text.ts";
 import {
 	evidenceLocator,
 	numberValue,
@@ -343,7 +344,17 @@ export const peSourceDetailTool = defineTool({
 				connection.database.close();
 			}
 			const { payload } = await resolvePeEvidenceSource(ctx.cwd, params.evidence_id.trim(), signal);
-			return { content: [{ type: "text", text: JSON.stringify(payload) }], details: payload };
+			if (payload.kind !== "excel")
+				return { content: [{ type: "text", text: JSON.stringify(payload) }], details: payload };
+			const rendered = formatWorkbookEvidenceText(
+				payload as unknown as Record<string, unknown>,
+				["evidence_id", "markdown_citation", "grid_window", "truncated", "warnings"],
+				{ includeEvidenceIds: true },
+			);
+			return {
+				content: [{ type: "text", text: rendered.text }],
+				details: { ...payload, model_text: rendered.summary },
+			};
 		}
 		const result = getPeSourceDetail(
 			ctx.cwd,
@@ -357,9 +368,16 @@ export const peSourceDetailTool = defineTool({
 			},
 			signal,
 		);
+		if (!Array.isArray(result.excel_cells) && !Array.isArray(result.cells))
+			return { content: [{ type: "text", text: JSON.stringify(result) }], details: result };
+		const rendered = formatWorkbookEvidenceText(
+			result,
+			["evidence_id", "citation", "markdown_citation", "title_path", "cell_range"],
+			{ includeEvidenceIds: true },
+		);
 		return {
-			content: [{ type: "text", text: JSON.stringify(result) }],
-			details: result,
+			content: [{ type: "text", text: rendered.text }],
+			details: { ...result, model_text: rendered.summary },
 		};
 	},
 });

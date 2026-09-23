@@ -5,6 +5,9 @@ import { readResearchInput } from "../src/research/pi-engine.ts";
 import { enqueueResearchJob } from "../src/research/watch.ts";
 import { peExcelRangeTool } from "../src/tools/excel-range.ts";
 import { peFormulaTraceTool } from "../src/tools/formula-trace.ts";
+import { peSourceDetailTool } from "../src/tools/source-detail.ts";
+import { peValuationDateTool } from "../src/tools/valuation-date.ts";
+import { peValuationOutputTool } from "../src/tools/valuation-output.ts";
 import { peWorkbookInspectTool } from "../src/tools/workbook-inspect.ts";
 import { peWorkbookSearchTool } from "../src/tools/workbook-search.ts";
 import {
@@ -332,6 +335,47 @@ it("sends compact text to the model from every project workbook tool while detai
 	expect(inspectText).toContain('calcPr={"calcId"');
 	expect(inspectText).not.toContain("metadata_json");
 	expect(inspectText).not.toContain('"sheet_name"');
+
+	const outputs = await peValuationOutputTool.execute(
+		"outputs",
+		{ doc_id: docId, query: "Line 12" },
+		undefined,
+		undefined,
+		ctx,
+	);
+	const outputsText = (outputs.content[0] as { text: string }).text;
+	expect(outputsText).toContain('status="search_results" selection_method="source_text_search" search_complete=true');
+	expect(outputsText).toMatch(/^A12\t"Line 12"\t-\tmatch=value\tsource:/mu);
+	expect(outputsText).not.toContain("markdown_citation");
+	expect((outputs.details as { matches: unknown[] }).matches.length).toBeGreaterThan(0);
+
+	const dates = await peValuationDateTool.execute(
+		"dates",
+		{ doc_id: docId, query: "Revenue" },
+		undefined,
+		undefined,
+		ctx,
+	);
+	const datesText = (dates.content[0] as { text: string }).text;
+	expect(datesText).toContain('status="search_results" resolution_method="source_text_search" evidence_ids=[]');
+	expect(datesText).toMatch(/^A1\t"Revenue"\t-\tmatch=value\tsource:/mu);
+
+	const citedC2 = citedCells.find((cell) => cell.cell_ref === "C2")!;
+	const detail = await peSourceDetailTool.execute(
+		"detail",
+		{ evidence_id: citedC2.evidence_id },
+		undefined,
+		undefined,
+		ctx,
+	);
+	const detailText = (detail.content[0] as { text: string }).text;
+	const detailPayload = detail.details as { cells: unknown[]; model_text: { shown_cells: number } };
+	expect(detailText).toContain(`evidence_id="${citedC2.evidence_id}"`);
+	expect(detailText).toContain("range=Model!C2");
+	expect(detailText).toContain("grid_window=");
+	expect(detailText).toMatch(/^C2\t40\t=B2\*2\t-\tsource:/mu);
+	expect(detailPayload.model_text.shown_cells).toBe(detailPayload.cells.length);
+	expect(Buffer.byteLength(detailText)).toBeLessThan(Buffer.byteLength(JSON.stringify(detailPayload.cells)) / 4);
 
 	const job = enqueueResearchJob(root, datasetId, "Budget", [docId], "evidence", null);
 	const research = readResearchInput(root, datasetId, job.input, { docId, sheet: "Model", range: "A1:C3" }) as Record<

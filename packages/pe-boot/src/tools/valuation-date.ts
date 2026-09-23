@@ -7,6 +7,7 @@ import {
 	workbookContextSourceSchema,
 } from "../workbook-context.ts";
 import { readWorkbookDocument } from "../workbook-reader.ts";
+import { formatWorkbookEvidenceText } from "../workbook-text.ts";
 import { openPeDataset, type SqlRow, sourceFilename } from "./database.ts";
 import { type ExcelCellDetail, excelCellDetail } from "./excel-cells.ts";
 
@@ -138,6 +139,12 @@ export const peValuationDateTool = defineTool({
 			},
 			signal,
 		);
-		return { content: [{ type: "text", text: JSON.stringify(result) }], details: result };
+		const rendered = formatWorkbookEvidenceText(result as unknown as Record<string, unknown>, [
+			"status",
+			"resolution_method",
+			"valuation_date",
+			"evidence_ids",
+		]);
+		return { content: [{ type: "text", text: rendered.text }], details: { ...result, model_text: rendered.summary } };
 	},
 });

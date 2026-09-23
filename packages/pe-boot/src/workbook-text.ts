@@ -23,6 +23,8 @@ export interface WorkbookTextOptions {
 	filename?: string;
 	docId?: string;
 	versionNo?: number | string;
+	/** Tool-specific header lines inserted after the document line; never cut by the budget. */
+	extraHeadLines?: string[];
 }
 
 export interface WorkbookTextSummary {
@@ -273,9 +275,9 @@ export function formatWorkbookCellsText(result: Row, options: WorkbookTextOption
 	const rows = Array.isArray(result.cells) ? (result.cells as Row[]) : [];
 	const offset = typeof result.offset === "number" ? result.offset : 0;
 	const filename = headerFilename(result, options);
-	const head = [documentHeader(result, options)];
+	const head = [documentHeader(result, options), ...(options.extraHeadLines ?? [])];
 	const scope: string[] = [];
-	const sheet = object(result.sheet) ? text(result.sheet.name) : text(result.sheet);
+	const sheet = object(result.sheet) ? text(result.sheet.name) : (text(result.sheet) ?? text(result.sheet_name));
 	const cellRange = text(result.cell_range);
 	if (sheet && cellRange) scope.push(`range=${sheet}!${cellRange}`);
 	else if (Array.isArray(result.requested_ranges) && result.requested_ranges.length)
@@ -291,7 +293,7 @@ export function formatWorkbookCellsText(result: Row, options: WorkbookTextOption
 	if (typeof result.matching_cell_count === "number") counts.push(`matching=${result.matching_cell_count}`);
 	counts.push(`returned=${rows.length}`, `offset=${offset}`);
 	if (typeof result.next_offset === "number") counts.push(`next_offset=${result.next_offset}`);
-	counts.push(`complete=${result.complete === true}`);
+	if (typeof result.complete === "boolean") counts.push(`complete=${result.complete}`);
 	if (typeof result.requested_cell_count === "number") counts.push(`requested=${result.requested_cell_count}`);
 	if (typeof result.blank_cell_count === "number") counts.push(`blank=${result.blank_cell_count}`);
 	head.push(`cells: ${counts.join(" ")}`);
@@ -561,6 +563,43 @@ export function formatWorkbookInspectText(result: Row, options: WorkbookTextOpti
 			],
 		},
 		workbookTextBudget(options.maxBytes),
+	);
+}
+
+/** `key=value` line for scalar result fields worth showing to the model; objects are JSON, long strings clipped. */
+export function summarizeResultFields(result: Row, keys: readonly string[]): string | undefined {
+	const parts: string[] = [];
+	for (const key of keys) {
+		const value = result[key];
+		if (value === undefined || value === null) continue;
+		if (typeof value === "string") parts.push(`${key}=${quote(value, 160)}`);
+		else if (typeof value === "object") parts.push(`${key}=${clip(JSON.stringify(value), 400)}`);
+		else parts.push(`${key}=${String(value)}`);
+	}
+	return parts.length ? parts.join(" ") : undefined;
+}
+
+const EVIDENCE_CELL_KEYS = ["cells", "excel_cells", "matches", "source_cells"] as const;
+
+/**
+ * Evidence-style results (valuation output/date search, source detail) carry cells under
+ * different keys next to tool-specific scalars. Cells become compact lines; the scalars
+ * listed in `fieldKeys` become one header line; everything else stays in details only.
+ */
+export function formatWorkbookEvidenceText(
+	result: Row,
+	fieldKeys: readonly string[],
+	options: WorkbookTextOptions = {},
+): WorkbookTextResult {
+	const cellKey = EVIDENCE_CELL_KEYS.find((key) => Array.isArray(result[key]));
+	if (!cellKey) return formatWorkbookResultText(result, options);
+	const rest: Row = { ...result };
+	for (const key of EVIDENCE_CELL_KEYS) delete rest[key];
+	delete rest.cell;
+	const summary = summarizeResultFields(rest, fieldKeys);
+	return formatWorkbookCellsText(
+		{ ...rest, cells: result[cellKey] },
+		{ ...options, extraHeadLines: [...(options.extraHeadLines ?? []), ...(summary ? [summary] : [])] },
 	);
 }
 
