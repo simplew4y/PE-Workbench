@@ -28,7 +28,8 @@ export function parseCompactionSummary(summary: string): ParsedCompactionSummary
 
   return {
     body: body.trim(),
-    readFiles,
-    modifiedFiles,
+    // Display each path once per category, preserving first-seen order.
+    readFiles: [...new Set(readFiles)],
+    modifiedFiles: [...new Set(modifiedFiles)],
   };
 }
