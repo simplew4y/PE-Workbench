@@ -8,7 +8,6 @@
 .progress button { text-align: left; white-space: normal; overflow-wrap: anywhere; }
 .card:focus { outline: 2px solid var(--accent); outline-offset: 3px; }
 .sourceAnswer { border-radius: 8px; outline: 2px solid var(--accent); outline-offset: 6px; }
-.sourceAnswer::highlight(research-source) { color: var(--text); background: color-mix(in srgb, var(--accent) 28%, transparent); }
 .stats { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 18px; }
 .stats div { padding: 12px; display: flex; flex-direction: column; }
 .stats div + div { border-left: 1px solid var(--border); }

@@ -61,6 +61,9 @@ export default function RootLayout({
     <html lang="en" translate="no" className={`${notoSansMono.variable} notranslate`} suppressHydrationWarning>
       <head>
         <meta name="google" content="notranslate" />
+        {/* The bundled CSS parser does not yet support Custom Highlight selectors.
+            Pass this fixed rule to the browser without PostCSS/Turbopack rewriting. */}
+        <style>{`::highlight(research-source) { color: var(--text); background-color: color-mix(in srgb, var(--accent) 28%, transparent); }`}</style>
         <script
           dangerouslySetInnerHTML={{
             __html: `(function(){try{var t=localStorage.getItem("pi-theme");var dark=t==="dark"||((t==null||t===""||t==="auto")&&window.matchMedia("(prefers-color-scheme: dark)").matches);if(dark)document.documentElement.classList.add("dark")}catch(e){}})();`,
