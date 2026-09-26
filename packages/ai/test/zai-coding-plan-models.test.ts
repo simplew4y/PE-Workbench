@@ -51,7 +51,9 @@ beforeAll(() => {
 		zai: {
 			models: Object.fromEntries(Object.entries(referenceCosts).map(([id, cost]) => [id, { id, name: id, cost }])),
 		},
-		"zai-coding-plan": { models: codingModels },
+		"zai-coding-plan": {
+			models: Object.fromEntries(Object.entries(codingModels).filter(([id]) => id !== "glm-4.6v")),
+		},
 		"zhipuai-coding-plan": { models: codingModels },
 		"alibaba-token-plan": {
 			models: Object.fromEntries(individualModelIds.map((id) => [id, { id, name: id, tool_call: true }])),
@@ -92,6 +94,7 @@ afterAll(() => rmSync(fixtureRoot, { force: true, recursive: true }));
 
 it("preserves vision model metadata on the China Coding Plan catalog", () => {
 	const model = catalog["zai-coding-cn"]["glm-4.6v"];
+	expect(catalog.zai["glm-4.6v"]).toBeUndefined();
 
 	expect(model).toMatchObject({
 		id: "glm-4.6v",
