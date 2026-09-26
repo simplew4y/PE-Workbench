@@ -35,6 +35,12 @@ To learn more about Pi:
 
 For Slack/chat automation and workflows see [earendil-works/pi-chat](https://github.com/earendil-works/pi-chat).
 
+## 📝 PE Workbench extension
+
+[`@earendil-works/pe-boot`](packages/pe-boot) builds a private-equity research application on the Pi agent runtime. It adds evidence-backed document and workbook reading, financial-model tracing, investment-framework versioning, research cards, trusted-source snapshots, monitoring, and stock-tracking tools.
+
+The agent loads these capabilities on demand so a task can stay focused on the relevant workflow. Financial-model answers distinguish workbook facts and formulas from analyst assumptions, preserve cell-level evidence, and surface unresolved dependencies instead of filling gaps. See [Financial model understanding](packages/pe-boot/docs/financial-model-understanding.md) and [Trusted sources](packages/pe-boot/TRUSTED-SOURCES.md) for the current behavior and boundaries.
+
 ## Permissions & Containerization
 
 Pi does not include a built-in permission system for restricting filesystem, process, network, or credential access. By default, it runs with the permissions of the user and process that launched it.

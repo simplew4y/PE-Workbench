@@ -15,7 +15,7 @@ const PE_SKILL_ROUTING = `Before a specialized workflow, call pe_load_capability
 - Project document retrieval (PDF, Excel, Office or text): pe-document-retrieval.
 - Read workbook evidence only: pe-financial-model-reader; explain how forecasts are built: pe-financial-model-understanding. Model mechanics alone do not require a valuation report.
 - Full investment research/report: investment-framework-builder; it routes business-driver-model, independent-investment-case, expectations-valuation, falsification-monitoring and framework-reviewer by stage. Focused research questions/project drafts: pe-investment-research.
-- Explain or verify an existing valuation model, screenshot or formula: pe-valuation-model-explainer.
+- Model/screenshot/formula review: pe-valuation-model-explainer; fully explain whole workbooks first.
 - Deliver an overall Excel valuation report: load pe-valuation-report before preparing report inputs (includes the model verification workflow).
 - Company valuation/pricing judgments: valuation-pricing-framework; stock-tracking forecasts: stock-tracking.
 - Save a Memo or Research Note, or choose a useful visual: the corresponding pe-memo, pe-research-note or pe-generative-ui skill.

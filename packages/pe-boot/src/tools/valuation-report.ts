@@ -340,7 +340,7 @@ export function buildPeValuationReport(cwd: string, options: PeValuationReportOp
 	}
 
 	const lines: string[] = [];
-	const notes: string[] = [];
+	const overviewLines: string[] = [];
 	const appendix: string[] = [];
 	if (options.scope === "overview") {
 		const outputs = [...facts.values()].filter((fact) =>
@@ -357,7 +357,7 @@ export function buildPeValuationReport(cwd: string, options: PeValuationReportOp
 				formula: fact.cell.formula,
 			})),
 		);
-		lines.push(...overview.lines);
+		overviewLines.push(...overview.lines);
 		appendix.push(...overview.appendix);
 		if (!overview.outputCount)
 			issues.push("An overview requires agent-selected valuation outputs and their source context");
@@ -411,7 +411,7 @@ export function buildPeValuationReport(cwd: string, options: PeValuationReportOp
 	if (issues.length && issues.length === result.section_issues.length) result.repair_scope = "sections";
 	if (!issues.length) {
 		result.status = "ready";
-		result.rendered_report = compactReportCitations([...lines, ...notes, ...appendix].join("\n").trim());
+		result.rendered_report = compactReportCitations([...lines, ...overviewLines, ...appendix].join("\n").trim());
 	}
 	return result;
 }

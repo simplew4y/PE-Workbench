@@ -108,7 +108,7 @@ export const PE_CAPABILITIES: readonly PeCapability[] = [
 		id: "pe-valuation-model-explainer",
 		description: "解释估值模型、截图或公式；按需读取核验参考",
 		dependencies: ["pe-financial-model-understanding"],
-		files: ["pe-valuation-model-explainer/SKILL.md"],
+		files: ["pe-valuation-model-explainer/SKILL.md", "valuation-model-review/references/model-understanding.md"],
 		tools: modelTools,
 	},
 	{
