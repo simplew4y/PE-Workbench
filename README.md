@@ -15,6 +15,16 @@ Local browser UI for the [pi coding agent](https://github.com/earendil-works/pi)
 - **Web-based configuration**: manage provider login and API keys, models, model tests, plugin packages, and skills without leaving Pi Web.
 - **English and Simplified Chinese UI**: Pi Web follows the browser language initially and provides a language switcher in the top bar.
 
+## 📝 Private-equity research workspace
+
+When Pi Web is connected to a PE Workbench project, the right-side workspace adds three persistent research flows:
+
+- **Research notebook**: save selected answer excerpts as research findings or open questions, preserve their source context and revision history, link them to framework items, and continue selected cards in a new session.
+- **Investment framework**: review and publish versioned theses, assumptions, metrics, questions, and events; compare changes and optionally run evidence-based monitoring in a local worker.
+- **Stock tracking**: combine model target prices, Wind market history, forward scenarios, and simulated transactions without placing real orders.
+
+These flows keep project data separated and retain citations or explicit evidence gaps. See [Research notebook](./docs/research-notebook.md), [Continuous research monitoring](./docs/continuous-research-monitoring.md), and [Stock tracking](./STOCK-TRACKING.md) for usage, prerequisites, and current limits.
+
 ## Quick Start
 
 Pi Web requires Node.js 22.19.0 or newer. Check your version with `node --version`, then run:
