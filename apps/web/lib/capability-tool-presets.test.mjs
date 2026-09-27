@@ -4,7 +4,7 @@ import test from "node:test";
 import { createJiti } from "jiti";
 
 const jiti = createJiti(import.meta.url, {
-  alias: { "@earendil-works/pe-boot": fileURLToPath(new URL("../../PE-Workbench-pi/packages/pe-boot/src/index.ts", import.meta.url)) },
+  alias: { "@earendil-works/pe-boot": fileURLToPath(new URL("../../../packages/pe-boot/src/index.ts", import.meta.url)) },
 });
 const { AgentSessionWrapper } = await jiti.import("./rpc-manager.ts");
 

@@ -39,7 +39,8 @@ function getVersionSpecifier(specifier) {
 
 const failures = [];
 
-collectPackageJsonFiles(".");
+packageJsonFiles.push("package.json");
+collectPackageJsonFiles("packages");
 
 for (const file of packageJsonFiles.sort()) {
 	const packageJson = JSON.parse(readFileSync(file, "utf8"));

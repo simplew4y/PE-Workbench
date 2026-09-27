@@ -1,120 +1,54 @@
-<p align="center">
-  <a href="https://pi.dev">
-    <img alt="pi logo" src="https://pi.dev/logo-auto.svg" width="128">
-  </a>
-</p>
-<p align="center">
-  <a href="https://discord.com/invite/3cU7Bz4UPx"><img alt="Discord" src="https://img.shields.io/badge/discord-community-5865F2?style=flat-square&logo=discord&logoColor=white" /></a>
-  <a href="https://www.npmjs.com/package/@earendil-works/pi-coding-agent"><img alt="npm" src="https://img.shields.io/npm/v/@earendil-works/pi-coding-agent?style=flat-square" /></a>
-</p>
+# PE Workbench
 
-> New issues and PRs from new contributors are auto-closed by default. Maintainers review auto-closed issues daily. See [CONTRIBUTING.md](CONTRIBUTING.md).
-
-# Pi Agent Harness
-
-This is the home of the Pi agent harness project including our self extensible coding agent.
-
-* **[@earendil-works/pi-coding-agent](packages/coding-agent)**: Interactive coding agent CLI
-* **[@earendil-works/pi-agent-core](packages/agent)**: Agent runtime with tool calling and state management
-* **[@earendil-works/pi-ai](packages/ai)**: Unified multi-provider LLM API (OpenAI, Anthropic, Google, …)
-
-To learn more about Pi:
-
-* [Visit pi.dev](https://pi.dev), the project website with demos
-* [Read the documentation](https://pi.dev/docs/latest), but you can also ask the agent to explain itself
-
-## All Packages
-
-| Package | Description |
-|---------|-------------|
-| **[@earendil-works/pi-telemetry](packages/telemetry)** | Vendor-neutral telemetry contracts, reference adapter, conformance tests, and typed schemas |
-| **[@earendil-works/pi-ai](packages/ai)** | Unified multi-provider LLM API (OpenAI, Anthropic, Google, etc.) |
-| **[@earendil-works/pi-agent-core](packages/agent)** | Agent runtime with tool calling and state management |
-| **[@earendil-works/pi-coding-agent](packages/coding-agent)** | Interactive coding agent CLI |
-| **[@earendil-works/pi-tui](packages/tui)** | Terminal UI library with differential rendering |
-
-For Slack/chat automation and workflows see [earendil-works/pi-chat](https://github.com/earendil-works/pi-chat).
-
-## 📝 PE Workbench extension
-
-[`@earendil-works/pe-boot`](packages/pe-boot) builds a private-equity research application on the Pi agent runtime. It adds evidence-backed document and workbook reading, financial-model tracing, investment-framework versioning, research cards, trusted-source snapshots, monitoring, and stock-tracking tools.
-
-The agent loads these capabilities on demand so a task can stay focused on the relevant workflow. Financial-model answers distinguish workbook facts and formulas from analyst assumptions, preserve cell-level evidence, and surface unresolved dependencies instead of filling gaps. See [Financial model understanding](packages/pe-boot/docs/financial-model-understanding.md) and [Trusted sources](packages/pe-boot/TRUSTED-SOURCES.md) for the current behavior and boundaries.
-
-## Permissions & Containerization
-
-Pi does not include a built-in permission system for restricting filesystem, process, network, or credential access. By default, it runs with the permissions of the user and process that launched it.
-
-If you need stronger boundaries, containerize or sandbox Pi. See [packages/coding-agent/docs/containerization.md](packages/coding-agent/docs/containerization.md) for three patterns:
-
-- **Gondolin extension**: keep `pi` and provider auth on the host while routing built-in tools and `!` commands into a local Linux micro-VM.
-- **Plain Docker**: run the whole `pi` process in a local container for simple isolation.
-- **OpenShell**: run the whole `pi` process in a policy-controlled sandbox.
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines and [AGENTS.md](AGENTS.md) for project-specific rules (for both humans and agents).  Longer term plans for Pi can also be found in [RFCs](https://rfc.earendil.com/keyword/pi/).
+Unified Pi workspace and PE Web application. All Pi packages, SDKs, TUI,
+extensions, examples and PE business capabilities are retained.
 
 ## Development
 
-```bash
-npm install --ignore-scripts  # Install all dependencies without running lifecycle scripts
-npm run build         # Refresh model data, then build all packages
-npm run build:offline # Rebuild using existing model data without network access
-npm run check         # Lint, format, and type check
-./test.sh            # Run tests (skips LLM-dependent tests without API keys)
-./pi-test.sh         # Run pi from sources (can be run from any directory)
+Use Node 24 LTS for the full workspace (the optional Gondolin example requires
+Node >=23.6). Core Pi/Web still declare Node >=22.19.0.
+
+```sh
+npm ci --ignore-scripts
+npm run hydrate:model-data
+npm run build:offline
+npm run setup:python
+npm run dev
 ```
 
-## Building standalone binaries from release source
+Web: http://127.0.0.1:30141. Configuration belongs in `apps/web/.env.local`;
+start from its `.env.example`, never copy credentials into tracked files.
+Python setup is needed for the existing document-analysis features, not native Pi.
 
-GitHub releases include a versioned source archive covered by the release's `SHA256SUMS` file. Extract it and run the same build script used for the official standalone binaries:
+Known baseline blocker: the current upstream model feed no longer contains
+`kimi-coding`, so fresh `hydrate:model-data` can fail. This checkout was tested
+with the source workspace's validated public model-data snapshot (not committed).
+See integration notes before treating a fresh clone as fully verified.
 
-```bash
-VERSION="<release-version>"
-tar -xzf "pi-${VERSION}-source.tar.gz"
-cd "pi-${VERSION}"
-./scripts/build-binaries.sh --offline-model-data --platform linux-x64 --out "$PWD/out"
+For a parallel test server use:
+```sh
+npm run dev -- --port 30142
 ```
 
-The source archive includes the generated provider model data used for the release. `--offline-model-data` builds with that snapshot instead of refreshing it from live provider catalogs. The script still installs dependencies, builds the monorepo, compiles the Bun executable, and stages its runtime assets. Package maintainers who provide dependencies separately can pass `--skip-install --skip-deps`.
+- `npm run dev:webpack`: alternate development compiler.
+- `npm run build:pi`: original Pi online build; `build:offline`: prepared model data.
+- `npm run build:web`: production Web build; `build`: Pi then Web.
+- `npm run check:pi`, `check:web`, `check:workspace`, `check`: validation.
+- `npm run research:doctor`, `research:worker`: existing research services.
+- `./pi-test.sh` or `./pi-test.ps1`: PE TUI, preserves caller cwd.
+- `node /absolute/path/PE-Workbench/scripts/pi-native.mjs`: native Pi from any cwd.
+  Also available as `npm run pi:native -- --help`.
 
-## Supply-chain hardening
+User data remains in the existing Pi agent directory; respect
+`PI_CODING_AGENT_DIR`. This is not a data migration or new isolation boundary.
 
-We treat npm dependency changes as reviewed code changes.
+## History and licensing
 
-- Direct external dependencies are pinned to exact versions. Internal workspace packages remain version-ranged.
-- `.npmrc` sets `save-exact=true` and `min-release-age=2` to avoid same-day dependency releases during npm resolution.
-- `package-lock.json` is the dependency ground truth. Pre-commit blocks accidental lockfile commits unless `PI_ALLOW_LOCKFILE_CHANGE=1` is set.
-- `npm run check` verifies pinned direct deps, native TypeScript import compatibility, and the generated coding-agent shrinkwrap.
-- The published CLI package includes `packages/coding-agent/npm-shrinkwrap.json`, generated from the root lockfile, to pin transitive deps for npm users.
-- Release smoke tests use `npm run release:local` to build, pack, and create isolated npm and Bun installs outside the repo before tagging a release.
-- Local release installs, documented npm installs, and `pi update --self` use `--ignore-scripts` where supported.
-- CI installs with `npm ci --ignore-scripts`, and a scheduled GitHub workflow runs `npm audit --omit=dev` plus `npm audit signatures --omit=dev`.
-- Shrinkwrap generation has an explicit allowlist for dependency lifecycle scripts; new lifecycle-script deps fail checks until reviewed.
+Web history is the first-parent product lineage. Pi history is merged intact.
+See [integration notes](docs/monorepo-integration.md) for pinned commits,
+boundaries and validation. Original documentation: [Pi](docs/pi-upstream-README.md)
+and [Web](apps/web/README.md). The archived Pi README uses paths relative to the
+repository root.
 
-## Share your OSS coding agent sessions
-
-If you use Pi or other coding agents for open source work, please share your sessions.
-
-Public OSS session data helps improve coding agents with real-world tasks, tool use, failures, and fixes instead of toy benchmarks.
-
-For the full explanation, see [this post on X](https://x.com/badlogicgames/status/2037811643774652911).
-
-To publish sessions, use [`badlogic/pi-share-hf`](https://github.com/badlogic/pi-share-hf). Read its README.md for setup instructions. All you need is a Hugging Face account, the Hugging Face CLI, and `pi-share-hf`.
-
-You can also watch [this video](https://x.com/badlogicgames/status/2041151967695634619), where I show how I publish my `pi-mono` sessions.
-
-I regularly publish my own `pi-mono` work sessions here:
-
-- [badlogicgames/pi-mono on Hugging Face](https://huggingface.co/datasets/badlogicgames/pi-mono)
-
-## License
-
-MIT
-
-<p align="center">
-  <a href="https://pi.dev">pi.dev</a> domain graciously donated by
-  <br /><br />
-  <a href="https://exe.dev"><img src="packages/coding-agent/docs/images/exy.png" alt="Exy mascot" width="48" /><br />exe.dev</a>
-</p>
+Keep the [Pi license](LICENSE) and [Web license](apps/web/LICENSE).
+No npm publishing or former upstream automation is enabled by this integration.

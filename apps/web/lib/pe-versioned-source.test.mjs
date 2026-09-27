@@ -14,7 +14,7 @@ import { createJiti } from "jiti";
 const jiti = createJiti(import.meta.url, { tsconfigPaths: true });
 const { resolvePeEvidenceSource, PeSourceError } = await jiti.import("./pe-source-server.ts");
 const python = process.env.PE_EXCEL_PYTHON || resolve(dirname(fileURLToPath(import.meta.url)),
-  "../../PE-Workbench-pi/packages/pe-boot/python/.venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python");
+  "../../../packages/pe-boot/python/.venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python");
 
 test("Web resolves exact Excel versions and blank ranges after cache loss, preserving legacy cell links", async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "pe-versioned-source-")));

@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 import { evaluateGenerativeUiRun } from "../lib/generative-ui/evaluator.ts";
 import { auditSelectionSession } from "../lib/generative-ui/selection-audit.ts";
 
@@ -24,7 +25,7 @@ const sessionPath = argument("--session");
 const caseMapPath = argument("--case-map");
 const casesPath = argument(
   "--cases",
-  "../PE-Workbench-pi/packages/pe-boot/skills/pe-generative-ui/references/evaluation-cases.json",
+  fileURLToPath(new URL("../../../packages/pe-boot/skills/pe-generative-ui/references/evaluation-cases.json", import.meta.url)),
 );
 const threshold = Number(argument("--threshold", "80"));
 

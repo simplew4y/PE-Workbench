@@ -1,5 +1,12 @@
 # Development Rules
 
+## Unified repository
+
+- `apps/web` has its own AGENTS.md, TypeScript and ESLint configuration. Do not apply Pi formatting to Web.
+- Use `npm run check:pi` for Pi and `npm run check:web` for Web; root `check` runs both plus workspace resolution checks.
+- Root `build:pi` and `build:offline` retain Pi build ordering. Production Web builds must run outside the active development checkout.
+- Original upstream automation is preserved under `docs/upstream-workflows` but disabled. Do not enable release/publish automation without authorization.
+
 ## Conversational Style
 
 - Keep answers short and concise

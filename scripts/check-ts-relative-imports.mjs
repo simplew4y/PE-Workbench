@@ -32,7 +32,8 @@ function getImportTypeSpecifier(node) {
 
 const failures = [];
 
-collectTypescriptFiles(".");
+collectTypescriptFiles("packages");
+collectTypescriptFiles("scripts");
 
 for (const file of files.sort()) {
 	const sourceText = readFileSync(file, "utf8");

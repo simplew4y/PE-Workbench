@@ -152,7 +152,7 @@ function bumpOrSetVersion(target) {
 		}
 
 		console.log(`Setting explicit version (${target})...`);
-		run(`npm version ${target} --workspaces --no-git-tag-version --no-workspaces-update && node scripts/sync-versions.js && npm install --package-lock-only --ignore-scripts`);
+		run(`node scripts/pi-workspaces.mjs version ${target} --no-git-tag-version --no-workspaces-update && node scripts/sync-versions.js && npm install --package-lock-only --ignore-scripts`);
 	}
 
 	// npm version can temporarily install the previous workspace versions before
@@ -243,7 +243,7 @@ console.log();
 
 // 6. Run checks and tests
 console.log("Running checks...");
-run("npm run check");
+run("npm run check:pi");
 console.log();
 
 console.log("Building packages for tests...");

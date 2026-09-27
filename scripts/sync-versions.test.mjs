@@ -53,6 +53,10 @@ test("synchronizes private dependencies without touching registry aliases, gener
 				"@earendil-works/pi-coding-agent": "^1.0.0",
 			},
 		});
+		await writeManifest(root, "apps/web", {
+			name: "@agegr/pi-web", version: "0.8.9",
+			dependencies: { "@earendil-works/pi-coding-agent": "1.0.0" },
+		});
 
 		const result = runSyncVersions(root);
 		assert.equal(result.status, 0, result.stderr);
@@ -62,6 +66,9 @@ test("synchronizes private dependencies without touching registry aliases, gener
 		assert.equal(evalsManifest.dependencies["@mariozechner/pi-ai"], "npm:@earendil-works/pi-ai@1.0.0");
 		const generatedManifest = await readManifest(root, "packages/coding-agent/install-lock");
 		assert.equal(generatedManifest.dependencies["@earendil-works/pi-coding-agent"], "^1.0.0");
+		const webManifest = await readManifest(root, "apps/web");
+		assert.equal(webManifest.version, "0.8.9");
+		assert.equal(webManifest.dependencies["@earendil-works/pi-coding-agent"], "^2.0.0");
 
 		await writeManifest(root, "packages/ai", {
 			name: "@earendil-works/pi-ai",

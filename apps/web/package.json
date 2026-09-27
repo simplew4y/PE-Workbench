@@ -37,7 +37,7 @@
   "scripts": {
     "research:doctor": "node scripts/research-doctor.mjs",
     "research:worker": "node services/pe-research/worker.mjs",
-    "build:pe-boot": "npm --prefix ../PE-Workbench-pi run build --workspace=@earendil-works/pe-boot",
+    "build:pe-boot": "npm --prefix ../.. run build:offline",
     "build:pe-ingest": "node scripts/build-pe-ingest-worker.mjs",
     "dev": "npm run build:pe-boot && npm run build:pe-ingest && next dev --turbopack -H 127.0.0.1 -p 30141",
     "dev:lan": "npm run build:pe-boot && npm run build:pe-ingest && next dev --turbopack -H 0.0.0.0 -p 30141",
@@ -49,15 +49,16 @@
     "lint": "eslint .",
     "test": "node --experimental-strip-types --test \"app/**/*.test.mjs\" \"components/**/*.test.mjs\" \"hooks/**/*.test.mjs\" \"lib/**/*.test.mjs\" \"public/**/*.test.mjs\"",
     "eval:generative-ui": "node --experimental-strip-types scripts/evaluate-generative-ui.mjs",
-    "release": "npm version patch --no-git-tag-version && npm run build && npm publish --access public"
+    "release": "npm version patch --no-git-tag-version && npm run build && npm publish --access public",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
-    "@earendil-works/pe-boot": "file:../PE-Workbench-pi/packages/pe-boot",
-    "@earendil-works/pi-agent-core": "file:../PE-Workbench-pi/packages/agent",
-    "@earendil-works/pi-ai": "file:../PE-Workbench-pi/packages/ai",
-    "@earendil-works/pi-coding-agent": "file:../PE-Workbench-pi/packages/coding-agent",
-    "@earendil-works/pi-tui": "file:../PE-Workbench-pi/packages/tui",
+    "@earendil-works/pe-boot": "0.84.2",
+    "@earendil-works/pi-agent-core": "0.84.2",
+    "@earendil-works/pi-ai": "0.84.2",
+    "@earendil-works/pi-coding-agent": "0.84.2",
+    "@earendil-works/pi-tui": "0.84.2",
     "@napi-rs/canvas": "1.0.8",
     "@radix-ui/react-scroll-area": "^1.2.18",
     "@streamdown/cjk": "1.0.3",

@@ -1,11 +1,12 @@
 import { spawnSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
 const projectRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const outputDirectory = path.join(projectRoot, "dist", "pe-ingest");
-const typescriptCli = path.join(projectRoot, "node_modules", "typescript", "bin", "tsc");
+const typescriptCli = createRequire(import.meta.url).resolve("typescript/bin/tsc");
 
 rmSync(outputDirectory, { recursive: true, force: true });
 const result = spawnSync(

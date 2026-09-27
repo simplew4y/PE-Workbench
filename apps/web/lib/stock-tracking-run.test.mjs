@@ -10,7 +10,7 @@ import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import { getStockTracking, sourceId } from "@earendil-works/pe-boot";
 
 const jiti = createJiti(import.meta.url, { tsconfigPaths: true,
-  alias: { "@earendil-works/pe-boot": fileURLToPath(new URL("../../PE-Workbench-pi/packages/pe-boot/src/index.ts", import.meta.url)) },
+  alias: { "@earendil-works/pe-boot": fileURLToPath(new URL("../../../packages/pe-boot/src/index.ts", import.meta.url)) },
 });
 const { createPeProject } = await jiti.import("./pe-project-store.ts");
 const { startStockTrackingRun, getStockTrackingRun, stockTrackingCompletionError, stockTrackingRunPrompt } = await jiti.import("./stock-tracking-run.ts");
@@ -92,7 +92,7 @@ test(`${rule.kind}: create and update fetch Wind before prediction; a later mode
     }
     return new Response(JSON.stringify({ jsonrpc: "2.0", id: request.id, result }));
   };
-  const skillPath = fileURLToPath(new URL("../../PE-Workbench-pi/packages/pe-boot/skills/valuation-pricing-framework/SKILL.md", import.meta.url));
+  const skillPath = fileURLToPath(new URL("../../../packages/pe-boot/skills/valuation-pricing-framework/SKILL.md", import.meta.url));
   let setupCalls = 0, forecastCalls = 0, failForecast = false, lastContext;
   const options = {
     initialModel: { provider: "pe-platform", modelId: "tracking-test" },

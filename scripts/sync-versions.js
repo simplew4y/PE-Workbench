@@ -5,8 +5,8 @@
  * internal dependency versions in all workspace packages, including private ones.
  */
 
-import { readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { findPackageDirectories } from "./package-workspaces.mjs";
 
 const GENERATED_PACKAGE_SUFFIXES = [join("coding-agent", "install-lock")];
@@ -40,7 +40,12 @@ console.log("\nAll non-private packages are at the same version (lockstep).");
 
 let totalUpdates = 0;
 const updatedPackages = new Set();
-for (const pkg of workspacePackages) {
+// Web follows internal dependency versions but is not part of Pi's lockstep versioning.
+const webPath = join(dirname(packageRoot), "apps/web/package.json");
+const consumers = existsSync(webPath)
+	? [...workspacePackages, { data: JSON.parse(readFileSync(webPath, "utf8")), path: webPath }]
+	: workspacePackages;
+for (const pkg of consumers) {
 	for (const dependencyType of ["dependencies", "devDependencies"]) {
 		const dependencies = pkg.data[dependencyType];
 		if (!dependencies) {

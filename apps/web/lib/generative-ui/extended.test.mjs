@@ -149,7 +149,7 @@ test("extended schema contains seven bounded tool-callable shapes", () => {
 });
 test("frontend and agent schema and parser stay aligned", async () => {
   const core = await jiti.import(
-    "../../../PE-Workbench-pi/packages/pe-boot/src/tools/extended-ui-contract.ts",
+    "../../../../packages/pe-boot/src/tools/extended-ui-contract.ts",
   );
   assert.deepEqual(core.extendedSchemas, extendedSchemas);
   for (const sample of samples)

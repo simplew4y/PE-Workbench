@@ -1,10 +1,12 @@
 import type { NextConfig } from "next";
-import { readFileSync } from "fs";
+import { existsSync, readFileSync } from "fs";
+import { createRequire } from "node:module";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 
 const configDir = dirname(fileURLToPath(import.meta.url));
-const workspaceRoot = dirname(configDir);
+const workspaceRoot = dirname(dirname(configDir));
+const require = createRequire(import.meta.url);
 const configuredAllowedHosts = (process.env.PI_WEB_ALLOWED_HOSTS ?? "")
   .split(",")
   .map((origin) => origin.trim())
@@ -12,7 +14,10 @@ const configuredAllowedHosts = (process.env.PI_WEB_ALLOWED_HOSTS ?? "")
 const { version } = JSON.parse(readFileSync(join(configDir, "package.json"), "utf8")) as { version: string };
 let piVersion = "unknown";
 try {
-  const piPkgPath = join(configDir, "node_modules/@earendil-works/pi-coding-agent/package.json");
+  const piPkgPath = require.resolve.paths("@earendil-works/pi-coding-agent")
+    ?.map((base) => join(base, "@earendil-works/pi-coding-agent/package.json"))
+    .find((candidate) => existsSync(candidate));
+  if (!piPkgPath) throw new Error("Pi workspace package not found");
   piVersion = (JSON.parse(readFileSync(piPkgPath, "utf8")) as { version: string }).version;
 } catch { /* package not found, use default */ }
 

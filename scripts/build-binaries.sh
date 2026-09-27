@@ -139,7 +139,7 @@ if [[ "$SKIP_BUILD" == "false" ]]; then
         npm run build:offline
     else
         echo "==> Building all packages..."
-        npm run build
+        npm run build:pi
     fi
 else
     echo "==> Skipping package build (--skip-build)"

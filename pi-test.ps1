@@ -63,8 +63,9 @@ if (-not (Test-Path -LiteralPath $tsxBin)) {
 	throw "tsx not found at $tsxBin. Run npm install from the repo root first."
 }
 
-$cliPath = Join-Path $scriptDir "packages/coding-agent/src/cli.ts"
-& $tsxBin $cliPath @forwardArgs
+$cliPath = Join-Path $scriptDir "packages/pe-boot/src/cli.ts"
+$tsconfigPath = Join-Path $scriptDir "tsconfig.json"
+& $tsxBin --tsconfig $tsconfigPath $cliPath @forwardArgs
 $exitCode = $LASTEXITCODE
 if ($exitCode -ne 0) {
 	exit $exitCode

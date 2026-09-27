@@ -13,7 +13,7 @@ const { createPeProject } = await jiti.import("../../../../lib/pe-project-store.
 const { GET, POST } = await jiti.import("./route.ts");
 const { cacheSessionPath } = await jiti.import("../../../../lib/session-reader.ts");
 const { AgentSessionWrapper } = await jiti.import("../../../../lib/rpc-manager.ts");
-const { AuthStorage } = await jiti.import("../../../../../PE-Workbench-pi/packages/coding-agent/src/core/auth-storage.ts");
+const { AuthStorage } = await jiti.import("../../../../../../packages/coding-agent/src/core/auth-storage.ts");
 
 test("project API creates, saves and publishes a draft; rejects stale, invalid and cross-project actions", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "pe-framework-route-"));

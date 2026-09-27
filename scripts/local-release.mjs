@@ -205,7 +205,7 @@ const options = parseArgs();
 const repoRoot = process.cwd();
 const rootPackageJson = readPackageJson(repoRoot);
 
-if (rootPackageJson.name !== "pi-monorepo") {
+if (rootPackageJson.name !== "pe-workbench-monorepo") {
 	throw new Error("Run this script from the repository root");
 }
 
@@ -221,7 +221,7 @@ mkdirSync(tarballDirectory, { recursive: true });
 run("npm", ["run", "generate:models"], { cwd: repoRoot });
 
 if (!options.skipCheck) {
-	run("npm", ["run", "check"], { cwd: repoRoot });
+	run("npm", ["run", "check:pi"], { cwd: repoRoot });
 }
 
 for (const pkg of packages) {
