@@ -20,10 +20,10 @@ Web: http://127.0.0.1:30141. Configuration belongs in `apps/web/.env.local`;
 start from its `.env.example`, never copy credentials into tracked files.
 Python setup is needed for the existing document-analysis features, not native Pi.
 
-Known baseline blocker: the current upstream model feed no longer contains
-`kimi-coding`, so fresh `hydrate:model-data` can fail. This checkout was tested
-with the source workspace's validated public model-data snapshot (not committed).
-See integration notes before treating a fresh clone as fully verified.
+Model hydration supports the renamed models.dev Kimi Coding catalog
+(`kimi-code-plan-cn`). Run `hydrate:model-data` on a fresh clone before offline
+builds; it requires network access. See integration notes for remaining baseline
+check failures and verification limits.
 
 For a parallel test server use:
 ```sh

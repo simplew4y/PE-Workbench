@@ -13,6 +13,8 @@
 
 ### Fixed
 
+- Fixed clean model-data hydration after models.dev renamed the Kimi Coding catalog to `kimi-code-plan-cn`, preserving the existing provider and strict validation.
+
 - Fixed Node.js built-in module discovery being bundled as unresolved dynamic imports in server applications.
 - Fixed OpenAI-compatible Chat Completions reasoning replay to preserve and resend assistant-level `reasoning_details` (`reasoning.text`, `reasoning.summary`, and `reasoning.encrypted`) verbatim and in order ([#7994](https://github.com/earendil-works/pi/issues/7994)).
 - Fixed Anthropic server-side fallback responses being priced with the requested model instead of the returned fallback model ([#8285](https://github.com/earendil-works/pi/issues/8285)).

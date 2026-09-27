@@ -59,9 +59,10 @@ Python 测试使用本机已安装的 Python 3.14.4 / openpyxl 3.1.5 / PyMuPDF 1
 
 既有阻塞与限制：
 
-1. 在线 `hydrate:model-data` 失败：上游数据缺少 `kimi-coding`。本机离线构建使用了
-   原 Pi 工作区的公开 provider JSON 和 manifest，经 `check:model-data` 验证通过；
-   它们未提交。全新机器仍有模型数据准备阻塞，不能声称开箱即用。
+1. 初次整合时在线 `hydrate:model-data` 因上游 Kimi 目录改名失败，曾使用旧工作区的
+   公开快照验证。现已修复为读取 `kimi-code-plan-cn`，兼容旧 `kimi-for-coding`；
+   保留 Provider ID、API 地址及严格校验。已在无旧 JSON 的临时源码目录中真实联网生成，
+   不再需要手工复制旧模型数据。网络故障或其他上游目录缺失仍会明确报错。
 2. Pi 全量类型检查：`packages/ai/test/stream.test.ts:707` 使用的
    `claude-sonnet-4-5` 不在当前生成类型中；包内源码及测试均与基线一致。
 3. Web 全量类型检查：股票追踪 API 有 4 处 `selected_output` 类型错误，与迁移前一致。
