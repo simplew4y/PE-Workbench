@@ -1,5 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { setTimeout as delay } from "node:timers/promises";
@@ -37,7 +38,8 @@ interface PeAnalysisOptions {
 function pythonCommand(): string {
   const override = process.env.PE_INGEST_ANALYSIS_PYTHON?.trim() || process.env.PE_EXCEL_PYTHON?.trim();
   if (override) return override;
-  const peBootRoot = path.dirname(path.dirname(fileURLToPath(import.meta.resolve("@earendil-works/pe-boot"))));
+  // Resolve with Node at runtime: Webpack cannot compile import.meta.resolve.
+  const peBootRoot = path.dirname(path.dirname(createRequire(import.meta.url).resolve("@earendil-works/pe-boot")));
   const venv = path.join(peBootRoot, "python", ".venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python");
   for (const candidate of [venv, ...(process.platform === "win32" ? ["python"] : ["python3", "python"])]) {
     if (candidate === venv && !existsSync(candidate)) continue;
