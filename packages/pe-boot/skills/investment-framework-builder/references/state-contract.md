@@ -1,6 +1,6 @@
 # 共同研究数据约定
 
-所有模块读写当前报告输出目录的同一个 `framework-state.json`。不用共享的个人skills目录保存公司数据；源Excel只读。先读取现有状态，只更新本模块负责的字段，不清空其他模块输出。顺序写入；如确有授权并行工作，模块先返回局部结果，由Builder合并，避免竞争覆盖。
+完整框架报告的所有模块读写当前报告输出目录的同一个 `framework-state.json`。普通聊天或单项说明不强制建立该文件，受限后台使用自身工具契约。不用共享的个人skills目录保存公司数据；源Excel只读。先读取现有状态，只更新本模块负责的字段，不清空其他模块输出。顺序写入；如确有授权并行工作，模块先返回局部结果，由Builder合并，避免竞争覆盖。
 
 ## PE-Workbench 接入
 
@@ -26,7 +26,7 @@ JSON顶层字段如下；空数组表示尚未产出，不表示检查已通过�
 - `case_checkpoint`：首次为null；完成独立判断阶段后记saved_at、revision、thesis_ids、evidence_ids、exposure（此前已接触的共识/目标价）、snapshot_path（实际保存的经营判断JSON）。即使结论为不能判断，也保存缺口。
 - `market`：价格、时间、交易所、货币、共识各期间数据及evidence_ids、样本限制。未取到数据可留空并列gap。
 - `valuations[]`：id、method、as_of、horizon、assumption_ids、thesis_ids、evidence_ids、formula_description、value（无法算可null）、unit、price_basis、calculation_path、limitations。不得把不同估值时点隐式合成。
-- `sensitivities[]`：id、valuation_ids、assumption_ids、evidence_ids、baseline、perturbation、range_basis、result、fixed_conditions、limitations；影响排名需有业务范围和不确定性依据。
+- `sensitivities[]`：id、valuation_ids、assumption_ids、evidence_ids、baseline、perturbation、range_basis、result、fixed_conditions、limitations；在perturbation/result中说明是原模型输入敏感性、价格条件对照还是研究新增情景，在fixed_conditions/limitations记传播与复算范围，沿用字段而不新增schema。分类与排名依据见 [共同计算规则](../../valuation-model-review/references/valuation-methods.md)。
 - `return_paths[]`：id、thesis_ids、valuation_ids、mechanism、conditions、horizon、evidence_ids。
 - `monitoring[]`：id、thesis_ids、assumption_ids、metric、source_ids、frequency、warning、invalidation、action、threshold_basis。
 - `gaps[]`：id、question、impact、evidence_needed。缺失字段不要靠编造满足结构。
