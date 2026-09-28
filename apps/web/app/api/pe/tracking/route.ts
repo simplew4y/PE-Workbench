@@ -22,6 +22,14 @@ function text(value: unknown, name: string): string {
   return value.trim();
 }
 
+function searchOffset(value: string | null, name: string): number {
+  if (value === null) return 0;
+  if (!/^\d+$/u.test(value) || !Number.isSafeInteger(Number(value))) {
+    throw new ResearchError(400, `${name} must be a non-negative integer`);
+  }
+  return Number(value);
+}
+
 function projectFor(value: unknown) {
   const project = getPeProject(text(value, "datasetId"));
   assertPeUserPathAllowed(project.root);
@@ -45,22 +53,26 @@ export async function GET(request: Request) {
     const docId = params.get("docId");
     if (docId !== null) {
       const id = text(docId, "docId");
-      await preparePeDocument(root, { docId: id, datasetId }, request.signal);
       if (params.has("cell") || params.has("sheet")) {
+        const sheetName = text(params.get("sheet"), "sheet");
+        const cellRange = text(params.get("cell"), "cell");
+        await preparePeDocument(root, { docId: id, datasetId }, request.signal);
         return NextResponse.json({ range: getPeExcelRange(root, {
-          docId: id, datasetId, sheetName: text(params.get("sheet"), "sheet"),
-          cellRange: text(params.get("cell"), "cell"), maxCells: 1,
+          docId: id, datasetId, sheetName, cellRange, maxCells: 1,
         }, request.signal) });
       }
-      const valuation = locatePeValuationOutputs(root, { docId: id, datasetId }, request.signal);
-      const dates = resolvePeValuationDate(root, {
-        docId: id, datasetId,
-        ...(valuation.selected_output ? {
-          outputSheet: valuation.selected_output.sheet_name,
-          outputCellRef: valuation.selected_output.cell_ref,
-          outputCandidateId: valuation.selected_output.candidate_id,
-        } : {}),
-      }, request.signal);
+      const query = params.has("query") ? text(params.get("query"), "query") : undefined;
+      const dateQuery = params.has("dateQuery") ? text(params.get("dateQuery"), "dateQuery") : undefined;
+      if (!query && !dateQuery) throw new ResearchError(400, "query or dateQuery is required for workbook source search");
+      const offset = searchOffset(params.get("offset"), "offset");
+      const dateOffset = searchOffset(params.get("dateOffset"), "dateOffset");
+      await preparePeDocument(root, { docId: id, datasetId }, request.signal);
+      const valuation = query ? locatePeValuationOutputs(root, {
+        docId: id, datasetId, query, offset,
+      }, request.signal) : null;
+      const dates = dateQuery ? resolvePeValuationDate(root, {
+        docId: id, datasetId, query: dateQuery, offset: dateOffset,
+      }, request.signal) : null;
       return NextResponse.json({ valuation, dates });
     }
     const state = getStockTracking(root, datasetId, params.get("trackerId") ?? undefined);

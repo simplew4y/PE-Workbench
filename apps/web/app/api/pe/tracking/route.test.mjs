@@ -10,6 +10,7 @@ import { refreshStockTracker, sourceId } from "@earendil-works/pe-boot";
 const jiti = createJiti(import.meta.url, { tsconfigPaths: true });
 const { createPeProject } = await jiti.import("../../../../lib/pe-project-store.ts");
 const { GET, POST } = await jiti.import("./route.ts");
+const { writeWorkbookFixture } = await jiti.import("../../../../../../packages/pe-boot/test/workbook-source-fixture.ts");
 
 test("tracking API saves independent rules and idempotent simulated trades; isolates projects and rejects invalid revisions", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "pe-tracking-route-"));
@@ -52,8 +53,8 @@ test("tracking API saves independent rules and idempotent simulated trades; isol
   assert.deepEqual(state.documents, []);
   const db = new DatabaseSync(join(project.root, "meta/collection.sqlite3"));
   db.prepare("INSERT INTO documents(doc_id,dataset_id,original_filename,file_type,status,created_at,updated_at) VALUES('model',?,'model.xlsx','xlsx','completed','2026-01-01','2026-01-01')").run(project.datasetId);
-  db.prepare("INSERT INTO excel_cells(cell_id,dataset_id,doc_id,sheet_name,cell_ref,row_index,col_index,value_type,numeric_value,unit) VALUES('eps',?,'model','Inputs','A1',1,1,'number',10,'HKD/share')").run(project.datasetId);
   db.close();
+  writeWorkbookFixture(project.root, "model", [{ sheet: "Inputs", cell: "A1", value: 10 }]);
   const estimate = { date, price: 110, basis: { summary: "AI假设：EPS 10 × P/E 11 = 110，非模型原值", evidenceIds: [sourceId({ docId: "model", location: { kind: "excel", sheet: "Inputs", range: "A1" } })] } };
   const retrospective = await post({ action: "save", tracker: { ...tracker, id: selected.id, valuationEstimates: [{ ...estimate, date: "2026-02-01" }] }, revision: selected.revision });
   assert.equal(retrospective.status, 400, "API rejects backdated AI estimates");
@@ -98,4 +99,58 @@ test("tracking API saves independent rules and idempotent simulated trades; isol
   assert.equal((await post({ action: "run", model: { provider: "missing-model" } })).status, 400);
   assert.equal((await post({ action: "run", trackerId: selected.id, datasetId: other.datasetId })).status, 404);
   assert.equal((await POST(new Request("http://localhost/api/pe/tracking", { method: "POST", body: "null" }))).status, 400);
+});
+
+test("tracking workbook search uses literal queries and pagination without inferring outputs or dates", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "pe-tracking-search-"));
+  const previous = { PI_CODING_AGENT_DIR: process.env.PI_CODING_AGENT_DIR, PE_MULTI_USER_MODE: process.env.PE_MULTI_USER_MODE };
+  process.env.PI_CODING_AGENT_DIR = root;
+  process.env.PE_MULTI_USER_MODE = "0";
+  t.after(() => {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+    rmSync(root, { recursive: true, force: true });
+  });
+  const project = createPeProject({ name: "Tracking workbook source test" });
+  const docId = "a".repeat(40);
+  const get = (params = {}) => GET(new Request(`http://localhost/api/pe/tracking?${new URLSearchParams({
+    datasetId: project.datasetId, docId, ...params,
+  })}`));
+  // Invalid requests must be rejected before attempting to prepare a document.
+  for (const params of [{}, { query: " " }, { dateQuery: "" }, { query: "target", offset: "-1" },
+    { query: "target", offset: "1.5" }, { query: "target", dateOffset: "9007199254740992" }, { sheet: "Inputs" }]) {
+    assert.equal((await get(params)).status, 400);
+  }
+  const db = new DatabaseSync(join(project.root, "meta/collection.sqlite3"));
+  db.prepare("INSERT INTO documents(doc_id,dataset_id,original_filename,file_type,status,created_at,updated_at) VALUES(?,?,'model.xlsx','xlsx','completed','2026-01-01','2026-01-01')").run(docId, project.datasetId);
+  db.close();
+  writeWorkbookFixture(project.root, docId, [
+    ...Array.from({ length: 11 }, (_, i) => ({ sheet: "Inputs", cell: `A${i + 1}`, value: `目标价 ${i + 1}` })),
+    { sheet: "Inputs", cell: "B1", value: 120 },
+    { sheet: "Inputs", cell: "A20", value: "估值日期" },
+    { sheet: "Inputs", cell: "B20", value: "2026-09-28" },
+  ]);
+  const response = await get({ query: "目标价", dateQuery: "估值日期" });
+  assert.equal(response.status, 200);
+  const first = await response.json();
+  assert.equal(first.valuation.status, "search_results");
+  assert.equal(first.valuation.matches.length, 10);
+  assert.equal(first.valuation.search_complete, false);
+  assert.equal(first.valuation.next_offset, 10);
+  assert.equal("selected_output" in first.valuation, false);
+  assert.equal(first.dates.status, "search_results");
+  assert.deepEqual(first.dates.source_cells.map((cell) => cell.cell_ref), ["A20"]);
+  assert.equal("valuation_date" in first.dates, false);
+  const next = await (await get({ query: "目标价", offset: String(first.valuation.next_offset) })).json();
+  assert.equal(next.valuation.matches.length, 1);
+  assert.equal(next.valuation.search_complete, true);
+  assert.equal(next.dates, null);
+  const dateOnly = await (await get({ dateQuery: "估值日期", dateOffset: "1" })).json();
+  assert.equal(dateOnly.valuation, null);
+  assert.deepEqual(dateOnly.dates.source_cells, []);
+  const empty = await (await get({ query: "not in this workbook" })).json();
+  assert.deepEqual(empty.valuation.matches, []);
+  assert.equal(empty.valuation.status, "search_results");
+  assert.equal((await get({ sheet: "Inputs", cell: "B1" })).status, 200);
 });
