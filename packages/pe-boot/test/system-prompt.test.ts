@@ -211,6 +211,7 @@ describe("PE system prompt", () => {
 			"pe-valuation-model-explainer",
 			"pe-valuation-report",
 			"investment-framework-builder",
+			"valuation-pricing-framework",
 		];
 		const visited = new Set<string>();
 		// These entrypoints are registered by the web host and the restricted research engine.
@@ -222,7 +223,9 @@ describe("PE system prompt", () => {
 			const content = readFileSync(path, "utf8");
 			for (const name of content.match(/\bpe_[a-z_]+\b/g) ?? [])
 				expect(registered.has(name) || otherEntrypoints.has(name), name).toBe(true);
-			for (const match of content.matchAll(/\]\(([^)]+\.md)\)/g)) inspect(resolve(dirname(path), match[1]));
+			for (const match of content.matchAll(/\]\(([^)]+\.md)\)/g)) {
+				if (!/^https?:\/\//.test(match[1])) inspect(resolve(dirname(path), match[1]));
+			}
 		};
 		for (const name of entrypoints) inspect(join(skillsRoot, name, "SKILL.md"));
 		for (const skill of ["pe-financial-model-reader", "pe-financial-model-understanding", "pe-investment-research"])

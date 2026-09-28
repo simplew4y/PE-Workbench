@@ -12,7 +12,7 @@ description: 协调完整投资研究：先独立交付并验收分析师的模�
 ## 执行顺序
 
 1. 确认公司、研究问题、资料与信息截止日，在用户输出目录建立或复用 `framework-state.json`。不覆写原模型。保留已有逻辑ID、原预测版本与证据，新增数据注明可得日期。研究对象不明才澄清，不为偏好等可空字段停工。
-2. 有工作簿时，读取 [模型说明与理解验收](../valuation-model-review/references/model-understanding.md)，由 [Business & Driver Model](../business-driver-model/SKILL.md) 先交付独立的 `模型说明.md`，按四部分解释原模型。执行 [Framework Reviewer](../framework-reviewer/SKILL.md) 的验收A，保存 `model_understanding` 证据和结论；不能仅用章节齐全或JSON合法代替。再由Business补充现实经营条件、外部证据及趋势图。没有工作簿时A标不适用并说明，不伪造模型说明。
+2. 有工作簿时，按 [模型说明与理解验收](../valuation-model-review/references/model-understanding.md) 的交接规则核对已有说明。由 [Business & Driver Model](../business-driver-model/SKILL.md) 复用同身份、版本和范围的说明、输入角色、路径证据、验收A及未解决事项；仅对新问题、版本差异或范围缺口补查，无适用成果才新交付 `模型说明.md`。执行 [Framework Reviewer](../framework-reviewer/SKILL.md) 的关键路径抽查并记录本次A结论；不能只凭旧通过状态、章节齐全或JSON合法通过。再由Business补充现实经营条件、外部证据及趋势图。没有工作簿时A标不适用并说明，不伪造模型说明。
 3. 读取并执行 [Independent Investment Case](../independent-investment-case/SKILL.md)，保存候选判断、经营预测及 `case_checkpoint`。先完成这一阶段，再主动获取市场共识。若输入已含共识或目标价，记录已接触信息，不伪称盲测。
 4. 读取并执行 [Expectations & Valuation](../expectations-valuation/SKILL.md)，把经营假设接入估值与市场比较，不能悄悄重写上一步判断。
 5. 读取并执行 [Falsification & Monitoring](../falsification-monitoring/SKILL.md)，把重点变量关联到逻辑、失效条件与新证据。

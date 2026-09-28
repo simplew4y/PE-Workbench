@@ -6,6 +6,7 @@
 
 - 报告目录位于项目 `generated/` 下；状态、检查点、复算脚本、图表和报告均保存于此，不直接改写 `raw/`、`meta/` 或托管缓存。
 - 工作簿读取复用 [财务模型读取](../../pe-financial-model-reader/SKILL.md) 的原始证据工具；保留 doc_id、版本和工具返回的 markdown_citation。E1 等研究记录 ID 不替代原始来源，正文保留可点击的原始引用。
+- 接续已有模型说明按 [交接规则](../../valuation-model-review/references/model-understanding.md) 核对身份、版本与范围。在现有context/sources记录本轮文件版本，evidence保留路径和输入角色，model_understanding记录A及范围，gaps保留缺口，artifacts关联说明与复算。版本变化保留前版，补查受影响路径后重评A；不能以相同文件名继承通过。普通聊天不要求建立本状态文件。
 - `framework-state.json` 是报告分析附件，不是 `pe_investment_framework` 的数据库格式。用户要求保存到项目框架时，另用该工具读取并 propose，保留已有条目 ID；不直接用附件覆盖项目状态。`reviewed_draft` 不等于项目框架已发布。
 - 按当前可用工具执行文件读写、Python复算和外部取证；加载 skill 不会扩展权限。仅有 `pe_research_read` / `pe_research_submit` 的后台任务继续遵守其提交 schema，记录能力缺口，不声称已保存文件、运行校验、生成图表或完成整套研究验收。
 
@@ -26,7 +27,7 @@ JSON顶层字段如下；空数组表示尚未产出，不表示检查已通过�
 - `case_checkpoint`：首次为null；完成独立判断阶段后记saved_at、revision、thesis_ids、evidence_ids、exposure（此前已接触的共识/目标价）、snapshot_path（实际保存的经营判断JSON）。即使结论为不能判断，也保存缺口。
 - `market`：价格、时间、交易所、货币、共识各期间数据及evidence_ids、样本限制。未取到数据可留空并列gap。
 - `valuations[]`：id、method、as_of、horizon、assumption_ids、thesis_ids、evidence_ids、formula_description、value（无法算可null）、unit、price_basis、calculation_path、limitations。不得把不同估值时点隐式合成。
-- `sensitivities[]`：id、valuation_ids、assumption_ids、evidence_ids、baseline、perturbation、range_basis、result、fixed_conditions、limitations；影响排名需有业务范围和不确定性依据。
+- `sensitivities[]`：id、valuation_ids、assumption_ids、evidence_ids、baseline、perturbation、range_basis、result、fixed_conditions、limitations；在result/limitations中明确原模型输入敏感性、价格条件对照或切断依赖的新增情景，保留传播路径及复算范围，不新增字段或把派生结果伪装为独立assumption。方法遵循 [估值公共规则](../../valuation-model-review/references/valuation-methods.md)。
 - `return_paths[]`：id、thesis_ids、valuation_ids、mechanism、conditions、horizon、evidence_ids。
 - `monitoring[]`：id、thesis_ids、assumption_ids、metric、source_ids、frequency、warning、invalidation、action、threshold_basis。
 - `gaps[]`：id、question、impact、evidence_needed。缺失字段不要靠编造满足结构。

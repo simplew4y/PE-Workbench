@@ -11,16 +11,23 @@ vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => {
 	return { ...sdk, createAgentSessionFromServices: vi.fn() };
 });
 
-it("loads reader, model understanding and research bodies without granting filesystem or external access", async () => {
+it("discovers only skills and preloads shared references without granting filesystem or external access", async () => {
 	const modelRuntime = { getModel: () => ({}), refresh: async () => undefined } as unknown as ModelRuntime;
 	vi.mocked(createAgentSessionFromServices).mockImplementation(async ({ services, tools }) => {
 		const loaded = services.resourceLoader.getSkills();
 		expect(loaded.diagnostics).toEqual([]);
 		const names = ["pe-financial-model-reader", "pe-financial-model-understanding", "pe-investment-research"];
 		expect(loaded.skills.map((skill) => skill.name)).toEqual(names);
-		expect(services.resourceLoader.getAppendSystemPrompt()).toEqual(
-			names.map((name) => readFileSync(join(PE_SKILLS_DIRECTORY, name, "SKILL.md"), "utf8")),
-		);
+		const instructions = services.resourceLoader.getAppendSystemPrompt();
+		const files = [
+			"pe-financial-model-reader/SKILL.md",
+			"pe-financial-model-understanding/SKILL.md",
+			"valuation-model-review/references/model-understanding.md",
+			"valuation-model-review/references/valuation-methods.md",
+			"pe-investment-research/SKILL.md",
+		];
+		expect(instructions).toEqual(files.map((file) => readFileSync(join(PE_SKILLS_DIRECTORY, file), "utf8")));
+		expect(new Set(instructions).size).toBe(instructions.length);
 		expect(tools).toEqual(["pe_research_read", "pe_research_submit"]);
 		throw new Error("Session configuration checked without a model call");
 	});

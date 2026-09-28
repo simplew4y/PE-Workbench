@@ -35,7 +35,11 @@ export const PE_CAPABILITIES: readonly PeCapability[] = [
 		id: "pe-financial-model-understanding",
 		description: "从预测结果追到独立假设，解释收入、成本、现金流和估值的实际建模逻辑",
 		dependencies: ["pe-financial-model-reader"],
-		files: ["pe-financial-model-understanding/SKILL.md"],
+		files: [
+			"pe-financial-model-understanding/SKILL.md",
+			"valuation-model-review/references/model-understanding.md",
+			"valuation-model-review/references/valuation-methods.md",
+		],
 		tools: [],
 	},
 	{
@@ -53,6 +57,7 @@ export const PE_CAPABILITIES: readonly PeCapability[] = [
 			"investment-framework-builder/SKILL.md",
 			"investment-framework-builder/references/state-contract.md",
 			"investment-framework-builder/references/report.md",
+			"valuation-model-review/references/chart-quality.md",
 		],
 		tools: ["read", "write", "bash", "pe_trusted_source", "pe_investment_framework"],
 	},
@@ -60,7 +65,7 @@ export const PE_CAPABILITIES: readonly PeCapability[] = [
 		id: "valuation-model-review",
 		description: "模型说明与理解验收，按需核验三表、估值复现及敏感性",
 		dependencies: ["pe-document-retrieval", "pe-valuation-model-explainer"],
-		files: ["valuation-model-review/SKILL.md", "valuation-model-review/references/model-understanding.md"],
+		files: ["valuation-model-review/SKILL.md", "valuation-model-review/references/chart-quality.md"],
 		tools: ["read", "write", "bash"],
 	},
 	{
@@ -79,7 +84,7 @@ export const PE_CAPABILITIES: readonly PeCapability[] = [
 	},
 	{
 		id: "expectations-valuation",
-		description: "比较市场预期，核算情景估值、敏感性、下行与回报路径",
+		description: "完整研究内的预期差、情景估值和回报路径；显式单项调用交付局部结果",
 		dependencies: ["valuation-model-review"],
 		files: ["expectations-valuation/SKILL.md", "investment-framework-builder/references/state-contract.md"],
 		tools: ["pe_trusted_source"],
@@ -88,7 +93,11 @@ export const PE_CAPABILITIES: readonly PeCapability[] = [
 		id: "falsification-monitoring",
 		description: "设计改判条件与关键变量追踪，记录证据导致的版本变化，不自动启动调度",
 		dependencies: ["pe-document-retrieval"],
-		files: ["falsification-monitoring/SKILL.md", "investment-framework-builder/references/state-contract.md"],
+		files: [
+			"falsification-monitoring/SKILL.md",
+			"investment-framework-builder/references/state-contract.md",
+			"valuation-model-review/references/chart-quality.md",
+		],
 		tools: ["read", "write", "bash", "pe_trusted_source"],
 	},
 	{
@@ -108,7 +117,7 @@ export const PE_CAPABILITIES: readonly PeCapability[] = [
 		id: "pe-valuation-model-explainer",
 		description: "解释估值模型、截图或公式；按需读取核验参考",
 		dependencies: ["pe-financial-model-understanding"],
-		files: ["pe-valuation-model-explainer/SKILL.md", "valuation-model-review/references/model-understanding.md"],
+		files: ["pe-valuation-model-explainer/SKILL.md"],
 		tools: modelTools,
 	},
 	{
@@ -124,8 +133,8 @@ export const PE_CAPABILITIES: readonly PeCapability[] = [
 	},
 	{
 		id: "valuation-pricing-framework",
-		description: "公司估值与定价判断",
-		files: ["valuation-pricing-framework/SKILL.md"],
+		description: "独立公司定价入口，适配Wind及股票追踪forecast；共用估值规则",
+		files: ["valuation-pricing-framework/SKILL.md", "valuation-model-review/references/valuation-methods.md"],
 		tools: ["pe_trusted_source"],
 	},
 	{

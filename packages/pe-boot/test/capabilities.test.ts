@@ -78,7 +78,11 @@ describe("PE capability runtime", () => {
 			expect(instructions).toContain(`${stage}/SKILL.md`);
 			expect(instructions).toContain("investment-framework-builder/SKILL.md");
 			expect(instructions.match(/<workflow_file path=.*references\/state-contract.md/g)).toHaveLength(1);
-			expect(instructions).not.toContain("pe-valuation-report/SKILL.md");
+			expect(instructions).not.toMatch(/<workflow_file path=.*pe-valuation-report\/SKILL.md/);
+			for (const reference of ["model-understanding", "valuation-methods", "chart-quality"])
+				expect(
+					instructions.match(new RegExp(`<workflow_file path=.*references/${reference}\\.md`, "g")),
+				).toHaveLength(1);
 			expect(h.session.getActiveToolNames().sort()).toEqual([...allowed].sort());
 		}
 		await h.session.reload();
@@ -86,6 +90,7 @@ describe("PE capability runtime", () => {
 		expect(restored).toContain("framework-reviewer/SKILL.md");
 		expect(restored).toContain("valuation-model-review/references/model-understanding.md");
 		expect(restored).not.toMatch(/<workflow_file path=.*expectations-valuation\/SKILL.md/);
+		expect(restored.match(/<workflow_file path=.*references\/valuation-methods.md/g)).toHaveLength(1);
 		expect(h.eventsOfType("tool_execution_end").every((event) => !event.isError)).toBe(true);
 	});
 
@@ -100,9 +105,34 @@ describe("PE capability runtime", () => {
 		const instructions = getMessageText(pinned(await h.session.extensionRunner.emitContext(h.session.messages))[0]);
 		for (const name of ["pe-financial-model-reader", "pe-financial-model-understanding", "pe-investment-research"])
 			expect(instructions.match(new RegExp(`<workflow_file path=.*${name}/SKILL.md`, "g"))).toHaveLength(1);
-		expect(instructions).not.toContain("pe-valuation-report/SKILL.md");
+		expect(instructions).not.toMatch(
+			/<workflow_file path=.*(?:pe-valuation-report|investment-framework-builder)\/SKILL.md/,
+		);
+		expect(instructions).not.toMatch(/<workflow_file path=.*references\/chart-quality.md/);
+		for (const reference of ["model-understanding", "valuation-methods"])
+			expect(instructions.match(new RegExp(`<workflow_file path=.*references/${reference}\\.md`, "g"))).toHaveLength(
+				1,
+			);
 		expect(h.session.getActiveToolNames().sort()).toEqual([...allowed].sort());
 		expect(h.eventsOfType("tool_execution_end").every((event) => !event.isError)).toBe(true);
+	});
+
+	it("loads standalone pricing rules without research stages and restores them after compaction", async () => {
+		const allowed = ["pe_load_capability", "pe_trusted_source"];
+		const h = await setup({}, { allowedToolNames: allowed });
+		h.setResponses([load(["valuation-pricing-framework"]), fauxAssistantMessage("done")]);
+		await h.session.prompt("Load standalone company pricing");
+		const kept = h.sessionManager.appendMessage({ role: "user", content: "continue pricing", timestamp: 1 });
+		h.sessionManager.appendCompaction("Earlier instructions omitted", kept, 100);
+		h.session.agent.state.messages = h.sessionManager.buildSessionContext().messages;
+		await h.session.reload();
+		const context = pinned(await h.session.extensionRunner.emitContext(h.session.messages));
+		expect(context).toHaveLength(1);
+		const instructions = getMessageText(context[0]);
+		expect(instructions.match(/<workflow_file path=/g)).toHaveLength(2);
+		expect(instructions).toMatch(/<workflow_file path=.*valuation-pricing-framework\/SKILL.md/);
+		expect(instructions.match(/<workflow_file path=.*references\/valuation-methods.md/g)).toHaveLength(1);
+		expect(h.session.getActiveToolNames().sort()).toEqual([...allowed].sort());
 	});
 
 	it("delays UI schemas, then adds the native tool and its instructions on the next real agent turn", async () => {
@@ -166,6 +196,7 @@ describe("PE capability runtime", () => {
 		const next = await h.session.extensionRunner.emitContext(h.session.messages);
 		expect(pinned(next)).toHaveLength(1);
 		expect(getMessageText(pinned(next)[0])).not.toContain("repair_scope=sections");
+		expect(getMessageText(pinned(next)[0])).not.toMatch(/<workflow_file path=.*references\/valuation-methods.md/);
 	});
 
 	it("recovers instructions and UI after compaction/reload and isolates branch state", async () => {
@@ -192,7 +223,9 @@ describe("PE capability runtime", () => {
 		h.setResponses([
 			(context) => {
 				const text = context.messages.map(getMessageText).join("\n");
-				expect(text).toContain("第一步：判断公司类型");
+				expect(text).toMatch(/<workflow_file path=.*valuation-pricing-framework\/SKILL.md/);
+				expect(text.match(/<workflow_file path=.*references\/valuation-methods.md/g)).toHaveLength(1);
+				expect(text).not.toMatch(/<workflow_file path=.*expectations-valuation\/SKILL.md/);
 				expect(context.systemPrompt).toContain("- pe_stock_tracking:");
 				expect(context.systemPrompt).not.toContain("- pe_render_ui:");
 				expect(context.systemPrompt).not.toContain("- pe_dataset_memo:");
