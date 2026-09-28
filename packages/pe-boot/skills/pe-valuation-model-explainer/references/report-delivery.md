@@ -1,4 +1,4 @@
-# 项目整体估值报告
+# 📝 项目整体估值报告
 
 仅在用户要求项目 Excel 的整体估值分析/报告，且当前入口有 `pe_valuation_report` 时使用。先按 reading skill 取证，再以 `scope=overview` 提交。
 
@@ -7,5 +7,6 @@
 - `calculations` 的 `growth/change/ratio/upside/product` 用于同口径增长、金额/百分点变化、比率、涨跌幅、每股量乘倍数。它不重算整个模型。
 - 对所选事实声明 `role`、`valuation_method`、`period_kind`。`overview` 至少需要一个 `target_price/per_share_value/enterprise_value/equity_value` 估值事实。独立方法分别披露，别把别名或取整结果当另一种方法。工具不会自动穷尽所有输出。
 - `sections` 用中性标题；`fact_ids` 引用事实/计算，非空 `analysis` 关联事实。数字、年份、引用和已发生的财务趋势放在事实/计算里，analysis 用于定性解释及明确的条件风险，不把未经核验的事实改写成假设。
+- 已按 [估值公共规则](../../valuation-model-review/references/valuation-methods.md) 核对 `pe_driver_sensitivity` 结果时，把真实返回的 `run_id` 作为 `sensitivity_run_id` 提交。报告工具核对工作簿、输出位置和原始输入，并展示最多五个已测驱动；不要把敏感性数字手抄进 analysis。完整传播路径和排除原因保留在审计附件，影响结论的未测范围随模型说明披露。
 - `blocked` 且 `repair_scope=sections` 时，按 `section_issues` 修正文字并重新提交，保留已核验事实，不需要为文字错误重新读表。来源或算术错误则按具体问题补读、修正。
 - `ready` 后原样返回 `rendered_report`，不改写其中数字、单位或引用。影响结论的未决问题在交付时简短说明，不静默隐藏；不能跳过被阻止的校验直接伪装成已通过的报告。

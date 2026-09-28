@@ -1,8 +1,11 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { preparePeDocument } from "../documents.ts";
 import { readWorkbookContextSource, type WorkbookFactContext, workbookFactContextSchema } from "../workbook-context.ts";
 import { normalizeText, openPeDataset } from "./database.ts";
+import type { PeDriverSensitivityResult } from "./driver-sensitivity.ts";
 import type { ExcelCellDetail } from "./excel-cells.ts";
 import { getPeExcelRange } from "./excel-range.ts";
 import {
@@ -14,7 +17,7 @@ import {
 import { type ReportSectionIssue, validateReportSectionProse } from "./valuation-report-prose.ts";
 
 export const PE_VALUATION_REPORT_PROMPT_SNIPPET =
-	"Validate source cells and render a readable valuation report with forecast-year/method comparison tables, formula explanations and compact source links; provide checked operating drivers and qualitative analysis, never invented numeric values";
+	"Validate source cells and render a readable valuation report with compact source links and optional recalculated Top Driver sensitivity; keep tool logs and full formula audits out of the main report";
 
 export interface ReportFactRequest {
 	id: string;
@@ -44,6 +47,7 @@ export interface PeValuationReportOptions {
 	facts: ReportFactRequest[];
 	calculations: ReportCalculation[];
 	sections: Array<{ title: string; fact_ids: string[]; analysis?: string }>;
+	sensitivityRunId?: string;
 }
 
 interface Quantity {
@@ -72,6 +76,57 @@ export interface PeValuationReportResult {
 	facts: Array<{ id: string; cell: ExcelCellDetail; text: string }>;
 	calculations: Array<{ id: string; value: number; text: string }>;
 	validation_scope: string;
+	sensitivity?: { run_id: string; ranked_driver_count: number; result_json: string };
+}
+
+const SENSITIVITY_RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+
+function signedPercent(value: number | undefined): string {
+	if (value === undefined) return "无法按百分比表示";
+	return `${value > 0 ? "+" : ""}${formatNumber(value)}%`;
+}
+
+function loadSensitivityRun(cwd: string, runId: string): PeDriverSensitivityResult {
+	if (!SENSITIVITY_RUN_ID.test(runId)) throw new Error("invalid sensitivity run id");
+	const path = join(cwd, "generated", "sensitivity", runId, "result.json");
+	const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("invalid sensitivity result");
+	const result = parsed as Partial<PeDriverSensitivityResult>;
+	if (
+		result.schema_version !== "1.0" ||
+		result.run_id !== runId ||
+		typeof result.doc_id !== "string" ||
+		result.original_unchanged !== true ||
+		!result.output ||
+		typeof result.output.sheet_name !== "string" ||
+		typeof result.output.cell_ref !== "string" ||
+		!Array.isArray(result.ranked_drivers) ||
+		!result.artifacts ||
+		typeof result.artifacts.result_json !== "string"
+	)
+		throw new Error("incomplete sensitivity result");
+	return result as PeDriverSensitivityResult;
+}
+
+function sensitivityLayout(result: PeDriverSensitivityResult, citations: ReadonlyMap<string, string>): string[] {
+	const drivers = result.ranked_drivers.filter((driver) => driver.active_driver).slice(0, 5);
+	if (!drivers.length) return [];
+	const lines = [
+		"## 核心敏感性",
+		"",
+		`以下排序来自隔离副本中的单变量重算：每次仅将一个上游输入调整 ±${formatNumber(result.shock.percent)}%，其他输入保持不变；原工作簿未修改。`,
+		"",
+		"| 排名 | 核心假设 | 下行情景的估值变化 | 上行情景的估值变化 | 最大绝对影响 |",
+		"| ---: | --- | ---: | ---: | ---: |",
+	];
+	for (const driver of drivers)
+		lines.push(
+			`| ${driver.rank} | ${markdownText(driver.label)} ${citations.get(driver.driver_id) ?? ""} | ${signedPercent(driver.down_output_change_percent)} | ${signedPercent(driver.up_output_change_percent)} | ${driver.max_abs_output_change_percent === undefined ? formatNumber(driver.max_abs_output_change) : `${formatNumber(driver.max_abs_output_change_percent)}%`} |`,
+		);
+	if (result.status === "partial")
+		lines.push("", "部分候选输入因非数值、零基数或重算结果不可用而未进入排名；完整原因保留在审计附件中。");
+	lines.push("");
+	return lines;
 }
 
 function quantity(unit: string): Quantity | undefined {
@@ -126,7 +181,7 @@ export function buildPeValuationReport(cwd: string, options: PeValuationReportOp
 		facts: [],
 		calculations: [],
 		validation_scope:
-			"Original value and context-text matching, deterministic arithmetic. Labels, periods, units and business roles are agent interpretation grounded in the cited context; stored formula caches are not recalculated.",
+			"Original value and context-text matching, deterministic arithmetic, plus optional validation of a saved isolated-workbook sensitivity run. Labels, periods, units and business roles are agent interpretation grounded in cited context; ordinary stored formula values are not treated as fresh recalculation.",
 	};
 	const facts = new Map<string, ReportFact>();
 	const statements = new Map<string, string>();
@@ -341,7 +396,56 @@ export function buildPeValuationReport(cwd: string, options: PeValuationReportOp
 
 	const lines: string[] = [];
 	const overviewLines: string[] = [];
+	const sensitivityLines: string[] = [];
 	const appendix: string[] = [];
+	if (options.sensitivityRunId) {
+		try {
+			const sensitivity = loadSensitivityRun(cwd, options.sensitivityRunId);
+			const outputLocation = `${sensitivity.output.sheet_name}!${sensitivity.output.cell_ref}`;
+			const selectedOutput = [...facts.values()].some(
+				(fact) =>
+					["target_price", "per_share_value", "enterprise_value", "equity_value"].includes(
+						fact.request.role ?? "",
+					) && `${fact.cell.sheet_name}!${fact.cell.cell_ref}` === outputLocation,
+			);
+			if (sensitivity.doc_id !== options.docId) issues.push("Sensitivity result belongs to a different workbook");
+			else if (!selectedOutput) issues.push("Sensitivity output must match one selected valuation output fact");
+			else if (!sensitivity.sensitivity_ranking_available) issues.push("Sensitivity run has no measured ranking");
+			else {
+				const citations = new Map<string, string>();
+				for (const driver of sensitivity.ranked_drivers.filter((item) => item.active_driver).slice(0, 5)) {
+					const range = getPeExcelRange(cwd, {
+						docId: options.docId,
+						datasetId: options.datasetId,
+						sheetName: driver.sheet_name,
+						cellRange: driver.cell_ref,
+					});
+					const cell = (range.cells as ExcelCellDetail[])[0];
+					const tolerance = Math.max(1e-9, Math.abs(driver.baseline_input) * 1e-9);
+					if (
+						!cell ||
+						cell.is_formula ||
+						cell.numeric_value === undefined ||
+						Math.abs(cell.numeric_value - driver.baseline_input) > tolerance
+					) {
+						issues.push(
+							`Sensitivity driver no longer matches source input: ${driver.sheet_name}!${driver.cell_ref}`,
+						);
+						continue;
+					}
+					citations.set(driver.driver_id, cell.markdown_citation);
+				}
+				if (!issues.length) sensitivityLines.push(...sensitivityLayout(sensitivity, citations));
+				result.sensitivity = {
+					run_id: sensitivity.run_id,
+					ranked_driver_count: sensitivity.ranked_drivers.length,
+					result_json: sensitivity.artifacts.result_json,
+				};
+			}
+		} catch (error) {
+			issues.push(`Cannot validate sensitivity run: ${error instanceof Error ? error.message : String(error)}`);
+		}
+	}
 	if (options.scope === "overview") {
 		const outputs = [...facts.values()].filter((fact) =>
 			["target_price", "per_share_value", "enterprise_value", "equity_value"].includes(fact.request.role ?? ""),
@@ -411,7 +515,9 @@ export function buildPeValuationReport(cwd: string, options: PeValuationReportOp
 	if (issues.length && issues.length === result.section_issues.length) result.repair_scope = "sections";
 	if (!issues.length) {
 		result.status = "ready";
-		result.rendered_report = compactReportCitations([...lines, ...overviewLines, ...appendix].join("\n").trim());
+		result.rendered_report = compactReportCitations(
+			[...lines, ...overviewLines, ...sensitivityLines, ...appendix].join("\n").trim(),
+		);
 	}
 	return result;
 }
@@ -421,11 +527,18 @@ export const peValuationReportTool = defineTool({
 	label: "PE Valuation Report",
 	promptSnippet: PE_VALUATION_REPORT_PROMPT_SNIPPET,
 	description:
-		"Build a valuation report from agent-selected source values and original context cells. Supply canonical labels, periods, units and business roles after reading their sources; context cites the exact label/period/unit text or number format. The tool checks those source facts, saved formula values, compatible conversions and arithmetic, without certifying agent interpretation or recalculating Excel. An overview renders only explicitly selected output facts and their declared valuation methods. Qualitative analysis must reference fact_ids; numbers and observed trends belong in facts/calculations. On repair_scope=sections, correct only the indicated prose. Once ready, return rendered_report verbatim.",
+		"Build a human-readable valuation report from selected source values and original context cells. Supply canonical labels, periods, units and business roles after reading their sources; context cites the exact label/period/unit text or number format. The tool checks source facts, compatible conversions and arithmetic. If sensitivity_run_id is supplied, it validates the saved isolated-workbook run against the same document, selected output and original inputs, then renders at most five measured Top Drivers. An overview renders only explicitly selected output facts and methods. Qualitative analysis must reference fact_ids; numbers and observed trends belong in facts/calculations. Keep tool logs and full audits outside the main report. Once ready, return rendered_report verbatim.",
 	parameters: Type.Object({
 		doc_id: Type.String({ minLength: 1 }),
 		dataset_id: Type.Optional(Type.String()),
 		scope: Type.Union([Type.Literal("overview"), Type.Literal("focused")]),
+		sensitivity_run_id: Type.Optional(
+			Type.String({
+				pattern: "^[0-9a-fA-F-]{36}$",
+				description:
+					"Run ID returned by pe_driver_sensitivity. The report validates the saved result against this workbook and selected output before rendering measured Top Drivers.",
+			}),
+		),
 		facts: Type.Array(
 			Type.Object({
 				id: Type.String({ pattern: "^[a-zA-Z][a-zA-Z0-9_]{0,63}$" }),
@@ -508,6 +621,7 @@ export const peValuationReportTool = defineTool({
 			facts: params.facts,
 			calculations: params.calculations,
 			sections: params.sections,
+			sensitivityRunId: params.sensitivity_run_id,
 		});
 		return {
 			content: [{ type: "text", text: JSON.stringify(result) }],

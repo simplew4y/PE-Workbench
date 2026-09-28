@@ -1,4 +1,4 @@
-import { rmSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
@@ -249,5 +249,83 @@ describe("reports from original workbook facts", () => {
 		expect(result.rendered_report).not.toContain("125.00");
 		input.sections[0] = { title: "判断", fact_ids: [], analysis: "品牌能力影响模型假设。" };
 		expect(buildPeValuationReport(root, input).status).toBe("blocked");
+	});
+
+	it("renders a concise measured sensitivity table from a matching audit run", () => {
+		const target: ReportFactRequest = {
+			id: "target",
+			sheet_name: "Valuation",
+			cell_ref: "B4",
+			expected_label: "Target Price",
+			expected_unit: "EUR/share",
+			role: "target_price",
+			context: {
+				label: { sheet: "Valuation", cell: "A4", text: "Target Price" },
+				unit: { sheet: "Valuation", cell: "H4", text: "EUR/share" },
+			},
+		};
+		const root = fixture();
+		const runId = "11111111-1111-4111-8111-111111111111";
+		const directory = join(root, "generated", "sensitivity", runId);
+		mkdirSync(directory, { recursive: true });
+		writeFileSync(
+			join(directory, "result.json"),
+			JSON.stringify({
+				schema_version: "1.0",
+				run_id: runId,
+				dataset_id: "report-test",
+				doc_id: "model",
+				status: "completed",
+				engine: { name: "libreoffice", version: "test" },
+				output: { output_id: "output:test", sheet_name: "Valuation", cell_ref: "B4", baseline_value: 150 },
+				shock: { method: "relative_one_at_a_time", percent: 5 },
+				tested_driver_count: 1,
+				active_driver_count: 1,
+				sensitivity_ranking_available: true,
+				ranked_drivers: [
+					{
+						rank: 1,
+						driver_id: "driver:test",
+						role: "valuation_assumption",
+						label: "Target P/E",
+						sheet_name: "Statements",
+						cell_ref: "D6",
+						baseline_input: 30,
+						down_input: 28.5,
+						up_input: 31.5,
+						baseline_output: 150,
+						down_output: 142.5,
+						up_output: 157.5,
+						down_output_change: -7.5,
+						up_output_change: 7.5,
+						down_output_change_percent: -5,
+						up_output_change_percent: 5,
+						max_abs_output_change: 7.5,
+						max_abs_output_change_percent: 5,
+						active_driver: true,
+						propagation: [],
+						markdown_citation: "untrusted",
+					},
+				],
+				excluded_drivers: [],
+				original_unchanged: true,
+				artifacts: {
+					result_json: `generated/sensitivity/${runId}/result.json`,
+					summary_markdown: `generated/sensitivity/${runId}/summary.md`,
+				},
+				warnings: [],
+				answer_contract: "test",
+			}),
+		);
+		const input = options([target]);
+		input.scope = "overview";
+		input.sensitivityRunId = runId;
+		const result = buildPeValuationReport(root, input);
+		expect(result.status, result.issues.join("\n")).toBe("ready");
+		expect(result.rendered_report).toContain("## 核心敏感性");
+		expect(result.rendered_report).toContain("Target P/E");
+		expect(result.rendered_report).toContain("-5.00%");
+		expect(result.rendered_report).not.toContain("untrusted");
+		expect(result.sensitivity).toMatchObject({ run_id: runId, ranked_driver_count: 1 });
 	});
 });

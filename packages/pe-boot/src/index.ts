@@ -39,6 +39,8 @@ export {
 export * from "./source.ts";
 export { buildPeSystemPrompt, buildToolsList } from "./system-prompt.ts";
 export { peDocumentOpenTool } from "./tools/document-open.ts";
+export { discoverPeDrivers, peDriverDiscoverTool } from "./tools/driver-discover.ts";
+export { peDriverSensitivityTool, runPeDriverSensitivity } from "./tools/driver-sensitivity.ts";
 export type { ExcelCellDetail } from "./tools/excel-cells.ts";
 export { getPeExcelRange, peExcelRangeTool } from "./tools/excel-range.ts";
 export { isPeConsensusEnabled } from "./tools/feature-flags.ts";
