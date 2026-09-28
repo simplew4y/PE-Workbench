@@ -42,6 +42,6 @@ description: 根据模型证据解释估值结果、关键假设、经营驱动�
 
 重要数字和判断附引用：工具直接返回 `markdown_citation` 时原样使用；Excel 读取工具返回的是 `evidence_id`，按 `[<文件名> <sheet>!<cell>](#pe-source?evidence_id=<evidence_id>)` 组成，ID 原样复制。保留 `#pe-source?evidence_id=`；不要展示裸 source ID 或编造链接。chat 附件用文件名和具体坐标。引用必须支持该项结论，推断明确标出。
 
-项目中用户要求整体估值模型报告、且有 `pe_valuation_report` 时，读取 [报告提交说明](references/report-delivery.md)，通过工具校验后交付。单项问答、chat 附件和投资框架生成不套用该报告流程；框架任务用自己的结构化提交工具。
+📝 项目中用户要求整体估值报告，或明确要求局部数值对照表、价格矩阵、跨期情景表，且有 `pe_valuation_report` 时，读取 [报告提交说明](references/report-delivery.md)，分别使用 `overview` 或 `focused` 校验后交付。局部表保持原问题范围，不要求完整模型说明或验收A；“不要完整报告”仍应校验局部表的数值和单位。普通单项问答、纯机制解释、chat 附件和投资框架生成不套用该流程；框架任务用自己的结构化提交工具。
 
 只在用户要求保存时创建 Memo 或 Research Note，不修改原工作簿。

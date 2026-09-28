@@ -1,8 +1,9 @@
-# 📝 项目整体估值报告
+# 📝 项目估值报告与局部数值表
 
-仅在用户要求项目 Excel 的整体估值分析/报告，且当前入口有 `pe_valuation_report` 时使用。先按 reading skill 取证，再以 `scope=overview` 提交。
+用户要求项目 Excel 的整体估值分析/报告时用 `scope=overview`；明确要求局部数值对照表、价格矩阵或跨期情景表时用 `scope=focused`。后者保持用户所问范围，不扩成完整报告或要求完整模型说明/验收A。先按 reader 取证；普通单值问答和纯机制解释不强制进入本流程。详细路由与单位规则见 [数值交付 skill](../../pe-valuation-report/SKILL.md)。
 
-- `facts` 提供来源坐标、完整 `expected_label`、期间和单位。每项 `context.label`、`context.unit`，以及需要时的 `context.period` 使用 `{sheet, cell, text, field?: "value" | "number_format"}`。文字用 reader 的 `display_value`，格式用原始 `number_format`。工具回读数字、核对文本，不替你证明业务含义。
+- 📝 `facts` 提供来源坐标、完整 `expected_label`、期间和单位。每项 `context.label`、`context.unit`，以及需要时的 `context.period` 使用 `{sheet, cell, text, field?: "value" | "number_format"}`。文字用 reader 的 `display_value`，格式用原始 `number_format`。工具独立从原单位文字解析币种/维度/倍率，`expected_unit` 必须匹配；`display_unit` 指定展示单位并同步换算数字。来源未建立完整单位时补读，不能让预期单位补齐证据。
+- 📝 补充条件表用事实 `factor` 配合 `product`；上游情景表用事实 `scenario={run_id,driver_id,direction}` 获取该格在真实隔离重算中的传播值。两者互斥且均沿用已核实原单位；保持所问情景和解释，不只提交原基准。
 - 保留加权平均、完全稀释、归母、调整后等口径。单位或期间不明时不能猜填；如果因此无法完成所问计算，明确说明。
 - `calculations` 的 `growth/change/ratio/upside/product` 用于同口径增长、金额/百分点变化、比率、涨跌幅、每股量乘倍数。它不重算整个模型。
 - 对所选事实声明 `role`、`valuation_method`、`period_kind`。`overview` 至少需要一个 `target_price/per_share_value/enterprise_value/equity_value` 估值事实。独立方法分别披露，别把别名或取整结果当另一种方法。工具不会自动穷尽所有输出。

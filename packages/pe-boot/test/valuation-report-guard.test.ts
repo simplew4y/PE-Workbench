@@ -4,12 +4,21 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
-import type { MessageEndEventResult } from "../../coding-agent/src/core/extensions/types.ts";
+import type {
+	BeforeAgentStartEventResult,
+	MessageEndEventResult,
+} from "../../coding-agent/src/core/extensions/types.ts";
 import { registerValuationReportGuard } from "../src/valuation-report-guard.ts";
 
 const PROJECTS: string[] = [];
 const PROMPT = "请全面分析这个 Excel 估值模型，生成完整估值报告。";
 const REPORT = "## 模型估值结果\n\n- 目标价：2,338.00 欧元。";
+const FOCUSED_PROMPT = `请读取当前项目中的 model.xlsx，只做以下局部分析，不修改原工作簿：
+1. 用模型中2026年的EPS上下浮动10%，配合18、20、22倍P/E，给出价格表，区分原模型基准和补充设定。
+2. 找到原模型中增长率的真正独立输入，将它提高1个百分点，其余原始假设固定。按原模型的实际引用关系，复算2026和2027年的收入、EPS及目标价，列出原基准与变动后的结果，并说明跨期传播、固定条件和复算范围。
+最后说明这两项分析分别回答什么问题，第一项能否证明经营驱动敏感性。请给出可核验的工作表、输入角色和公式证据。只回答这些问题，不生成完整投资报告、不查市场数据、不创建框架状态或图表。`;
+const LIVE_FOCUSED_PROMPT =
+	"请读取当前项目的 model.xlsx，只做局部数值对照表：列出2026和2027年的收入、EPS、目标价原模型基准，保留原单位；收入再给出按元换算的对照。另以2027年目标价为输出，找到增长率的真正独立输入并将它相对上调10%，其余原始假设固定，用可用重算引擎在隔离副本验证，列出2027年收入、EPS、目标价的基准与情景对照，并简述传播机制与固定条件。每项保留可核验来源和单位，说明原值与重算值。不要生成完整投资报告，不查市场数据，不改原工作簿，不创建框架或图表；允许保存重算工具自动产生的审计附件。";
 
 function project(legacy = false): string {
 	const cwd = mkdtempSync(join(tmpdir(), "pe-valuation-guard-"));
@@ -64,8 +73,9 @@ function harness(cwd = project()) {
 		return handlers.get(name)?.({ type: name, ...event } as never, ctx);
 	}
 	async function begin(prompt = PROMPT, images: unknown[] = []) {
-		await emit("before_agent_start", { prompt, images });
+		const result = await emit("before_agent_start", { prompt, images });
 		await emit("message_start", { message: { role: "user", content: prompt } });
+		return result as BeforeAgentStartEventResult | undefined;
 	}
 	async function call(id = "report-1", docId = "doc-a", toolName = "pe_valuation_report", scope = "overview") {
 		await emit("tool_call", { toolCallId: id, toolName, input: { doc_id: docId, scope } });
@@ -143,6 +153,111 @@ afterEach(() => {
 });
 
 describe("valuation report final-message guard", () => {
+	it.each([
+		FOCUSED_PROMPT,
+		LIVE_FOCUSED_PROMPT,
+		"不要完整估值报告，只列收入表。",
+		"做收入表，保留原始单位。",
+		"请给我收入和EPS的数值对照表。",
+		"请用表格给出这个工作簿的收入和EPS。",
+		"Do not generate a full valuation report; show a revenue table from this workbook.",
+	])("protects explicit local numeric tables and supplies a usable focused route: %s", async (prompt) => {
+		const run = harness();
+		const start = await run.begin(prompt);
+		expect(start?.message?.customType).toBe("pe-focused-numeric-delivery");
+		expect(start?.message?.display).toBe(false);
+		expect(start?.message?.content).toContain("Load pe-valuation-report");
+		expect(start?.message?.content).toContain("scope=focused");
+		expect(start?.message?.content).toContain("all requested numeric comparisons and their explanations");
+		expect(text(await run.finish())).toContain("本次数值表尚未通过校验");
+		const focused = "## 局部结果\n\n| 收入 | 110.00 百万CNY |\n\n保留价格条件对照与跨期传播说明。";
+		await run.call("focused", "doc-a", "pe_valuation_report", "focused");
+		await run.result("focused", { rendered_report: focused });
+		expect(text(await run.finish())).toBe(focused);
+		expect(text(await run.finish())).not.toContain("9,999");
+	});
+
+	it("removes free numeric prefaces and explanations from the live focused-table response", async () => {
+		const run = harness();
+		await run.begin(LIVE_FOCUSED_PROMPT);
+		const focused = "## 局部数值对照\n\n| 收入 | 110.00 百万CNY |\n\n条件和传播说明由报告工具保留。";
+		await run.call("focused", "doc-a", "pe_valuation_report", "focused");
+		await run.result("focused", { rendered_report: focused });
+		const final = await run.finish({
+			content: [
+				{ type: "text", text: `原模型收入为110元，情景收入为111元。\n\n${focused}\n\n补充说明：EPS增长10%。` },
+			],
+		});
+		expect(text(final)).toBe(focused);
+	});
+
+	it("does not widen a local table request into an overview", async () => {
+		const run = harness();
+		await run.begin(FOCUSED_PROMPT);
+		await run.call();
+		await run.result();
+		expect(text(await run.finish())).toContain("请使用 scope=focused");
+	});
+
+	it("blocks unresolved source units in a focused result without retrying it as prose", async () => {
+		const run = harness();
+		await run.begin(FOCUSED_PROMPT);
+		await run.call("focused", "doc-a", "pe_valuation_report", "focused");
+		await run.result("focused", { status: "blocked", issues: ["Source says CNY million, expected CNY"] }, true);
+		expect(text(await run.finish())).toContain("Source says CNY million, expected CNY");
+		expect(text(await run.finish())).not.toContain("9,999");
+		expect(run.repairs).toEqual([]);
+	});
+
+	it("preserves focused scope and scenario coverage in its bounded prose repair", async () => {
+		const run = harness();
+		await run.begin(FOCUSED_PROMPT);
+		await run.call("focused", "doc-a", "pe_valuation_report", "focused");
+		await run.result("focused", SECTION_FAILURE, true);
+		await run.finish();
+		expect(run.repairs).toHaveLength(1);
+		expect(run.repairs[0].message.content).toContain("scope=focused");
+		expect(run.repairs[0].message.content).toContain("scenario conditions and explanations");
+		await run.call("repaired", "doc-a", "pe_valuation_report", "focused");
+		await run.result("repaired");
+		expect(text(await run.finish())).toBe(REPORT);
+	});
+
+	it("retains focused mode on continue but clears it for a plain explanation", async () => {
+		const run = harness();
+		await run.begin(FOCUSED_PROMPT);
+		await run.call("focused", "doc-a", "pe_valuation_report", "focused");
+		await run.result("focused");
+		await run.emit("agent_settled");
+		const start = await run.begin("继续");
+		expect(start?.message?.content).toContain("scope=focused");
+		expect(text(await run.finish())).toContain("数值表尚未通过校验");
+		await run.begin("只解释EPS公式是什么意思，不生成完整报告");
+		expect(await run.finish()).toBeUndefined();
+	});
+
+	it("does not require numeric-table delivery without an active workbook", async () => {
+		const run = harness();
+		update(run.cwd, "UPDATE documents SET is_current=0");
+		expect(await run.begin(FOCUSED_PROMPT)).toBeUndefined();
+		expect(await run.finish()).toBeUndefined();
+	});
+
+	it.each([
+		"只回答收入是多少，不要完整报告",
+		"请解释这个收入表是怎么计算的",
+		"请解释怎么做收入表",
+		"请说明给我收入表的步骤",
+		"不要给出收入表，只解释EPS公式",
+		"请只解释EPS公式和增长率的跨期传播",
+		"请修复收入表的代码",
+		"请按这张截图给出收入表",
+	])("leaves simple questions, explanations and excluded surfaces free: %s", async (prompt) => {
+		const run = harness();
+		expect(await run.begin(prompt)).toBeUndefined();
+		expect(await run.finish()).toBeUndefined();
+	});
+
 	it("queues one prose repair when the model stops on a repairable error, then delivers the ready report", async () => {
 		const run = harness();
 		await run.begin();

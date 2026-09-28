@@ -35,6 +35,7 @@ function isConditionalTrend(clause: string, match: RegExpMatchArray): boolean {
 export function validateReportSectionProse(
 	section: { title: string; analysis?: string },
 	sectionIndex: number,
+	options: { preserveGaps?: boolean } = {},
 ): { analysis: string; issues: ReportSectionIssue[] } {
 	const issues: ReportSectionIssue[] = [];
 	// Keep decimal points and URLs together. Validate only sentences that will be rendered.
@@ -42,6 +43,7 @@ export function validateReportSectionProse(
 		.split(/(?<=[。！？；\n])\s*|(?<=[.!?;])(?=\s|$)\s*/u)
 		.filter(
 			(sentence) =>
+				options.preserveGaps ||
 				!/未确认|未核实|未确定|尚未确定|待核|无法确认|无法确定|无法验证|未提供|未找到|未定位|未明确|不明确|未知|缺失|不详|未刷新|未重算/u.test(
 					sentence,
 				),

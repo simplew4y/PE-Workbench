@@ -4,6 +4,7 @@ import { defineTool } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { preparePeDocument } from "../documents.ts";
 import { readWorkbookContextSource, type WorkbookFactContext, workbookFactContextSchema } from "../workbook-context.ts";
+import { type Quantity, quantity, resolveSourceQuantity } from "../workbook-units.ts";
 import { normalizeText, openPeDataset } from "./database.ts";
 import type { PeDriverSensitivityResult } from "./driver-sensitivity.ts";
 import type { ExcelCellDetail } from "./excel-cells.ts";
@@ -27,6 +28,8 @@ export interface ReportFactRequest {
 	expected_period?: string;
 	expected_unit?: string;
 	display_unit?: string;
+	factor?: number;
+	scenario?: { run_id: string; driver_id: string; direction: "down" | "up" };
 	context?: WorkbookFactContext;
 	role?: "metric" | "target_price" | "per_share_value" | "enterprise_value" | "equity_value" | "current_price";
 	valuation_method?: string;
@@ -50,12 +53,6 @@ export interface PeValuationReportOptions {
 	sensitivityRunId?: string;
 }
 
-interface Quantity {
-	dimension: string;
-	scale: number;
-	label: string;
-}
-
 interface ReportFact {
 	id: string;
 	cell: ExcelCellDetail;
@@ -63,6 +60,7 @@ interface ReportFact {
 	base_value: number;
 	text: string;
 	table_value: string;
+	origin: string;
 	request: ReportFactRequest;
 }
 
@@ -73,7 +71,16 @@ export interface PeValuationReportResult {
 	section_issues: ReportSectionIssue[];
 	repair_scope?: "sections";
 	rendered_report?: string;
-	facts: Array<{ id: string; cell: ExcelCellDetail; text: string }>;
+	facts: Array<{
+		id: string;
+		cell: ExcelCellDetail;
+		text: string;
+		quantity: Quantity;
+		display_quantity: Quantity;
+		value: number;
+		factor?: number;
+		scenario?: ReportFactRequest["scenario"];
+	}>;
 	calculations: Array<{ id: string; value: number; text: string }>;
 	validation_scope: string;
 	sensitivity?: { run_id: string; ranked_driver_count: number; result_json: string };
@@ -108,7 +115,11 @@ function loadSensitivityRun(cwd: string, runId: string): PeDriverSensitivityResu
 	return result as PeDriverSensitivityResult;
 }
 
-function sensitivityLayout(result: PeDriverSensitivityResult, citations: ReadonlyMap<string, string>): string[] {
+function sensitivityLayout(
+	result: PeDriverSensitivityResult,
+	citations: ReadonlyMap<string, string>,
+	outputQuantity: Quantity,
+): string[] {
 	const drivers = result.ranked_drivers.filter((driver) => driver.active_driver).slice(0, 5);
 	if (!drivers.length) return [];
 	const lines = [
@@ -121,7 +132,7 @@ function sensitivityLayout(result: PeDriverSensitivityResult, citations: Readonl
 	];
 	for (const driver of drivers)
 		lines.push(
-			`| ${driver.rank} | ${markdownText(driver.label)} ${citations.get(driver.driver_id) ?? ""} | ${signedPercent(driver.down_output_change_percent)} | ${signedPercent(driver.up_output_change_percent)} | ${driver.max_abs_output_change_percent === undefined ? formatNumber(driver.max_abs_output_change) : `${formatNumber(driver.max_abs_output_change_percent)}%`} |`,
+			`| ${driver.rank} | ${markdownText(driver.label)} ${citations.get(driver.driver_id) ?? ""} | ${signedPercent(driver.down_output_change_percent)} | ${signedPercent(driver.up_output_change_percent)} | ${driver.max_abs_output_change_percent === undefined ? `${formatNumber(driver.max_abs_output_change)} ${outputQuantity.label}` : `${formatNumber(driver.max_abs_output_change_percent)}%`} |`,
 		);
 	if (result.status === "partial")
 		lines.push("", "部分候选输入因非数值、零基数或重算结果不可用而未进入排名；完整原因保留在审计附件中。");
@@ -129,31 +140,99 @@ function sensitivityLayout(result: PeDriverSensitivityResult, citations: Readonl
 	return lines;
 }
 
-function quantity(unit: string): Quantity | undefined {
-	const currency = /^(EUR|USD|CNY|RMB|HKD|GBP|JPY)(m|bn|_100m|\/share)?$/u.exec(unit);
-	if (currency) {
-		const suffix = currency[2] ?? "";
-		return {
-			dimension: `${currency[1]}${suffix === "/share" ? "/share" : ""}`,
-			scale: suffix === "m" ? 1e6 : suffix === "bn" ? 1e9 : suffix === "_100m" ? 1e8 : 1,
-			label: `${suffix === "m" ? "百万" : suffix === "bn" ? "十亿" : suffix === "_100m" ? "亿" : ""}${currency[1]}${suffix === "/share" ? "/股" : ""}`,
-		};
-	}
-	if (unit === "shares_m" || unit === "shares")
-		return {
-			dimension: "shares",
-			scale: unit === "shares_m" ? 1e6 : 1,
-			label: unit === "shares_m" ? "百万股" : "股",
-		};
-	if (unit === "%") return { dimension: "ratio", scale: 1, label: "%" };
-	if (unit === "per_share") return { dimension: "unknown_currency/share", scale: 1, label: "每股金额" };
-	if (unit === "share_count_unspecified_scale") return { dimension: "unknown_share_scale", scale: 1, label: "" };
-	if (["x", "multiple", "times"].includes(unit)) return { dimension: "multiple", scale: 1, label: "倍" };
-	return undefined;
+function formatNumber(value: number): string {
+	return new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 6 }).format(value);
 }
 
-function formatNumber(value: number): string {
-	return new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
+function formulaCode(formula: string): string {
+	const delimiter = "`".repeat(Math.max(0, ...[...formula.matchAll(/`+/gu)].map((match) => match[0].length)) + 1);
+	return `${delimiter} ${formula.replace(/\r?\n/gu, " ")} ${delimiter}`;
+}
+
+function sameFiniteValue(left: unknown, right: unknown): boolean {
+	return (
+		typeof left === "number" &&
+		typeof right === "number" &&
+		Number.isFinite(left) &&
+		Number.isFinite(right) &&
+		Math.abs(left - right) <= Math.max(1e-9, Math.abs(right) * 1e-9)
+	);
+}
+
+function scenarioValue(
+	cwd: string,
+	options: PeValuationReportOptions,
+	datasetId: string,
+	cell: ExcelCellDetail,
+	scenario: NonNullable<ReportFactRequest["scenario"]>,
+	runs: Map<string, PeDriverSensitivityResult>,
+): { value: number; origin: string } {
+	const run = runs.get(scenario.run_id) ?? loadSensitivityRun(cwd, scenario.run_id);
+	runs.set(scenario.run_id, run);
+	if (run.doc_id !== options.docId || run.dataset_id !== datasetId)
+		throw new Error("Scenario belongs to a different workbook or dataset");
+	if (!["completed", "partial"].includes(run.status) || !run.sensitivity_ranking_available)
+		throw new Error("Scenario has no measured recalculation");
+	if (
+		run.shock?.method !== "relative_one_at_a_time" ||
+		!Number.isFinite(run.shock.percent) ||
+		run.shock.percent <= 0 ||
+		!["down", "up"].includes(scenario.direction)
+	)
+		throw new Error("Scenario shock or direction is invalid");
+	const drivers = run.ranked_drivers.filter((candidate) => candidate.driver_id === scenario.driver_id);
+	if (drivers.length !== 1) throw new Error("Scenario requires one matching driver");
+	const driver = drivers[0];
+	const nodes = driver.propagation?.filter(
+		(node) => node.sheet_name === cell.sheet_name && node.cell_ref === cell.cell_ref,
+	);
+	if (nodes?.length !== 1) throw new Error("Scenario has no unique propagated value for this source cell");
+	const node = nodes[0];
+	const value = scenario.direction === "down" ? node.down_value : node.up_value;
+	if (
+		!sameFiniteValue(node.baseline_value, cell.numeric_value) ||
+		node.is_formula !== cell.is_formula ||
+		typeof value !== "number" ||
+		!Number.isFinite(value)
+	)
+		throw new Error("Scenario source baseline or propagated value is invalid");
+	const input = (
+		getPeExcelRange(cwd, {
+			docId: options.docId,
+			datasetId,
+			sheetName: driver.sheet_name,
+			cellRange: driver.cell_ref,
+		}).cells as ExcelCellDetail[]
+	)[0];
+	const output = (
+		getPeExcelRange(cwd, {
+			docId: options.docId,
+			datasetId,
+			sheetName: run.output.sheet_name,
+			cellRange: run.output.cell_ref,
+		}).cells as ExcelCellDetail[]
+	)[0];
+	if (
+		!input ||
+		input.is_formula ||
+		!sameFiniteValue(input.numeric_value, driver.baseline_input) ||
+		!output ||
+		!sameFiniteValue(output.numeric_value, run.output.baseline_value) ||
+		!sameFiniteValue(driver.baseline_output, run.output.baseline_value) ||
+		!sameFiniteValue(
+			driver.down_input,
+			driver.baseline_input - (Math.abs(driver.baseline_input) * run.shock.percent) / 100,
+		) ||
+		!sameFiniteValue(
+			driver.up_input,
+			driver.baseline_input + (Math.abs(driver.baseline_input) * run.shock.percent) / 100,
+		)
+	)
+		throw new Error("Scenario input or output no longer matches the source workbook");
+	return {
+		value,
+		origin: `隔离重算：${markdownText(input.row_label ?? driver.label)}相对${scenario.direction === "down" ? "下调" : "上调"}${formatNumber(run.shock.percent)}%，其余原始输入固定`,
+	};
 }
 
 function periodOrder(period: string): { year: number; grain: string } | undefined {
@@ -181,11 +260,12 @@ export function buildPeValuationReport(cwd: string, options: PeValuationReportOp
 		facts: [],
 		calculations: [],
 		validation_scope:
-			"Original value and context-text matching, deterministic arithmetic, plus optional validation of a saved isolated-workbook sensitivity run. Labels, periods, units and business roles are agent interpretation grounded in cited context; ordinary stored formula values are not treated as fresh recalculation.",
+			"Original values and context text, source-derived unit dimensions/scales, compatible conversions, deterministic arithmetic and optional saved isolated-workbook scenarios are checked. Labels, periods and business roles remain agent interpretation; ordinary stored formula values are not fresh recalculation.",
 	};
 	const facts = new Map<string, ReportFact>();
 	const statements = new Map<string, string>();
 	const ids = new Set<string>();
+	const scenarioRuns = new Map<string, PeDriverSensitivityResult>();
 	for (const request of options.facts) {
 		if (!/^[a-zA-Z][a-zA-Z0-9_]{0,63}$/u.test(request.id) || ids.has(request.id)) {
 			issues.push(`Invalid or duplicate fact id: ${request.id}`);
@@ -252,10 +332,52 @@ export function buildPeValuationReport(cwd: string, options: PeValuationReportOp
 			issues.push(`${location}: metric label is required`);
 			continue;
 		}
-		const sourceQuantity = quantity(cell.unit ?? "");
-		const displayQuantity = quantity(request.display_unit ?? cell.unit ?? "");
-		if (!sourceQuantity || !displayQuantity || sourceQuantity.dimension !== displayQuantity.dimension) {
+		let sourceQuantity: Quantity;
+		try {
+			const unitCell = contextCells[contextCells.length - 1];
+			sourceQuantity = resolveSourceQuantity({
+				text:
+					request.context.unit.field === "number_format"
+						? (unitCell.number_format ?? "")
+						: (unitCell.display_value ?? ""),
+				field: request.context.unit.field,
+				expectedUnit: request.expected_unit,
+				metricLabel: contextCells[0].display_value,
+			});
+		} catch (error) {
+			issues.push(`${location}: ${error instanceof Error ? error.message : String(error)}`);
+			continue;
+		}
+		const displayQuantity = request.display_unit ? quantity(request.display_unit) : sourceQuantity;
+		if (!displayQuantity || sourceQuantity.dimension !== displayQuantity.dimension) {
 			issues.push(`${location}: unresolved or incompatible unit`);
+			continue;
+		}
+		let rawValue = cell.numeric_value;
+		let origin = cell.is_formula ? "模型保存值" : "模型填写值";
+		try {
+			if (request.factor !== undefined && request.scenario)
+				throw new Error("Use either a supplemental factor or a recalculated scenario, never both");
+			if (request.factor !== undefined) {
+				if (!Number.isFinite(request.factor)) throw new Error("Supplemental factor must be finite");
+				rawValue *= request.factor;
+				origin = `补充条件：原值×${formatNumber(request.factor)}`;
+			}
+			if (request.scenario) {
+				const selected = scenarioValue(
+					cwd,
+					options,
+					String(range.dataset_id),
+					cell,
+					request.scenario,
+					scenarioRuns,
+				);
+				rawValue = selected.value;
+				origin = selected.origin;
+			}
+			if (!Number.isFinite(rawValue)) throw new Error("Non-finite scenario or supplemental value");
+		} catch (error) {
+			issues.push(`${location}: ${error instanceof Error ? error.message : String(error)}`);
 			continue;
 		}
 		// Excel's percent format scales a stored fraction by 100. Formula text is
@@ -268,10 +390,12 @@ export function buildPeValuationReport(cwd: string, options: PeValuationReportOp
 			continue;
 		}
 		const baseValue =
-			(cell.numeric_value * sourceQuantity.scale) /
-			(sourceQuantity.dimension === "ratio" && !percentIsFraction ? 100 : 1);
+			(rawValue * sourceQuantity.scale) / (sourceQuantity.dimension === "ratio" && !percentIsFraction ? 100 : 1);
 		const displayValue = sourceQuantity.dimension === "ratio" ? baseValue * 100 : baseValue / displayQuantity.scale;
-		const origin = cell.is_formula ? "模型保存值" : "模型填写值";
+		if (!Number.isFinite(baseValue) || !Number.isFinite(displayValue)) {
+			issues.push(`${location}: non-finite unit conversion`);
+			continue;
+		}
 		const citations = [
 			...new Set([cell.markdown_citation, ...contextCells.map((context) => context.markdown_citation)]),
 		].join(" ");
@@ -284,10 +408,20 @@ export function buildPeValuationReport(cwd: string, options: PeValuationReportOp
 			base_value: baseValue,
 			text,
 			table_value: tableValue,
+			origin,
 			request,
 		});
 		statements.set(request.id, text);
-		result.facts.push({ id: request.id, cell, text });
+		result.facts.push({
+			id: request.id,
+			cell,
+			text,
+			quantity: sourceQuantity,
+			display_quantity: displayQuantity,
+			value: rawValue,
+			factor: request.factor,
+			scenario: request.scenario,
+		});
 	}
 
 	const outputLocations = new Set(
@@ -319,15 +453,21 @@ export function buildPeValuationReport(cwd: string, options: PeValuationReportOp
 		if (calculation.operation === "growth" || calculation.operation === "change") {
 			const before = periodOrder(left.cell.period ?? "");
 			const after = periodOrder(right.cell.period ?? "");
+			const conditionChange =
+				calculation.operation === "change" &&
+				left.cell.sheet_name === right.cell.sheet_name &&
+				left.cell.cell_ref === right.cell.cell_ref &&
+				left.cell.period === right.cell.period &&
+				JSON.stringify([left.request.factor, left.request.scenario]) !==
+					JSON.stringify([right.request.factor, right.request.scenario]);
 			if (
 				!sameDimension ||
 				normalizeText(left.cell.row_label) !== normalizeText(right.cell.row_label) ||
-				!before ||
-				!after ||
-				before.grain !== after.grain ||
-				before.year >= after.year
+				(!conditionChange && (!before || !after || before.grain !== after.grain || before.year >= after.year))
 			) {
-				issues.push(`${calculation.id}: change needs the same metric, units and comparable ordered periods`);
+				issues.push(
+					`${calculation.id}: change needs the same metric and units, with comparable ordered periods or different verified conditions of the same source cell`,
+				);
 				continue;
 			}
 			if (calculation.operation === "growth" && left.base_value <= 0) {
@@ -348,7 +488,10 @@ export function buildPeValuationReport(cwd: string, options: PeValuationReportOp
 					: left.quantity.dimension === "ratio"
 						? "个百分点"
 						: left.quantity.label;
-			text = `${markdownText(left.cell.row_label ?? "指标")}（${markdownText(left.cell.period ?? "")} → ${markdownText(right.cell.period ?? "")}）：${value > 0 ? "上升" : value < 0 ? "下降" : "不变"} ${formatNumber(scaled)} ${unit}`;
+			const comparison = conditionChange
+				? `${markdownText(left.cell.period ?? "")}，${left.origin} → ${right.origin}`
+				: `${markdownText(left.cell.period ?? "")} → ${markdownText(right.cell.period ?? "")}`;
+			text = `${markdownText(left.cell.row_label ?? "指标")}（${comparison}）：${value > 0 ? "上升" : value < 0 ? "下降" : "不变"} ${formatNumber(scaled)} ${unit}`;
 		} else if (calculation.operation === "ratio") {
 			if (!sameDimension || !left.cell.period || left.cell.period !== right.cell.period || right.base_value === 0) {
 				issues.push(`${calculation.id}: ratio requires matching units, periods and nonzero denominator`);
@@ -383,7 +526,7 @@ export function buildPeValuationReport(cwd: string, options: PeValuationReportOp
 				continue;
 			}
 			value = left.base_value * right.base_value;
-			text = `${markdownText(left.cell.row_label ?? "每股收益")}${left.cell.period ? `（${markdownText(left.cell.period)}）` : ""}× ${markdownText(right.cell.row_label ?? "倍数")}：${formatNumber(value / left.quantity.scale)} ${left.quantity.label}`;
+			text = `${markdownText(left.cell.row_label ?? "每股收益")}${left.cell.period ? `（${markdownText(left.cell.period)}）` : ""} ${formatNumber(left.base_value / left.quantity.scale)} ${left.quantity.label} × ${markdownText(right.cell.row_label ?? "倍数")} ${formatNumber(right.base_value)} 倍：${formatNumber(value / left.quantity.scale)} ${left.quantity.label}${left.request.factor !== undefined || right.request.factor !== undefined ? "（补充条件测算）" : ""}`;
 		}
 		if (!Number.isFinite(value)) {
 			issues.push(`${calculation.id}: non-finite result`);
@@ -402,7 +545,7 @@ export function buildPeValuationReport(cwd: string, options: PeValuationReportOp
 		try {
 			const sensitivity = loadSensitivityRun(cwd, options.sensitivityRunId);
 			const outputLocation = `${sensitivity.output.sheet_name}!${sensitivity.output.cell_ref}`;
-			const selectedOutput = [...facts.values()].some(
+			const selectedOutput = [...facts.values()].find(
 				(fact) =>
 					["target_price", "per_share_value", "enterprise_value", "equity_value"].includes(
 						fact.request.role ?? "",
@@ -435,7 +578,8 @@ export function buildPeValuationReport(cwd: string, options: PeValuationReportOp
 					}
 					citations.set(driver.driver_id, cell.markdown_citation);
 				}
-				if (!issues.length) sensitivityLines.push(...sensitivityLayout(sensitivity, citations));
+				if (!issues.length)
+					sensitivityLines.push(...sensitivityLayout(sensitivity, citations, selectedOutput.quantity));
 				result.sensitivity = {
 					run_id: sensitivity.run_id,
 					ranked_driver_count: sensitivity.ranked_drivers.length,
@@ -467,8 +611,11 @@ export function buildPeValuationReport(cwd: string, options: PeValuationReportOp
 			issues.push("An overview requires agent-selected valuation outputs and their source context");
 	}
 	const usedStatements = new Set<string>();
+	const shownFormulas = new Set<string>();
 	for (const [sectionIndex, section] of options.sections.entries()) {
-		const { analysis, issues: sectionIssues } = validateReportSectionProse(section, sectionIndex);
+		const { analysis, issues: sectionIssues } = validateReportSectionProse(section, sectionIndex, {
+			preserveGaps: options.scope === "focused",
+		});
 		result.section_issues.push(...sectionIssues);
 		for (const issue of sectionIssues)
 			issues.push(`章节「${section.title}」的 ${issue.field}：${issue.excerpt} — ${issue.repair}`);
@@ -486,7 +633,7 @@ export function buildPeValuationReport(cwd: string, options: PeValuationReportOp
 		lines.push(`## ${markdownText(section.title)}`, "");
 		const sectionFacts = section.fact_ids.filter((id) => facts.has(id) && !usedStatements.has(id));
 		if (sectionFacts.length > 1) {
-			lines.push("| 指标 | 期间 | 模型数值 |", "| --- | --- | ---: |");
+			lines.push("| 指标 | 期间 | 数值与口径 |", "| --- | --- | ---: |");
 			for (const id of sectionFacts) {
 				const fact = facts.get(id);
 				if (!fact || usedStatements.has(id)) continue;
@@ -503,6 +650,19 @@ export function buildPeValuationReport(cwd: string, options: PeValuationReportOp
 			if (usedStatements.has(id)) continue;
 			usedStatements.add(id);
 			lines.push(`- ${text}`);
+		}
+		if (options.scope === "focused") {
+			for (const id of section.fact_ids) {
+				const fact = facts.get(id);
+				if (!fact?.cell.formula) continue;
+				const location = `${fact.cell.sheet_name}!${fact.cell.cell_ref}`;
+				if (shownFormulas.has(location)) continue;
+				shownFormulas.add(location);
+				lines.push(
+					"",
+					`原模型公式 ${markdownText(location)}：${formulaCode(fact.cell.formula)}。${fact.cell.markdown_citation}`,
+				);
+			}
 		}
 		if (analysis) lines.push("", `分析推断：${markdownText(analysis)}`);
 		lines.push("");
@@ -527,7 +687,7 @@ export const peValuationReportTool = defineTool({
 	label: "PE Valuation Report",
 	promptSnippet: PE_VALUATION_REPORT_PROMPT_SNIPPET,
 	description:
-		"Build a human-readable valuation report from selected source values and original context cells. Supply canonical labels, periods, units and business roles after reading their sources; context cites the exact label/period/unit text or number format. The tool checks source facts, compatible conversions and arithmetic. If sensitivity_run_id is supplied, it validates the saved isolated-workbook run against the same document, selected output and original inputs, then renders at most five measured Top Drivers. An overview renders only explicitly selected output facts and methods. Qualitative analysis must reference fact_ids; numbers and observed trends belong in facts/calculations. Keep tool logs and full audits outside the main report. Once ready, return rendered_report verbatim.",
+		"Build a human-readable valuation overview or focused quantitative answer from selected source values and original context cells. Source unit text determines currency, dimension and scale; expected_unit is an assertion, display_unit requests a compatible numeric conversion. For conditional EPS/multiple tables use fact.factor and product calculations; for upstream model scenarios use fact.scenario referencing saved propagation values. Preserve all requested cases and qualitative explanations in sections. If sensitivity_run_id is supplied, validate the saved run and render measured Top Drivers. An overview renders only selected valuation outputs and methods. Numbers and observed trends belong in facts/calculations; qualitative analysis references fact_ids. Once ready, return rendered_report verbatim.",
 	parameters: Type.Object({
 		doc_id: Type.String({ minLength: 1 }),
 		dataset_id: Type.Optional(Type.String()),
@@ -574,10 +734,29 @@ export const peValuationReportTool = defineTool({
 				expected_unit: Type.String({
 					minLength: 1,
 					description:
-						"Canonical unit interpreted from context.unit; the tool checks source text and compatible arithmetic, not the interpretation.",
+						"Assert the source unit, e.g. CNYm, EUR/share, shares_m, %. Must match the currency, dimension and scale parsed independently from original context.unit. Do not use the desired display unit here.",
 				}),
 				display_unit: Type.Optional(
 					Type.String({ description: "Canonical compatible unit, e.g. EURm, EUR_100m, EUR/share, shares_m, %." }),
+				),
+				factor: Type.Optional(
+					Type.Number({
+						description:
+							"User-requested supplemental multiplier of this original fact, e.g. 0.9/1/1.1 for an EPS or P/E condition table. Preserves source units and labels the value as a supplemental condition, never as an upstream model recalculation. For unit conversions use display_unit instead. Mutually exclusive with scenario.",
+					}),
+				),
+				scenario: Type.Optional(
+					Type.Object(
+						{
+							run_id: Type.String({ pattern: "^[0-9a-fA-F-]{36}$" }),
+							driver_id: Type.String({ minLength: 1 }),
+							direction: Type.Union([Type.Literal("down"), Type.Literal("up")]),
+						},
+						{
+							description:
+								"Read this exact source cell's propagated value from a saved pe_driver_sensitivity run. The run, source baseline and driver are verified; units are inherited from this cell's original context. Never submit a manually calculated scenario number.",
+						},
+					),
 				),
 			}),
 			{ maxItems: 40 },
@@ -585,13 +764,19 @@ export const peValuationReportTool = defineTool({
 		calculations: Type.Array(
 			Type.Object({
 				id: Type.String(),
-				operation: Type.Union([
-					Type.Literal("growth"),
-					Type.Literal("change"),
-					Type.Literal("ratio"),
-					Type.Literal("upside"),
-					Type.Literal("product"),
-				]),
+				operation: Type.Union(
+					[
+						Type.Literal("growth"),
+						Type.Literal("change"),
+						Type.Literal("ratio"),
+						Type.Literal("upside"),
+						Type.Literal("product"),
+					],
+					{
+						description:
+							"growth compares ordered periods. change compares ordered periods, or different verified factor/scenario conditions of the exact same source cell; condition changes are not time-series growth.",
+					},
+				),
 				left: Type.String({ description: "Numerator/earlier-period/target/EPS fact id." }),
 				right: Type.String({ description: "Denominator/later-period/reference price/multiple fact id." }),
 			}),

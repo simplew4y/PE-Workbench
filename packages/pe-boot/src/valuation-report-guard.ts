@@ -38,6 +38,8 @@ interface ReadyReport {
 	text: string;
 }
 
+type ReportMode = "overview" | "focused" | "none";
+
 function object(value: unknown): Record<string, unknown> | undefined {
 	return value !== null && typeof value === "object" && !Array.isArray(value)
 		? (value as Record<string, unknown>)
@@ -102,6 +104,12 @@ function activeWorkbooks(cwd: string): Map<string, WorkbookVersion> {
 	}
 }
 
+function isTrackingOperation(text: string): boolean {
+	return /(?:创建|新建|建立|构建|生成|配置|设置|启用|开启|暂停|关闭|更新|刷新|记录|录入|添加|加入|加到|保存).{0,30}(?:股票[追跟]踪|股价[追跟]踪|[追跟]踪(?:表|流程)|模拟(?:交易|买入|卖出|持仓))|\b(?:create|configure|set\s+up|refresh|update|record|add|enable|disable|pause|start|save)\b[^.!?\n]{0,50}\b(?:stock\s+track(?:ing|ers?)|price\s+tracking|tracking\s+(?:table|workflow)|(?:simulated|paper)\s+(?:trade|buy|sell|position)s?)\b/iu.test(
+		text,
+	);
+}
+
 function isOverviewRequest(text: string, imageCount: number): boolean {
 	if (
 		/(?:代码|源码|编程|程序|部署|提示词|准确率|准确性|如何优化|怎么优化|优化流程|优化报告|修复|\b(?:code|coding|prompt|accuracy|debug|deployment|implementation)\b)/iu.test(
@@ -115,10 +123,7 @@ function isOverviewRequest(text: string, imageCount: number): boolean {
 		)
 	)
 		return false;
-	const trackingOperation =
-		/(?:创建|新建|建立|构建|生成|配置|设置|启用|开启|暂停|关闭|更新|刷新|记录|录入|添加|加入|加到|保存).{0,30}(?:股票[追跟]踪|股价[追跟]踪|[追跟]踪(?:表|流程)|模拟(?:交易|买入|卖出|持仓))|\b(?:create|configure|set\s+up|refresh|update|record|add|enable|disable|pause|start|save)\b[^.!?\n]{0,50}\b(?:stock\s+track(?:ing|ers?)|price\s+tracking|tracking\s+(?:table|workflow)|(?:simulated|paper)\s+(?:trade|buy|sell|position)s?)\b/iu.test(
-			text,
-		);
+	const trackingOperation = isTrackingOperation(text);
 	const explicitReport =
 		/(?:生成|撰写|出具|提供|输出|交付|整理|完成).{0,20}(?:(?:完整|整体|全面)(?:的)?(?:估值模型|估值|模型)?报告|估值报告)|\b(?:write|generate|produce|prepare|provide|deliver)\b[^.!?\n]{0,40}\b(?:(?:full|complete|overall)\s+(?:valuation\s+(?:model\s+)?)?report|valuation\s+report)\b/iu.test(
 			text,
@@ -157,10 +162,48 @@ function isOverviewRequest(text: string, imageCount: number): boolean {
 	);
 }
 
-function blockedReport(issues: string[]): string {
-	const missing = issues.length ? issues : ["尚未取得当前工作簿整体报告的校验结果。"];
+function requestMode(text: string, imageCount: number): ReportMode {
+	// Declining a complete report does not decline a requested local numeric table.
+	const reportOptOut =
+		/(?:不(?:要|用|必|需要)?|无需|别|勿)\s*(?:再|为此)?\s*(?:给我|给出|提供|生成|输出|创建|制作|写|做|给)?\s*(?:(?:完整|整体|全面)(?:的)?\s*)?(?:投资|估值|模型|研究)?(?:分析)?报告|\b(?:do not|don't|no|without)\s+(?:(?:generate|write|produce|provide)\s+)?(?:(?:a|the)\s+)?(?:(?:full|complete|overall)\s+)?(?:(?:valuation|investment|research)\s+)?report\b/giu;
+	const affirmative = text.replace(reportOptOut, "");
+	const declinesOverview = affirmative !== text;
+	if (!declinesOverview && isOverviewRequest(text, imageCount)) return "overview";
+	if (
+		isTrackingOperation(affirmative) ||
+		/(?:代码|源码|编程|部署|提示词|准确率|准确性|如何优化|怎么优化|修复|截图|截屏|图片|取消|停止|算了|先别|不要继续|不用分析|别分析|\b(?:code|coding|prompt|accuracy|debug|deployment|implementation|cancel|stop|screenshot|image.only)\b|never mind)/iu.test(
+			affirmative,
+		) ||
+		(imageCount > 0 && !/(?:excel|工作簿|\.xlsx\b|\.xlsm\b)/iu.test(affirmative))
+	)
+		return "none";
+	const financial =
+		/(?:收入|利润|盈利|现金流|股数|股本|增长率|毛利率|税率|目标价|价格|估值|EPS|P\/E|EBITDA|FCF|\b(?:revenue|earnings|profit|cash flow|shares|growth|margin|tax|price|valuation)\b)/iu.test(
+			affirmative,
+		);
+	const tableRequest = affirmative.replace(
+		/(?:不要|不用|无需|别|勿|不)\s*(?:给出|生成|输出|制作|提供|整理|展示|列出|做)?[^。！？\n，,；;]{0,40}(?:表格|数值表|数据表|价格表|收入表|结果表|跨期表|对照表|对比表|比较表|矩阵)/giu,
+		"",
+	);
+	const table =
+		/(?:给出|生成|输出|制作|提供|整理|展示|列出|列|做一张|做一个)[^。！？\n]{0,100}(?:表格|数值表|数据表|价格表|收入表|结果表|跨期表|对照表|对比表|比较表|矩阵)|(?:用|以)\s*表格?[^。！？\n]{0,40}(?:给出|列出|展示|比较|对比|呈现)|\b(?:give|generate|produce|provide|show|create|list|compare)\b[^.!?\n]{0,100}\b(?:table|matrix)\b/iu.test(
+			tableRequest,
+		);
+	// Bare 做/给我 are table requests at a clause start, but not in “解释怎么做收入表”.
+	const directTable =
+		/(?:^|[，,。！？\n：:；;]|并(?:且)?)\s*(?:请|麻烦)?\s*(?:帮我|为我)?\s*(?:只|仅|单独)?\s*(?:做|给我)[^。！？\n，,；;]{0,80}(?:表格|数值表|数据表|价格表|收入表|结果表|跨期表|对照表|对比表|比较表|矩阵)/u.test(
+			tableRequest,
+		);
+	return financial && (table || directTable) ? "focused" : "none";
+}
+
+function blockedReport(issues: string[], mode: ReportMode): string {
+	const label = mode === "focused" ? "局部数值表" : "整体报告";
+	const missing = issues.length ? issues : [`尚未取得当前工作簿${label}的校验结果。`];
 	return [
-		"本次估值报告尚未通过校验，暂时无法交付完整报告。",
+		mode === "focused"
+			? "本次数值表尚未通过校验，暂时无法交付未经核验的数字与单位。"
+			: "本次估值报告尚未通过校验，暂时无法交付完整报告。",
 		"",
 		...missing.slice(0, 6).map(
 			(issue) =>
@@ -170,7 +213,7 @@ function blockedReport(issues: string[]): string {
 					.replace(/\s+/gu, " ")}`,
 		),
 		"",
-		"需补齐上述证据或修正冲突，再重新生成经过校验的报告。",
+		`需补齐上述证据或修正冲突，再重新生成经过校验的${label}。`,
 	].join("\n");
 }
 
@@ -181,7 +224,8 @@ export function registerValuationReportGuard(pi: ExtensionAPI): void {
 	let generation = 0;
 	let revision = 0;
 	let eligible = false;
-	let previousOverview = false;
+	let mode: ReportMode = "none";
+	let previousMode: ReportMode = "none";
 	let initialPrompt: string | undefined;
 	let versions = new Map<string, WorkbookVersion>();
 	let lockedDocId: string | undefined;
@@ -197,6 +241,7 @@ export function registerValuationReportGuard(pi: ExtensionAPI): void {
 		generation++;
 		revision = 0;
 		eligible = false;
+		mode = "none";
 		ready = undefined;
 		sectionRepair = undefined;
 		repairAttempts = 0;
@@ -215,13 +260,14 @@ export function registerValuationReportGuard(pi: ExtensionAPI): void {
 	function beginRequest(text: string, imageCount: number, ctx: ExtensionContext): void {
 		const continuation =
 			sameSession(ctx) &&
-			previousOverview &&
+			previousMode !== "none" &&
 			/^(?:请)?(?:继续|继续分析|继续生成|continue|resume)[。.!！\s]*$/iu.test(text.trim());
 		clearRun();
 		sessionId = ctx.sessionManager.getSessionId();
 		workspace = ctx.cwd;
-		previousOverview = continuation || isOverviewRequest(text, imageCount);
-		if (!previousOverview || !existsSync(join(ctx.cwd, "meta", "collection.sqlite3"))) return;
+		mode = continuation ? previousMode : requestMode(text, imageCount);
+		previousMode = mode;
+		if (mode === "none" || !existsSync(join(ctx.cwd, "meta", "collection.sqlite3"))) return;
 		try {
 			versions = activeWorkbooks(ctx.cwd);
 			eligible = versions.size > 0;
@@ -243,7 +289,7 @@ export function registerValuationReportGuard(pi: ExtensionAPI): void {
 
 	function selectDocument(docId: string): void {
 		if (docId !== selectedDocId) {
-			invalidate("分析所用文档发生变化，需要重新生成当前版本的整体报告。");
+			invalidate(`分析所用文档发生变化，需要重新生成当前版本的${mode === "focused" ? "局部数值表" : "整体报告"}。`);
 			selectedDocId = docId;
 		}
 	}
@@ -251,6 +297,15 @@ export function registerValuationReportGuard(pi: ExtensionAPI): void {
 	pi.on("before_agent_start", (event, ctx) => {
 		beginRequest(event.prompt, event.images?.length ?? 0, ctx);
 		initialPrompt = event.prompt;
+		if (eligible && mode === "focused")
+			return {
+				message: {
+					customType: "pe-focused-numeric-delivery",
+					display: false,
+					content:
+						"This request requires a checked local numeric table, not a whole-model report. Load pe-valuation-report and use pe_valuation_report with scope=focused. Read the original unit context for each fact and use the current tool schema for supported source values, calculations and scenario conditions; never submit invented results. Include all requested numeric comparisons and their explanations in the focused result. Preserve concrete gaps when a requested calculation is unavailable; do not silently replace the task with a smaller baseline-only table. This does not require an overview or full model-understanding review. Return rendered_report verbatim only when status=ready, without rewriting numbers or units. If required tools are unavailable, state the limitation instead of inventing a result.",
+				},
+			};
 	});
 	pi.on("message_start", (event, ctx) => {
 		if (event.message.role !== "user") return;
@@ -272,12 +327,12 @@ export function registerValuationReportGuard(pi: ExtensionAPI): void {
 	});
 	pi.on("session_start", () => {
 		clearRun();
-		previousOverview = false;
+		previousMode = "none";
 		initialPrompt = undefined;
 	});
 	pi.on("session_tree", () => {
 		clearRun();
-		previousOverview = false;
+		previousMode = "none";
 		initialPrompt = undefined;
 	});
 	pi.on("agent_settled", () => {
@@ -295,7 +350,7 @@ export function registerValuationReportGuard(pi: ExtensionAPI): void {
 			latestReportCallId = event.toolCallId;
 			ready = undefined;
 			sectionRepair = undefined;
-			issues = ["整体报告的校验尚未完成。"];
+			issues = [mode === "focused" ? "局部数值表的校验尚未完成。" : "整体报告的校验尚未完成。"];
 		}
 		calls.set(event.toolCallId, { generation, revision, docId, isReport, scope: input?.scope });
 	});
@@ -325,7 +380,7 @@ export function registerValuationReportGuard(pi: ExtensionAPI): void {
 					issues = details.issues;
 				if (
 					call.isReport &&
-					call.scope === "overview" &&
+					call.scope === mode &&
 					details?.status === "blocked" &&
 					details.repair_scope === "sections" &&
 					Array.isArray(details.issues) &&
@@ -357,8 +412,12 @@ export function registerValuationReportGuard(pi: ExtensionAPI): void {
 				issues = ["报告与本轮选定的工作簿或工具调用不一致。"];
 				return;
 			}
-			if (call.scope !== "overview") {
-				issues = ["当前请求需要整体估值报告，局部指标报告不能替代完整校验。"];
+			if (call.scope !== mode) {
+				issues = [
+					mode === "focused"
+						? "当前请求需要局部数值表，请使用 scope=focused 保留所需结果与说明。"
+						: "当前请求需要整体估值报告，局部指标报告不能替代完整校验。",
+				];
 				return;
 			}
 			if (
@@ -408,18 +467,17 @@ export function registerValuationReportGuard(pi: ExtensionAPI): void {
 					{
 						customType: "pe-valuation-report-repair",
 						display: false,
-						content:
-							"The current valuation report failed only section prose validation. Continue the existing report request: use section_issues from the latest pe_valuation_report result to revise the affected title/analysis fields, preserving checked facts and calculations. Route numeric claims and observed financial trends through facts/calculations and fact_ids; retain supported qualitative drivers and explicit conditional risks. Remove manual citations and unconfirmed metadata commentary. Do not relabel unchecked facts as hypotheses. Do not reread the workbook for prose-only errors. Call pe_valuation_report again for the same doc_id with scope=overview, then return rendered_report verbatim only if ready. This is one bounded repair attempt; do not repeat the failed request unchanged.",
+						content: `The current valuation report failed only section prose validation. Continue the existing report request: use section_issues from the latest pe_valuation_report result to revise the affected title/analysis fields, preserving checked facts and calculations. Route numeric claims and observed financial trends through facts/calculations and fact_ids; retain supported qualitative drivers and explicit conditional risks. Remove manual citations and unconfirmed metadata commentary. Do not relabel unchecked facts as hypotheses. Do not reread the workbook for prose-only errors. Call pe_valuation_report again for the same doc_id with scope=${mode}, then return rendered_report verbatim only if ready. Preserve all requested comparisons, scenario conditions and explanations; do not silently reduce scope. This is one bounded repair attempt; do not repeat the failed request unchanged.`,
 					},
 					{ deliverAs: "followUp" },
 				);
 				repairAttempts++;
 				sectionRepair = undefined;
 				text = "正在修正报告文字并重新校验。";
-			} else text = ready?.text ?? blockedReport(issues);
+			} else text = ready?.text ?? blockedReport(issues, mode);
 		} catch {
 			invalidate("无法重新核验当前工作簿版本，暂不交付报告。");
-			text = blockedReport(issues);
+			text = blockedReport(issues, mode);
 		}
 		return {
 			message: {
