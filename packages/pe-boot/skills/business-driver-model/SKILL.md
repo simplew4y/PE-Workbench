@@ -7,11 +7,11 @@ description: 先还原分析师的收入、成本利润、现金流及估值输�
 
 开始前读取 [共同数据约定](../investment-framework-builder/references/state-contract.md)。完整流程只更新指定状态字段和分析附件，不各写一篇完整报告；单独调用时可返回该模块的中文结果。保留来源与稳定 ID。
 
-## 输入与输出
+## 📝 输入与输出
 
 输入：context、sources、既有evidence及原工作簿。输出：模型说明、model_understanding的说明与检查证据、evidence、business、metrics、assumptions、model_checks、gaps，以及趋势图附件。验收A的最终状态由Reviewer记录；不得写入市场共识或最终投资评级。
 
-有工作簿时先执行 [模型说明与理解验收](../valuation-model-review/references/model-understanding.md)，并读取 [模型审核规则](../valuation-model-review/SKILL.md) 的“内部核验要求”和“范围与证据”，不要执行其整份审核报告。无工作簿时用财报建立基线并注明模型缺失，不虚构Excel来源。
+有工作簿时先执行 [模型说明与理解验收](../valuation-model-review/references/model-understanding.md)，并读取 [模型审核规则](../valuation-model-review/SKILL.md) 的“审核特有的勾稽”和“公共规则与范围”，不要执行其整份审核报告。无工作簿时用财报建立基线并注明模型缺失，不虚构Excel来源。
 
 先按公共参考核对已有说明的身份、版本和范围。同版本可复用说明、输入角色、路径证据、验收A和未解决事项；只补新问题、版本差异或范围缺口，不重新遍历或另写说明。没有适用成果时交付独立模型说明和A的检查证据，再进入以下经营研究。Reviewer保留必要抽查；不能用后续实际或市场预测替换原模型输入来验收理解。
 
