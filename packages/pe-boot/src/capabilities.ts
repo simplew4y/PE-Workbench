@@ -21,7 +21,14 @@ const retrievalTools = [
 	"pe_excel_range",
 	"pe_source_detail",
 ];
-const modelTools = ["pe_formula_trace", "pe_valuation_output_locate", "pe_valuation_date_resolve", "pe_model_validate"];
+const modelTools = [
+	"pe_formula_trace",
+	"pe_valuation_output_locate",
+	"pe_valuation_date_resolve",
+	"pe_model_validate",
+	"pe_driver_discover",
+	"pe_driver_sensitivity",
+];
 
 // Package-owned paths: models select IDs, never executable paths.
 export const PE_CAPABILITIES: readonly PeCapability[] = [

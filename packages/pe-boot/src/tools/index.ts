@@ -6,6 +6,8 @@ import { peConsensusCardsTool } from "./consensus-cards.ts";
 import { peDatasetMemoTool } from "./dataset-memo.ts";
 import { peDatasetSearchTool } from "./dataset-search.ts";
 import { peDocumentOpenTool } from "./document-open.ts";
+import { peDriverDiscoverTool } from "./driver-discover.ts";
+import { peDriverSensitivityTool } from "./driver-sensitivity.ts";
 import { peEvidenceDetailTool } from "./evidence-detail.ts";
 import { peExcelRangeTool } from "./excel-range.ts";
 import { peExcelRenderTool } from "./excel-render.ts";
@@ -50,6 +52,8 @@ export function registerPeTools(pi: ExtensionAPI, options: PeCapabilityOptions =
 	pi.registerTool(peValuationOutputTool);
 	pi.registerTool(peValuationDateTool);
 	pi.registerTool(peModelValidateTool);
+	pi.registerTool(peDriverDiscoverTool);
+	pi.registerTool(peDriverSensitivityTool);
 	pi.registerTool(peValuationReportTool);
 	registerValuationReportGuard(pi);
 	pi.registerTool(peDatasetMemoTool);
@@ -65,6 +69,8 @@ export {
 	peConsensusCardsTool,
 	peDatasetSearchTool,
 	peDocumentOpenTool,
+	peDriverDiscoverTool,
+	peDriverSensitivityTool,
 	peEvidenceDetailTool,
 	peExcelRangeTool,
 	peFormulaTraceTool,

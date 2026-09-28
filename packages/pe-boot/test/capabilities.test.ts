@@ -105,6 +105,12 @@ describe("PE capability runtime", () => {
 		expect(h.eventsOfType("tool_execution_end").every((event) => !event.isError)).toBe(true);
 	});
 
+	it("activates measured driver discovery and sensitivity with valuation analysis", () => {
+		expect(getPeCapabilityTools(["pe-valuation-model-explainer"])).toEqual(
+			expect.arrayContaining(["pe_driver_discover", "pe_driver_sensitivity"]),
+		);
+	});
+
 	it("delays UI schemas, then adds the native tool and its instructions on the next real agent turn", async () => {
 		const h = await setup();
 		expect(h.session.getActiveToolNames()).not.toContain("pe_render_ui");

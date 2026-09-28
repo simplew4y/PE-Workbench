@@ -13,6 +13,8 @@ const WORKBOOK_TOOLS = new Set([
 	"pe_valuation_output_locate",
 	"pe_valuation_date_resolve",
 	"pe_model_validate",
+	"pe_driver_discover",
+	"pe_driver_sensitivity",
 	"pe_valuation_report",
 ]);
 
