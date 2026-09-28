@@ -7,6 +7,8 @@ import { resolveSessionPath } from "./session-reader";
 import { getRpcSession } from "./rpc-manager";
 import { parsePeSourceHref } from "./pe-source";
 import { isRenderedResearchExcerpt } from "./research-excerpt";
+import { getTurnFrameworkReport } from "./framework-proposal";
+import type { ToolResultMessage } from "./types";
 
 export function researchProject(value: unknown) {
   if (typeof value !== "string" || !value.trim() || value.length > 128) throw new ResearchError(400, "请选择研究项目");
@@ -40,7 +42,20 @@ export async function readResearchCardOrigin(root: string, value: unknown): Prom
     throw new ResearchError(404, "找不到当前项目的来源会话");
   const entry = manager.getEntry(input.entryId);
   if (entry?.type !== "message" || entry.message.role !== "assistant") throw new ResearchError(404, "找不到来源回答");
-  const original = entry.message.content.filter((block) => block.type === "text").map((block) => block.text).join("\n").trim();
+  const frameworkCalls = entry.message.content.flatMap((block) => block.type === "toolCall"
+    ? [{ type: "toolCall" as const, toolCallId: block.id, toolName: block.name, input: block.arguments }] : []);
+  const callIds = new Set(frameworkCalls.map((block) => block.toolCallId));
+  const frameworkResults = new Map<string, ToolResultMessage>();
+  for (const candidate of manager.getEntries()) {
+    if (candidate.type !== "message" || candidate.message.role !== "toolResult" || !callIds.has(candidate.message.toolCallId)
+      || !manager.getBranch(candidate.id).some((ancestor) => ancestor.id === entry.id)) continue;
+    frameworkResults.set(candidate.message.toolCallId, {
+      ...candidate.message,
+      content: candidate.message.content.filter((block) => block.type === "text"),
+    });
+  }
+  const original = getTurnFrameworkReport(frameworkCalls, frameworkResults)
+    ?? entry.message.content.filter((block) => block.type === "text").map((block) => block.text).join("\n").trim();
   const excerpt = typeof input.excerpt === "string" ? input.excerpt.trim() : "";
   if (input.format !== undefined && input.format !== "rendered") throw new ResearchError(400, "无效的摘录格式");
   if (!excerpt || excerpt.length > 20000 ||

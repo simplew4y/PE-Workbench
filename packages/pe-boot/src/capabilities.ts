@@ -51,14 +51,14 @@ export const PE_CAPABILITIES: readonly PeCapability[] = [
 	},
 	{
 		id: "pe-investment-research",
-		description: "把模型假设和其他证据变成待验证的投资判断、反证条件与跟踪问题",
+		description: "回答聚焦投资问题，把证据变成待验证判断；生成或修订完整框架用 investment-framework-builder",
 		dependencies: ["pe-financial-model-understanding"],
 		files: ["pe-investment-research/SKILL.md"],
 		tools: ["pe_investment_framework", "pe_trusted_source"],
 	},
 	{
 		id: "investment-framework-builder",
-		description: "完整投资研究总控，共用研究状态，组织模型说明、投资判断、两阶段审核与最终报告",
+		description: "生成或修订七节投资框架文档，提交供确认的完整草稿；模型说明与两阶段审核为附件",
 		dependencies: ["pe-document-retrieval", "pe-financial-model-understanding"],
 		files: [
 			"investment-framework-builder/SKILL.md",

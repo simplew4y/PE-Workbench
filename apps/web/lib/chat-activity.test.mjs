@@ -27,6 +27,19 @@ test("handles namespaced tools without misleading substring matches", () => {
   assert.equal(getChatActivity({ messages: [], runningTools: [{ id: "2", name: "thread_research", progress: "do not display this raw output" }] }), "正在处理任务");
 });
 
+test("shows live investment framework validation progress without exposing unrelated tool output", () => {
+  const progress = "正在核验投资框架引用：12/32";
+  assert.equal(getChatActivity({ messages: [], runningTools: [{ id: "1", name: "pe_investment_framework", progress }] }), progress);
+  assert.equal(getChatActivity({ messages: [], runningTools: [{ id: "1", name: "pe_investment_framework", progress: "   ", input: { operation: "propose" } }] }), "正在整理投资框架草案");
+});
+
+test("a saved investment framework remains successful after a failed retry or follow-up response", () => {
+  const options = { completed: true, hasSavedFramework: true };
+  assert.equal(getChatActivity({ ...options, messages: [result("failed", true), result("saved"), assistant([{ type: "text", text: "完成" }])] }), "投资框架已保存 · 查看处理过程");
+  assert.equal(getChatActivity({ ...options, messages: [result("saved"), assistant([], { stopReason: "error" })] }), "投资框架已保存 · 后续回复失败，查看过程");
+  assert.equal(getChatActivity({ ...options, messages: [result("saved"), assistant([], { stopReason: "aborted" })] }), "投资框架已保存 · 已停止后续回复");
+});
+
 test("keeps concurrent tool activity compact", () => {
   const tools = [{ id: "1", name: "pe_excel_range" }, { id: "2", name: "pe_excel_range" }];
   assert.equal(getChatActivity({ messages: [], runningTools: tools }), "正在读取表格数据");

@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Popover } from "@base-ui/react/popover";
 import { useRouter } from "next/navigation";
-import type { FrameworkContent, ResearchCardRevision, ResearchCardView, ResearchCardStatus } from "@earendil-works/pe-boot";
+import type { ResearchCardRevision, ResearchCardView, ResearchCardStatus } from "@earendil-works/pe-boot";
+import type { FrameworkItem } from "@earendil-works/pe-boot/framework-report";
 import type { PeProjectSummary } from "@/lib/pe-project-types";
 import { PeSourceCitation } from "./PeSourceCitation";
 import { MarkdownBody } from "./MarkdownBody";
@@ -14,7 +15,7 @@ import { cleanResearchSelection } from "@/lib/research-selection";
 
 const statusNames: Record<ResearchCardStatus, string> = { unverified: "待核实", confirmed: "已人工确认", open: "待研究", resolved: "已解决" };
 const statusClassNames: Record<ResearchCardStatus, string> = { unverified: styles.unverified, confirmed: styles.confirmed, open: styles.open, resolved: styles.resolved };
-const frameworkKindNames: Record<FrameworkContent["items"][number]["kind"], string> = { thesis: "核心论点", hypothesis: "关键假设", metric: "跟踪指标", question: "待核实问题", event: "经营事件" };
+const frameworkKindNames: Record<FrameworkItem["kind"], string> = { thesis: "核心论点", hypothesis: "关键假设", metric: "跟踪指标", question: "待核实问题", event: "经营事件" };
 
 function excerptRange(root: HTMLElement, excerpt: string): Range | null {
   const target = excerpt.replace(/\s/gu, "");
@@ -203,7 +204,7 @@ export function ResearchCardCapture({ project, sessionId, entryId, text, sourceH
 }
 
 export function PeResearchNotebook({ project, refreshKey, frameworkItems = [], onOpenFramework, onOpenSource, onSessionCreated, model, toolNames, agentUnavailable = false }: {
-  project: PeProjectSummary; refreshKey: number; frameworkItems?: FrameworkContent["items"]; onOpenFramework: () => void; onOpenSource?: (target: { sessionId: string; cardId: string; entryId: string; excerpt: string }) => void; onSessionCreated?: (id: string) => void;
+  project: PeProjectSummary; refreshKey: number; frameworkItems?: Pick<FrameworkItem, "id" | "kind" | "subject">[]; onOpenFramework: () => void; onOpenSource?: (target: { sessionId: string; cardId: string; entryId: string; excerpt: string }) => void; onSessionCreated?: (id: string) => void;
   model?: { provider: string; modelId: string }; toolNames?: string[]; agentUnavailable?: boolean;
 }) {
   const router = useRouter();

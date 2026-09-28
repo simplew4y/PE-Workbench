@@ -8,7 +8,7 @@ export const PE_TOOL_PROMPT_SNIPPETS = [
 		name: "pe_stock_tracking",
 		description: "Configure stock tracking, refresh market history and record instructed simulated trades",
 	},
-	{ name: "pe_investment_framework", description: "Read and maintain the project investment research framework" },
+	{ name: "pe_investment_framework", description: "Read or propose the complete seven-section investment framework" },
 	// 旧版 Chunk 检索保留在源码中便于追溯，但不再写入系统提示词。
 	// { name: "pe_dataset_search", description: PE_DATASET_SEARCH_PROMPT_SNIPPET },
 	// { name: "pe_source_detail", description: PE_SOURCE_DETAIL_PROMPT_SNIPPET },

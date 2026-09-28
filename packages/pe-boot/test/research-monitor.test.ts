@@ -4,8 +4,9 @@ import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { initializePeCollectionDatabase } from "../src/collection-schema.ts";
 import { createResearchDraft, getResearchFramework, publishResearchDraft } from "../src/research/framework.ts";
-import type { FrameworkContent } from "../src/research/model.ts";
+import { type FrameworkContent, isFrameworkDocument } from "../src/research/model.ts";
 import {
+	frameworkChanges,
 	getResearchMonitor,
 	type MonitorConfig,
 	requestResearchMonitorRun,
@@ -13,10 +14,11 @@ import {
 	saveResearchMonitor,
 } from "../src/research/monitor.ts";
 import { withResearchDatabase } from "../src/research/storage.ts";
+import { frameworkFixture } from "./fixtures/framework.ts";
 
 const roots: string[] = [];
 const dataset = "dataset_test";
-const content: FrameworkContent = {
+const content = frameworkFixture({
 	title: "原框架",
 	objective: "验证需求",
 	horizon: "一年",
@@ -34,7 +36,7 @@ const content: FrameworkContent = {
 		},
 	],
 	coverageGaps: ["待补充财报"],
-};
+});
 const config: MonitorConfig = {
 	enabled: true,
 	mode: "auto",
@@ -55,6 +57,83 @@ function setup() {
 }
 afterEach(() => {
 	for (const cwd of roots.splice(0)) rmSync(cwd, { recursive: true, force: true });
+});
+
+it("records changes to every document section even when judgment claims are unchanged", () => {
+	const updates: Array<[keyof FrameworkContent["sections"], (value: FrameworkContent) => void]> = [
+		[
+			"researchSetup",
+			(value) => {
+				value.sections.researchSetup.preferences = "关注现金流";
+			},
+		],
+		[
+			"currentAssessment",
+			(value) => {
+				value.sections.currentAssessment.status = "等待新资料";
+			},
+		],
+		[
+			"businessModel",
+			(value) => {
+				value.sections.businessModel.kpis[0].value = "10%";
+			},
+		],
+		[
+			"investmentJudgments",
+			(value) => {
+				value.sections.investmentJudgments.items[0].confidence.reason = "新增反向信息";
+			},
+		],
+		[
+			"valuation",
+			(value) => {
+				value.sections.valuation.scenarios[0].value = 100;
+			},
+		],
+		[
+			"monitoring",
+			(value) => {
+				value.sections.monitoring.rules[0].frequency = "每周";
+			},
+		],
+		[
+			"evidenceAndChanges",
+			(value) => {
+				value.sections.evidenceAndChanges.openQuestions[0].status = "resolved";
+			},
+		],
+	];
+	for (const [section, update] of updates) {
+		const revised = structuredClone(content);
+		update(revised);
+		const change = frameworkChanges(content, revised).find((entry) => entry.id === section);
+		expect(change).toMatchObject({
+			before: JSON.stringify(content.sections[section]),
+			after: JSON.stringify(revised.sections[section]),
+		});
+	}
+});
+
+it("publishes a monitoring update confined to the valuation section", async () => {
+	const cwd = setup();
+	const revised = structuredClone(content);
+	revised.sections.valuation.scenarios[1].value = 125;
+	revised.sections.valuation.scenarios[1].calculation = "测试新估值假设";
+	await runResearchMonitor(
+		cwd,
+		dataset,
+		{
+			async generate() {
+				return revised;
+			},
+		},
+		AbortSignal.timeout(5000),
+	);
+	const run = getResearchMonitor(cwd, dataset).runs[0];
+	expect(run.status).toBe("published");
+	expect(run.changes?.map((entry) => entry.id)).toEqual(["valuation"]);
+	expect(getResearchFramework(cwd, dataset).versions[0].content).toEqual(revised);
 });
 
 it("automatically publishes, persists records, skips unchanged inputs and detects a newly ready document", async () => {
@@ -91,7 +170,8 @@ it("automatically publishes, persists records, skips unchanged inputs and detect
 			async generate(input, basis) {
 				expect(input.inputs.map((i) => i.docId)).toContain("new");
 				calls++;
-				return basis!;
+				if (!basis || !isFrameworkDocument(basis)) throw new Error("Expected a seven-section document");
+				return basis;
 			},
 		},
 		AbortSignal.timeout(5000),

@@ -1,8 +1,8 @@
 import { frameworkReportMarkdown } from "@/lib/framework-report";
 import { NextResponse } from "next/server";
 import {
-  cancelResearchJob, createResearchDraft, enqueueResearchJob, getResearchFramework,
-  listResearchJobs, publishResearchDraft, ResearchError, restoreResearchVersion, updateResearchDraft,
+  cancelResearchJob, createResearchDraftAsync, enqueueResearchJob, getResearchFramework,
+  listResearchJobs, publishResearchDraftAsync, ResearchError, restoreResearchVersion, updateResearchDraft,
   listPeMemoHistory, getPeMemoVersion,
   listResearchContinuations,
   getResearchMonitor, saveResearchMonitor, requestResearchMonitorRun,
@@ -92,24 +92,24 @@ export async function POST(request: Request) {
         const sessionId = text(input.sessionId, "sessionId");
         const toolCallId = text(input.toolCallId, "toolCallId");
         await validateResearchSession(root, { datasetId, draftId, revision: rev, toolCallId }, sessionId);
-        const version = publishResearchDraft(root, datasetId, {
+        const version = await publishResearchDraftAsync(root, datasetId, {
           draftId, revision: rev, expectedVersionId: expected(input.expectedVersionId),
           requestId: `confirm_${draftId}_${rev}`, continuation: { sessionId, toolCallId },
-        });
+        }, { signal: request.signal });
         return NextResponse.json({ version, continuation: listResearchContinuations(root, datasetId).find((item) => item.versionId === version.id) });
       }
       case "generate":
         return NextResponse.json({ job: enqueueResearchJob(root, datasetId, text(input.objective, "objective"), strings(input.docIds), text(input.requestId, "requestId"), expected(input.expectedVersionId)) }, { status: 202 });
       case "create":
-        return NextResponse.json({ draft: createResearchDraft(root, datasetId, input.content, strings(input.docIds), expected(input.expectedVersionId)) }, { status: 201 });
+        return NextResponse.json({ draft: await createResearchDraftAsync(root, datasetId, input.content, strings(input.docIds), expected(input.expectedVersionId), { signal: request.signal }) }, { status: 201 });
       case "save":
       case "reject":
         return NextResponse.json({ draft: updateResearchDraft(root, datasetId, text(input.draftId, "draftId"), revision(input.revision), input.content, input.action === "reject") });
       case "publish":
-        return NextResponse.json({ version: publishResearchDraft(root, datasetId, {
+        return NextResponse.json({ version: await publishResearchDraftAsync(root, datasetId, {
           draftId: text(input.draftId, "draftId"), revision: revision(input.revision), expectedVersionId: expected(input.expectedVersionId), requestId: text(input.requestId, "requestId"),
           ...(input.selectedItemIds === undefined ? {} : { selectedItemIds: strings(input.selectedItemIds) }),
-        }) });
+        }, { signal: request.signal }) });
       case "restore":
         return NextResponse.json({ draft: restoreResearchVersion(root, datasetId, text(input.versionId, "versionId"), expected(input.expectedVersionId)) });
       case "cancel":

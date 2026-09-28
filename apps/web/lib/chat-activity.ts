@@ -16,6 +16,8 @@ export interface ChatActivityOptions {
   retrying?: boolean;
   waitingForInput?: boolean;
   completed?: boolean;
+  hasSavedFramework?: boolean;
+  frameworkFailed?: boolean;
 }
 
 type ActivityCopy = readonly [chinese: string, english: string];
@@ -93,6 +95,12 @@ export function getChatActivity(options: ChatActivityOptions, locale = "zh-CN"):
 
   if (options.completed) {
     const lastAssistant = assistantMessages[assistantMessages.length - 1];
+    if (options.hasSavedFramework) {
+      if (lastAssistant?.stopReason === "error" || lastAssistant?.errorMessage?.trim()) return copy(["投资框架已保存 · 后续回复失败，查看过程", "Framework saved · Follow-up response failed, view process"]);
+      if (lastAssistant?.stopReason === "aborted") return copy(["投资框架已保存 · 已停止后续回复", "Framework saved · Follow-up response stopped"]);
+      return copy(["投资框架已保存 · 查看处理过程", "Framework saved · View process"]);
+    }
+    if (options.frameworkFailed) return copy(["投资框架未保存 · 查看处理过程", "Framework not saved · View process"]);
     if (lastAssistant?.stopReason === "aborted") return copy(["已停止 · 查看过程", "Stopped · View process"]);
     if (lastAssistant?.stopReason === "error" || lastAssistant?.errorMessage?.trim()) {
       return copy(["处理失败 · 查看过程", "Failed · View process"]);
@@ -115,9 +123,11 @@ export function getChatActivity(options: ChatActivityOptions, locale = "zh-CN"):
   }
 
   if (runningTools.length > 0) {
-    const labels = [...new Set(runningTools.map((tool) => (
-      copy(toolActivity(tool.name, tool.input ?? toolCalls.get(tool.id)?.input))
-    )))];
+    const labels = [...new Set(runningTools.map((tool) => {
+      const normalized = tool.name.toLowerCase().split(/__|\./).pop();
+      if (normalized === "pe_investment_framework" && tool.progress?.trim()) return tool.progress.trim();
+      return copy(toolActivity(tool.name, tool.input ?? toolCalls.get(tool.id)?.input));
+    }))];
     return labels.length === 1 ? labels[0] : `${labels[0]} · ${copy(["另有任务进行中", "More tasks in progress"])}`;
   }
 

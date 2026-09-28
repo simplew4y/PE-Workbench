@@ -16,14 +16,25 @@ it("discovers only skills and preloads shared references without granting filesy
 	vi.mocked(createAgentSessionFromServices).mockImplementation(async ({ services, tools }) => {
 		const loaded = services.resourceLoader.getSkills();
 		expect(loaded.diagnostics).toEqual([]);
-		const names = ["pe-financial-model-reader", "pe-financial-model-understanding", "pe-investment-research"];
+		const names = [
+			"pe-document-retrieval",
+			"pe-financial-model-reader",
+			"pe-financial-model-understanding",
+			"investment-framework-builder",
+			"pe-investment-research",
+		];
 		expect(loaded.skills.map((skill) => skill.name)).toEqual(names);
 		const instructions = services.resourceLoader.getAppendSystemPrompt();
 		const files = [
+			"pe-document-retrieval/SKILL.md",
 			"pe-financial-model-reader/SKILL.md",
 			"pe-financial-model-understanding/SKILL.md",
 			"valuation-model-review/references/model-understanding.md",
 			"valuation-model-review/references/valuation-methods.md",
+			"investment-framework-builder/SKILL.md",
+			"investment-framework-builder/references/state-contract.md",
+			"investment-framework-builder/references/report.md",
+			"valuation-model-review/references/chart-quality.md",
 			"pe-investment-research/SKILL.md",
 		];
 		expect(instructions).toEqual(files.map((file) => readFileSync(join(PE_SKILLS_DIRECTORY, file), "utf8")));

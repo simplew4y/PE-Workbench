@@ -10,7 +10,7 @@ from unittest.mock import patch
 from xml.etree import ElementTree as ET
 from zipfile import ZipFile, ZIP_DEFLATED
 
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from openpyxl.comments import Comment
 from openpyxl.formatting.rule import CellIsRule
 from openpyxl.styles import Color, Font, GradientFill, PatternFill
@@ -127,6 +127,14 @@ class WorkbookReaderTests(unittest.TestCase):
             self.assertIsNone(blank["cells"][0]["raw_value"])
             self.assertEqual(blank["non_empty_cell_count"], 0)
             self.assertEqual(blank["cells"][0]["comment"]["text"], "Margin assumption pending review")
+            validation = {"action": "validate", "ranges": [
+                {"sheet": "Model", "range": "D80"},
+                {"sheet": "Hidden", "range": "C10"},
+                {"sheet": "Model", "range": "D81"},
+            ]}
+            expected = [{**area, "exists": index < 2} for index, area in enumerate(validation["ranges"])]
+            self.assertEqual(read_workbook(path, validation)["ranges"], expected)
+            self.assertEqual(read_workbook(path, validation, navigation=navigation)["ranges"], expected)
             filtered = read_workbook(path, {"action": "search", "query": "margin", "sheet": "Hidden"}, index, navigation)
             self.assertEqual(filtered["matching_cell_count"], 1)
             self.assertEqual(path.read_bytes(), original)
@@ -167,6 +175,33 @@ class WorkbookReaderTests(unittest.TestCase):
             self.assertIsNone(cells[3]["value"])
             self.assertEqual(cells[3]["comment"]["text"], "Blank input, not zero")
             self.assertEqual(cells[3]["style"]["fill_gradient"][0]["color"]["value"], "FF0000FF")
+
+    def test_batch_validation_matches_read_existence_without_recalculating_or_scanning_metadata(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "Validation.xlsx"
+            book = Workbook()
+            sheet = book.active
+            sheet.title = "Model"
+            sheet["A1"] = 0
+            sheet["B1"] = ""
+            sheet["C1"] = "=Missing!A1"
+            sheet["D1"].number_format = "0.00"
+            sheet["A4"].comment = Comment("Pending", "Reader")
+            other = book.create_sheet("Other")
+            other["D20"] = False
+            book.save(path)
+            book.close()
+            ranges = [{"sheet": "Model", "range": area} for area in ["A1", "B1", "C1", "D1", "E1", "A4", "A1:E9", "XFD100"]]
+            ranges.append({"sheet": "Other", "range": "D20"})
+            expected = [{**area, "exists": bool(read_workbook(path, {"action": "read", **area})["cells"])} for area in ranges]
+            with patch("workbook_reader.load_workbook", wraps=load_workbook) as loader, patch("workbook_reader._metadata", side_effect=AssertionError("Validation must not scan whole-workbook metadata")):
+                result = read_workbook(path, {"action": "validate", "ranges": ranges})
+            self.assertEqual(result["ranges"], expected)
+            self.assertEqual(loader.call_count, 1)
+            self.assertTrue(loader.call_args.kwargs["read_only"])
+            self.assertFalse(loader.call_args.kwargs["data_only"])
+            with self.assertRaisesRegex(ValueError, "Unknown or missing sheet"):
+                read_workbook(path, {"action": "validate", "ranges": [{"sheet": "Missing", "range": "A1"}]})
 
     def test_case_insensitive_formula_destinations_and_cycles(self):
         with tempfile.TemporaryDirectory() as directory:

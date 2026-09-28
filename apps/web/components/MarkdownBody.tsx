@@ -24,6 +24,7 @@ const streamingOptions = { linkMode: "text-only" } as const;
 
 interface MarkdownRenderContextValue {
   isStreaming?: boolean;
+  defaultMermaidPreview?: boolean;
   cwd?: string;
   onOpenFile?: (filePath: string) => void;
 }
@@ -36,14 +37,14 @@ interface MarkdownBodyProps extends MarkdownRenderContextValue {
 }
 
 function MarkdownCode({ className, children, ...props }: ComponentProps<"code"> & ExtraProps) {
-  const { isStreaming, cwd, onOpenFile } = useContext(MarkdownRenderContext);
+  const { isStreaming, defaultMermaidPreview, cwd, onOpenFile } = useContext(MarkdownRenderContext);
   delete props.node;
   const lang = className?.replace("language-", "").toLowerCase() ?? "";
   const raw = String(children);
   const isBlock = className?.includes("language-") || raw.includes("\n");
   if (isBlock) {
     if (lang === "mermaid") {
-      return <MermaidBlock code={raw.replace(/\n$/, "")} isStreaming={isStreaming} />;
+      return <MermaidBlock code={raw.replace(/\n$/, "")} isStreaming={isStreaming} defaultPreview={defaultMermaidPreview} />;
     }
     if (lang === "pe-ui") {
       return (
@@ -147,9 +148,9 @@ function splitMarkdown(markdown: string): string[] {
   return parseMarkdownIntoBlocks(markdown);
 }
 
-export function MarkdownBody({ children, className, isStreaming, cwd, onOpenFile }: MarkdownBodyProps) {
+export function MarkdownBody({ children, className, isStreaming, defaultMermaidPreview, cwd, onOpenFile }: MarkdownBodyProps) {
   const normalizedMarkdown = useMemo(() => normalizeDisplayMath(children), [children]);
-  const renderContext = useMemo(() => ({ cwd, isStreaming, onOpenFile }), [cwd, isStreaming, onOpenFile]);
+  const renderContext = useMemo(() => ({ cwd, isStreaming, defaultMermaidPreview, onOpenFile }), [cwd, isStreaming, defaultMermaidPreview, onOpenFile]);
 
   return (
     <MarkdownRenderContext.Provider value={renderContext}>

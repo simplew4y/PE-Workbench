@@ -53,7 +53,7 @@ test("renders PE evidence links as compact source markers with accessible labels
   assert.match(html, /<svg[^>]*aria-hidden="true"/);
   assert.match(html, /<span class="sr-only">查看原始证据：访谈\.pdf p\.2<\/span>/);
   assert.match(html, /title="查看原始证据：访谈\.pdf p\.2"/);
-  assert.ok(!html.includes(id));
+  assert.ok(!html.replace(/<[^>]*>/g, "").includes(id));
 });
 
 test("renders legacy PE evidence links as compact source markers", () => {
@@ -62,7 +62,7 @@ test("renders legacy PE evidence links as compact source markers", () => {
   assert.match(html, /data-pe-source-citation="true"/);
   assert.match(html, /<svg[^>]*aria-hidden="true"/);
   assert.match(html, /<span class="sr-only">查看原始证据：访谈\.pdf p\.2<\/span>/);
-  assert.doesNotMatch(html, /chunk-storage/);
+  assert.doesNotMatch(html.replace(/<[^>]*>/g, ""), /chunk-storage/);
 });
 
 test("restores compact source markers for expanded citation URLs in existing answers", () => {
@@ -156,6 +156,15 @@ test("retains Mermaid source and disables preview during streaming", () => {
   const code = "```mermaid\ngraph TD\n  A --> B\n```";
   assert.match(renderMarkdown(code), /markdown-code-lang">mermaid/);
   assert.match(renderMarkdown(code, { isStreaming: true }), /disabled=""/);
+});
+
+test("report callers can request Mermaid previews without changing ordinary Markdown defaults", () => {
+  const code = "~~~mermaid\ngraph TD\n  A --> B\n~~~";
+  assert.doesNotMatch(renderMarkdown(code), /mermaid-block-loading/);
+  assert.match(renderMarkdown(code, { defaultMermaidPreview: true }), /mermaid-block-loading/);
+  const streaming = renderMarkdown(code, { defaultMermaidPreview: true, isStreaming: true });
+  assert.doesNotMatch(streaming, /mermaid-block-loading/);
+  assert.match(streaming, /disabled=""/);
 });
 
 test("preserves table alignment and local image routing", () => {

@@ -579,10 +579,61 @@ def _trace_loaded(formulas, values, metadata, request):
     return {"nodes": list(nodes.values()), "edges": edges, "issues": issues, "pending_ranges": unvisited, "pending_reads": pending_reads, "complete": all(issue["reason"] == "formula_cache_unavailable" for issue in issues) and not unvisited and not pending_reads, "truncated": bool(unvisited or pending_reads)}
 
 
+def _validate_workbook(path, request, navigation):
+    """Check all citation ranges in one load, preserving read's cell-existence rules."""
+    with ZipFile(path) as archive:
+        workbook = ET.fromstring(archive.read("xl/workbook.xml"))
+        relationships = _relationships(archive, "xl/workbook.xml")
+        sheets = {item.get("name"): relationships[item.get(REL + "id")]
+                  for item in workbook.findall(f"{NS}sheets/{NS}sheet")
+                  if relationships[item.get(REL + "id")]["type"].endswith("/worksheet")}
+        ranges = _requests(request, sheets)
+        found = [False] * len(ranges)
+        formulas = load_workbook(path, read_only=True, data_only=False, keep_links=False)
+        try:
+            for name, relation in sheets.items():
+                pending = {index for index, area in enumerate(ranges) if area["sheet"] == name}
+                if not pending:
+                    continue
+                if navigation is not None:
+                    metadata = next(item["metadata"] for item in navigation["sheets"] if item["sheet_name"] == name)
+                else:
+                    sheet_relations = _relationships(archive, relation["part"])
+                    metadata = {"comments_part": next((r["part"] for r in sheet_relations.values() if r["type"].endswith("/comments")), None)}
+                comments = _sheet_comments(archive, {"metadata": metadata})
+                for ref in comments:
+                    col, row, _, _ = _bounds(ref)
+                    matches = {index for index in pending if _contains(ranges[index]["bounds"], col, row)}
+                    for index in matches:
+                        found[index] = True
+                    pending.difference_update(matches)
+                if not pending:
+                    continue
+                sheet = formulas[name]
+                sheet.reset_dimensions()
+                min_row = min(ranges[index]["bounds"][1] for index in pending)
+                max_row = max(ranges[index]["bounds"][3] for index in pending)
+                for row in sheet.iter_rows(min_row=min_row, max_row=max_row):
+                    for cell in row:
+                        if not hasattr(cell, "coordinate") or (cell.value is None and cell.data_type not in {"str", "s", "inlineStr"} and not cell.has_style):
+                            continue
+                        matches = {index for index in pending if _contains(ranges[index]["bounds"], cell.column, cell.row)}
+                        for index in matches:
+                            found[index] = True
+                        pending.difference_update(matches)
+                    if not pending:
+                        break
+        finally:
+            formulas.close()
+    return {"ranges": [{"sheet": area["sheet"], "range": area["range"], "exists": found[index]} for index, area in enumerate(ranges)]}
+
+
 def read_workbook(path, request, text_index_path=None, navigation=None):
     if not isinstance(request, dict):
         raise ValueError("Reader request must be an object")
     action = request.get("action")
+    if action == "validate":
+        return _validate_workbook(path, request, navigation)
     if action == "inspect":
         return _inspect_page(navigation if navigation is not None else inspect_workbook(path), request)
     if action not in {"read", "search", "trace"}:
@@ -660,7 +711,7 @@ def main():
     if args.navigation:
         with args.navigation.open(encoding="utf-8") as stream:
             navigation = json.load(stream)["navigation"]
-    prepared = navigation is None
+    prepared = navigation is None and request.get("action") != "validate"
     if prepared:
         navigation = inspect_workbook(path)
     result = read_workbook(path, request, args.text_index, navigation)

@@ -16,6 +16,7 @@ const { GET, POST } = await jiti.import("./route.ts");
 const { cacheSessionPath } = await jiti.import("../../../../lib/session-reader.ts");
 const cardsModule = await jiti.import("../../../../lib/research-cards.ts");
 const { cleanResearchSelection } = await jiti.import("../../../../lib/research-selection.ts");
+const { frameworkFixture } = await jiti.import("../../../../../../packages/pe-boot/test/fixtures/framework.ts");
 const require = createRequire(import.meta.url);
 
 function setup(t) {
@@ -89,6 +90,44 @@ test("rendered selections preserve only the excerpt across emphasis, links, list
   for (const excerpt of ["", "收入增长已证实", "销量增加 结尾也不应保存。", undefined]) {
     assert.equal((await request({ ...create, source: { ...source, entryId, excerpt, format: "rendered" } })).status, 400);
   }
+});
+
+test("framework excerpts are verified against the saved tool document even with a failed or absent final reply", async (t) => {
+  const { manager, project, source, create, request } = setup(t);
+  for (const textOnly of [false, true]) {
+    const callId = textOnly ? "historic-framework" : "saved-framework";
+    const document = frameworkFixture();
+    const excerpt = document.sections.businessModel.drivers[0].mechanism;
+    const entryId = manager.appendMessage({ role: "assistant", api: "openai-completions", provider: "test", model: "test", timestamp: Date.now(),
+      content: [{ type: "toolCall", id: callId, name: "pe_investment_framework", arguments: { operation: "propose" } }], stopReason: "toolUse",
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } });
+    const details = { kind: "pe_framework_draft", datasetId: project.datasetId, draft: { id: "draft", revision: 1, content: document } };
+    manager.appendMessage({ role: "toolResult", toolCallId: callId, toolName: "pe_investment_framework", timestamp: Date.now(), isError: false,
+      content: [{ type: "text", text: textOnly ? JSON.stringify(details) : "框架已保存，请用户确认。" }], details: textOnly ? undefined : details });
+    const response = await request({ ...create, requestId: callId, source: { ...source, entryId, excerpt, format: "rendered" } });
+    assert.equal(response.status, 201, await response.clone().text());
+    const { card } = await response.json();
+    assert.equal(card.content, excerpt);
+    assert.equal(card.origin.entryId, entryId);
+    assert.equal((await request({ ...create, requestId: `${callId}-forged`, source: { ...source, entryId, excerpt: "编造的框架结论", format: "rendered" } })).status, 400);
+  }
+});
+
+test("failed and unrelated framework results cannot authorize research excerpts", async (t) => {
+  const { manager, project, source, create, request } = setup(t);
+  const document = frameworkFixture();
+  const excerpt = document.sections.businessModel.drivers[0].mechanism;
+  const entryId = manager.appendMessage({ role: "assistant", api: "openai-completions", provider: "test", model: "test", timestamp: Date.now(),
+    content: [{ type: "toolCall", id: "failed-call", name: "pe_investment_framework", arguments: { operation: "propose" } }], stopReason: "toolUse",
+    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } });
+  const details = { kind: "pe_framework_draft", datasetId: project.datasetId, draft: { id: "draft", revision: 1, content: document } };
+  manager.appendMessage({ role: "toolResult", toolCallId: "failed-call", toolName: "pe_investment_framework", timestamp: Date.now(), isError: true, content: [], details });
+  assert.equal((await request({ ...create, requestId: "failed-source", source: { ...source, entryId, excerpt } })).status, 400);
+  manager.appendMessage({ role: "toolResult", toolCallId: "other-call", toolName: "pe_investment_framework", timestamp: Date.now(), isError: false, content: [], details });
+  assert.equal((await request({ ...create, requestId: "unrelated-source", source: { ...source, entryId, excerpt } })).status, 400);
+  manager.branch(source.entryId);
+  manager.appendMessage({ role: "toolResult", toolCallId: "failed-call", toolName: "pe_investment_framework", timestamp: Date.now(), isError: false, content: [], details });
+  assert.equal((await request({ ...create, requestId: "other-branch-source", source: { ...source, entryId, excerpt } })).status, 400);
 });
 
 test("new-session route sends only selected saved revisions, validates before starting the agent", async (t) => {

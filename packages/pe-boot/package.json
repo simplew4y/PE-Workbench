@@ -11,6 +11,7 @@
 			"import": "./dist/index.js",
 			"default": "./dist/index.js"
 		},
+		"./framework-report": { "types": "./dist/research/report.d.ts", "import": "./dist/research/report.js", "default": "./dist/research/report.js" },
 		"./documents": { "types": "./dist/documents.d.ts", "import": "./dist/documents.js", "default": "./dist/documents.js" },
 		"./schema": { "types": "./dist/collection-schema.d.ts", "import": "./dist/collection-schema.js", "default": "./dist/collection-schema.js" },
 		"./source": { "types": "./dist/source.d.ts", "import": "./dist/source.js", "default": "./dist/source.js" },

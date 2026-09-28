@@ -1,14 +1,17 @@
-# 共同研究数据约定
+# 📝 共同研究数据约定
 
 所有模块读写当前报告输出目录的同一个 `framework-state.json`。不用共享的个人skills目录保存公司数据；源Excel只读。先读取现有状态，只更新本模块负责的字段，不清空其他模块输出。顺序写入；如确有授权并行工作，模块先返回局部结果，由Builder合并，避免竞争覆盖。
 
-## PE-Workbench 接入
+## 📝 PE-Workbench 接入与七节保存对象
 
 - 报告目录位于项目 `generated/` 下；状态、检查点、复算脚本、图表和报告均保存于此，不直接改写 `raw/`、`meta/` 或托管缓存。
 - 工作簿读取复用 [财务模型读取](../../pe-financial-model-reader/SKILL.md) 的原始证据工具；保留 doc_id、版本和工具返回的 markdown_citation。E1 等研究记录 ID 不替代原始来源，正文保留可点击的原始引用。
 - 接续已有模型说明按 [交接规则](../../valuation-model-review/references/model-understanding.md) 核对身份、版本与范围。在现有context/sources记录本轮文件版本，evidence保留路径和输入角色，model_understanding记录A及范围，gaps保留缺口，artifacts关联说明与复算。版本变化保留前版，补查受影响路径后重评A；不能以相同文件名继承通过。普通聊天不要求建立本状态文件。
-- `framework-state.json` 是报告分析附件，不是 `pe_investment_framework` 的数据库格式。用户要求保存到项目框架时，另用该工具读取并 propose，保留已有条目 ID；不直接用附件覆盖项目状态。`reviewed_draft` 不等于项目框架已发布。
+- 项目投资框架的唯一新提案格式是 `pe_investment_framework` schema：`{schemaVersion: 2, title, sections: {researchSetup, currentAssessment, businessModel, investmentJudgments, valuation, monitoring, evidenceAndChanges}}`。七节都必须存在；空内容的原因和影响明确保留，不能退回 `objective/horizon/items/coverageGaps` 顶层旧格式。
+- `framework-state.json` 是可选分析附件，不是数据库里的框架文档。分析完成后将结果映射到七节内容，先 read 再 propose，保留稳定 ID；不直接用附件覆盖项目状态。工具的 `rendered_report` 由已保存草稿生成，工作台直接展示完整投资框架，模型仅简短说明待确认；用户确认按钮发布同一文档。`reviewed_draft` 不等于项目框架已发布。
 - 按当前可用工具执行文件读写、Python复算和外部取证；加载 skill 不会扩展权限。仅有 `pe_research_read` / `pe_research_submit` 的后台任务继续遵守其提交 schema，记录能力缺口，不声称已保存文件、运行校验、生成图表或完成整套研究验收。
+
+分析附件到文档的映射：context → researchSetup；整体结论和变化 → currentAssessment；business/metrics/assumptions → businessModel；theses 及正反证据 → investmentJudgments；market/forecasts/valuations/return_paths → valuation；monitoring → monitoring；evidence/gaps/changes → evidenceAndChanges。模型说明、校验过程和图表文件属于附件，不能取代任何一节。附件用 `schema_version`，正式提交用 `schemaVersion`，二者不要混淆。第 4 节反面证据与第 5/6 节来源也必须使用工具返回的真实证据 ID。
 
 ## 状态结构
 

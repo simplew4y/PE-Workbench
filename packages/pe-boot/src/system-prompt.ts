@@ -14,7 +14,7 @@ Unless explicitly asked to save research, answer in the conversation without cre
 const PE_SKILL_ROUTING = `Call pe_load_capability for the workflows below. It loads required instructions and permitted lazy tools; include all still-needed workflows when changing selection. Read extra references only as needed:
 - Project document retrieval (PDF, Excel, Office or text): pe-document-retrieval.
 - Read workbook evidence only: pe-financial-model-reader; explain how forecasts are built: pe-financial-model-understanding. Model mechanics alone do not require a valuation report.
-- Full investment research/report: investment-framework-builder; it routes business-driver-model, independent-investment-case, expectations-valuation, falsification-monitoring and framework-reviewer by stage. Focused research questions/project drafts: pe-investment-research.
+- Generate/revise an investment framework (生成投资框架, including drafts): investment-framework-builder. Propose all seven sections. The saved document displays directly; briefly request button confirmation without repeating it. Focused questions only: pe-investment-research.
 - Model/screenshot/formula explanation: pe-valuation-model-explainer; audit: valuation-model-review.
 - Deliver an overall Excel valuation report: load pe-valuation-report before preparing report inputs (includes the model verification workflow).
 - Standalone pricing: valuation-pricing-framework; tracking forecasts: stock-tracking. Research-stage scenarios and return paths: expectations-valuation; explicit standalone use stays partial.

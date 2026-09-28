@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import type { SqlRow } from "../tools/database.ts";
 import { captureResearchInputs, currentResearchVersion, insertResearchDraft } from "./framework.ts";
-import { type FrameworkContent, ResearchError, type ResearchInput } from "./model.ts";
+import { type FrameworkContent, ResearchError, type ResearchInput, type StoredFrameworkContent } from "./model.ts";
 import { researchTransaction, withResearchDatabase } from "./storage.ts";
 
 export interface ResearchJobInput {
@@ -27,7 +27,7 @@ export interface ResearchJob {
 export interface ResearchEngine {
 	generate(
 		input: ResearchJobInput,
-		basis: FrameworkContent | null,
+		basis: StoredFrameworkContent | null,
 		signal: AbortSignal,
 		onProgress?: (detail: string) => void,
 	): Promise<FrameworkContent>;
@@ -272,7 +272,7 @@ export async function runNextResearchJob(
 						.prepare("SELECT content_json FROM research_versions WHERE dataset_id=? AND version_id=?")
 						.get(datasetId, claim.basisVersionId)
 				: undefined;
-			return row ? (JSON.parse(String(row.content_json)) as FrameworkContent) : null;
+			return row ? (JSON.parse(String(row.content_json)) as StoredFrameworkContent) : null;
 		});
 		controller.signal.throwIfAborted();
 		const content = await engine.generate(claim.input, basis, controller.signal);

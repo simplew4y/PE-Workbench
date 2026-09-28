@@ -12,8 +12,13 @@ test("puts live activity and streamed details in the turn disclosure", () => {
 
 test("retains final reasoning in the disclosure and the answer outside it", () => {
   assert.match(source, /withAssistantBlocks\(finalAssistant, finalProcessBlocks\)/);
-  assert.match(source, /<\/ProcessDetailsGroup>[\s\S]*?if \(finalAssistant && finalAnswerMessage\)/);
-  assert.match(source, /renderMessage\(finalAssistantIdx, \{ messageOverride: finalAnswerMessage/);
+  assert.match(source, /<\/ProcessDetailsGroup>[\s\S]*?if \(displayedAnswer\)/);
+  assert.match(source, /renderMessage\(answerIdx, \{[^\n]+messageOverride: displayedAnswer/);
+});
+
+test("only saved framework documents request diagram previews in the final answer", () => {
+  assert.match(source, /renderMessage\(answerIdx, \{[^\n]+defaultMermaidPreview: Boolean\(frameworkReport\) \}\)/);
+  assert.match(source, /defaultMermaidPreview=\{options\.defaultMermaidPreview\}/);
 });
 
 test("renders result-bearing generative UI messages outside the hidden tool chain", () => {
@@ -22,7 +27,7 @@ test("renders result-bearing generative UI messages outside the hidden tool chai
 });
 
 test("provides a live disclosure before the first saved assistant message", () => {
-  assert.match(source, /const finalAssistantIdx = isLiveTail \? -1/);
+  assert.match(source, /const finalAssistantIdx = isLiveTail \|\| frameworkReport \? -1/);
   assert.match(source, /if \(isLiveTail \|\| detailIndices\.length > 0 \|\| finalProcessBlocks\.length > 0\)/);
   assert.doesNotMatch(source, /if \(finalAssistantIdx === -1\) \{/);
 });

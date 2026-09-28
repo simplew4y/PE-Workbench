@@ -9,6 +9,7 @@ import { createResearchDraft, publishResearchDraft } from "../src/research/frame
 import { readResearchInput } from "../src/research/pi-engine.ts";
 import { sourceId } from "../src/source.ts";
 import { fetchWindSnapshot, listWindSnapshots, queryWind } from "../src/trusted-sources.ts";
+import { frameworkFixture } from "./fixtures/framework.ts";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -60,7 +61,7 @@ it("saves immutable evidence, deduplicates, resolves historical citations and pu
 	expect(first.preview).not.toContain("test-wind-key");
 	expect((await fetchWindSnapshot(root, query)).docId).toBe(first.docId);
 	expect(listWindSnapshots(root)).toHaveLength(1);
-	const content = {
+	const content = frameworkFixture({
 		title: "腾讯研究",
 		objective: "验证增长",
 		horizon: "一年",
@@ -78,7 +79,7 @@ it("saves immutable evidence, deduplicates, resolves historical citations and pu
 				evidenceIds: [first.evidenceId],
 			},
 		],
-	};
+	});
 	const draft = createResearchDraft(root, "dataset_test", content, [first.docId], null);
 	const job = { objective: "test", inputs: draft.inputs, asOf: first.checkedAt };
 	expect(readResearchInput(root, "dataset_test", job, { docId: first.docId })).toMatchObject({

@@ -26,6 +26,14 @@ function renderMessage(message, props = {}) {
   );
 }
 
+test("explicit report preview preference reaches assistant Markdown and invalidates memoization", () => {
+  const message = { role: "assistant", content: [{ type: "text", text: "~~~mermaid\ngraph TD\n  A --> B\n~~~" }] };
+  assert.doesNotMatch(renderMessage(message), /mermaid-block-loading/);
+  assert.match(renderMessage(message, { defaultMermaidPreview: true }), /mermaid-block-loading/);
+  assert.doesNotMatch(renderMessage(message, { defaultMermaidPreview: true, isStreaming: true }), /mermaid-block-loading/);
+  assert.equal(MessageView.compare({ message }, { message, defaultMermaidPreview: true }), false);
+});
+
 test("keeps streamed tool input out of collapsed markup while counting it", () => {
   const block = {
     type: "toolCall",

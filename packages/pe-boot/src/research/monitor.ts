@@ -5,7 +5,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { getPeMemoVersion, listPeMemoHistory } from "../tools/memo-storage.ts";
 import { fetchWindSnapshot, WIND_CATEGORIES, type WindQuery } from "../trusted-sources.ts";
 import { captureResearchInputs, createResearchDraft, getResearchFramework, publishResearchDraft } from "./framework.ts";
-import { type FrameworkContent, ResearchError } from "./model.ts";
+import { getFrameworkItems, isFrameworkDocument, ResearchError, type StoredFrameworkContent } from "./model.ts";
 import { researchTransaction, withResearchDatabase } from "./storage.ts";
 import type { ResearchEngine, ResearchJobInput } from "./watch.ts";
 
@@ -392,24 +392,34 @@ export async function runResearchMonitor(
 }
 
 export function frameworkChanges(
-	before: FrameworkContent,
-	after: FrameworkContent,
+	before: StoredFrameworkContent,
+	after: StoredFrameworkContent,
 ): NonNullable<MonitorRun["changes"]> {
-	const ids = new Set([...before.items, ...after.items].map((item) => item.id));
+	const beforeItems = getFrameworkItems(before);
+	const afterItems = getFrameworkItems(after);
+	const ids = new Set([...beforeItems, ...afterItems].map((item) => item.id));
 	const changes = [...ids].flatMap((id) => {
-		const a = before.items.find((item) => item.id === id);
-		const b = after.items.find((item) => item.id === id);
+		const a = beforeItems.find((item) => item.id === id);
+		const b = afterItems.find((item) => item.id === id);
 		return JSON.stringify(a) === JSON.stringify(b)
 			? []
 			: [{ id, before: a?.claim ?? null, after: b?.claim ?? null, reason: b?.rationale ?? "条目移除，详见新框架" }];
 	});
-	for (const key of ["title", "objective", "horizon", "coverageGaps"] as const) {
-		if (JSON.stringify(before[key]) !== JSON.stringify(after[key]))
+	const beforeFields = isFrameworkDocument(before)
+		? { title: before.title, schemaVersion: 2, ...before.sections }
+		: { ...before, items: undefined, schemaVersion: 1 };
+	const afterFields = isFrameworkDocument(after)
+		? { title: after.title, schemaVersion: 2, ...after.sections }
+		: { ...after, items: undefined, schemaVersion: 1 };
+	const oldSections = new Map(Object.entries(beforeFields));
+	const newSections = new Map(Object.entries(afterFields));
+	for (const key of new Set([...oldSections.keys(), ...newSections.keys()])) {
+		if (JSON.stringify(oldSections.get(key)) !== JSON.stringify(newSections.get(key)))
 			changes.push({
 				id: key,
-				before: JSON.stringify(before[key]),
-				after: JSON.stringify(after[key]),
-				reason: "框架说明或资料缺口发生变化，详见前后版本。",
+				before: JSON.stringify(oldSections.get(key)) ?? null,
+				after: JSON.stringify(newSections.get(key)) ?? null,
+				reason: "投资框架章节发生变化，详见前后版本。",
 			});
 	}
 	return changes;

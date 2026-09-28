@@ -12,8 +12,9 @@ import {
 	restoreResearchVersion,
 	updateResearchDraft,
 } from "../src/research/framework.ts";
-import type { FrameworkContent } from "../src/research/model.ts";
+import { collectFrameworkEvidenceIds, type FrameworkContent } from "../src/research/model.ts";
 import { readResearchInput } from "../src/research/pi-engine.ts";
+import { renderInvestmentFrameworkMarkdown } from "../src/research/report.ts";
 import { withResearchDatabase } from "../src/research/storage.ts";
 import {
 	cancelResearchJob,
@@ -25,6 +26,7 @@ import {
 } from "../src/research/watch.ts";
 import { sourceId } from "../src/source.ts";
 import { peFrameworkTool } from "../src/tools/framework.ts";
+import { frameworkFixture, withFrameworkItems } from "./fixtures/framework.ts";
 
 const roots: string[] = [];
 function project() {
@@ -38,7 +40,7 @@ function project() {
 	return cwd;
 }
 const datasetId = "dataset_test";
-const content: FrameworkContent = {
+const content = frameworkFixture({
 	title: "投资框架",
 	objective: "验证盈利恢复",
 	horizon: "未来四个季度",
@@ -56,7 +58,7 @@ const content: FrameworkContent = {
 		},
 	],
 	coverageGaps: ["尚未提供财报"],
-};
+});
 function publish(cwd: string, value = content, expected: string | null = null, key = "first") {
 	const draft = createResearchDraft(cwd, datasetId, value, [], expected);
 	return publishResearchDraft(cwd, datasetId, {
@@ -71,6 +73,208 @@ afterEach(() => {
 });
 
 describe("investment framework persistence", () => {
+	it("retains change records for retired judgments while rejecting invented and cross-project history", () => {
+		const cwd = project();
+		const first = publish(cwd);
+		const retired = withFrameworkItems(content, []);
+		retired.sections.evidenceAndChanges.changes = [
+			{
+				judgmentIds: ["margin"],
+				before: "毛利率可能恢复",
+				after: "移除该判断",
+				reason: "不再作为本次研究的投资依据",
+				evidenceIds: [],
+			},
+		];
+		const deletion = createResearchDraft(cwd, datasetId, retired, [], first.id);
+		const revised = updateResearchDraft(cwd, datasetId, deletion.id, 1, { ...retired, title: "删除判断后的框架" });
+		const second = publishResearchDraft(cwd, datasetId, {
+			draftId: revised.id,
+			revision: revised.revision,
+			expectedVersionId: first.id,
+			requestId: "retired",
+		});
+		expect(second.content).toEqual(revised.content);
+		const third = publish(cwd, { ...retired, title: "保留先前版本变化" }, second.id, "retained-history");
+		expect(restoreResearchVersion(cwd, datasetId, second.id, third.id).content).toEqual(second.content);
+		withResearchDatabase(cwd, datasetId, (db) => {
+			db.prepare("INSERT INTO research_frameworks VALUES('foreign-project',NULL)").run();
+			const foreign = withFrameworkItems(content, [
+				{ ...content.sections.investmentJudgments.items[0], id: "foreign-judgment" },
+			]);
+			db.prepare(
+				"INSERT INTO research_versions VALUES('foreign-version','foreign-project',1,NULL,?,'[]','before','foreign-request','{}')",
+			).run(JSON.stringify(foreign));
+		});
+		for (const id of ["invented", "foreign-judgment"]) {
+			const invalid = structuredClone(retired);
+			invalid.sections.evidenceAndChanges.changes[0].judgmentIds = [id];
+			expect(() => createResearchDraft(cwd, datasetId, invalid, [], third.id)).toThrow("unknown judgment");
+		}
+		expect(getResearchFramework(cwd, datasetId).currentVersionId).toBe(third.id);
+	});
+	it("rejects every incomplete document and preserves every section when saving and publishing", () => {
+		const cwd = project();
+		for (const section of Object.keys(content.sections)) {
+			const incomplete = structuredClone(content) as { sections: Record<string, unknown> };
+			delete incomplete.sections[section];
+			expect(() => createResearchDraft(cwd, datasetId, incomplete, [], null)).toThrow("seven sections");
+		}
+		expect(getResearchFramework(cwd, datasetId).drafts).toEqual([]);
+		const candidate = createResearchDraft(cwd, datasetId, content, [], null);
+		expect(getResearchFramework(cwd, datasetId).drafts[0].content).toEqual(content);
+		const updated = structuredClone(content);
+		updated.sections.researchSetup.preferences = "保守估值";
+		updated.sections.currentAssessment.summary = "需要更多证据才能调整判断";
+		updated.sections.businessModel.drivers[0].mechanism = "订单交付和回款决定经营现金流";
+		updated.sections.investmentJudgments.items[0].confidence.reason = "资料仍不足";
+		updated.sections.valuation.forecastComparisons[0].ownForecast = "待最新财报";
+		updated.sections.monitoring.rules[0].frequency = "每月";
+		updated.sections.evidenceAndChanges.openQuestions[0].evidenceNeeded = "季度订单与回款资料";
+		const saved = updateResearchDraft(cwd, datasetId, candidate.id, 1, updated);
+		expect(saved.content).toEqual(updated);
+		const confirmed = publishResearchDraft(cwd, datasetId, {
+			draftId: saved.id,
+			revision: 2,
+			expectedVersionId: null,
+			requestId: "all-sections",
+		});
+		expect(confirmed.content).toEqual(updated);
+		expect(getResearchFramework(cwd, datasetId).versions[0].content).toEqual(updated);
+	});
+	it("reads legacy records unchanged, rejects legacy publication and permits dismissing an old draft", () => {
+		const cwd = project();
+		const legacy = {
+			title: "旧框架",
+			objective: "原研究目标",
+			horizon: "一年",
+			items: [
+				{
+					id: "legacy",
+					kind: "hypothesis",
+					claim: "旧判断",
+					rationale: "用户假设",
+					subject: "公司",
+					verification: "季度数据",
+					invalidation: "订单下滑",
+					origin: "user",
+					evidenceIds: [],
+				},
+			],
+			coverageGaps: ["原资料缺口"],
+		};
+		withResearchDatabase(cwd, datasetId, (db) => {
+			db.prepare("INSERT INTO research_versions VALUES(?,?,1,NULL,?,'[]','before','legacy-request','{}')").run(
+				"legacy-version",
+				datasetId,
+				JSON.stringify(legacy),
+			);
+			db.prepare("UPDATE research_frameworks SET current_version_id='legacy-version' WHERE dataset_id=?").run(
+				datasetId,
+			);
+			db.prepare("INSERT INTO research_drafts VALUES(?,?,'legacy-version',1,'open',?,'[]','before')").run(
+				"legacy-draft",
+				datasetId,
+				JSON.stringify(legacy),
+			);
+		});
+		expect(getResearchFramework(cwd, datasetId).versions[0].content).toEqual(legacy);
+		expect(getResearchFramework(cwd, datasetId).drafts[0].content).toEqual(legacy);
+		expect(() => createResearchDraft(cwd, datasetId, legacy, [], "legacy-version")).toThrow("schemaVersion 2");
+		expect(() => updateResearchDraft(cwd, datasetId, "legacy-draft", 1, content)).toThrow("read-only");
+		expect(() =>
+			publishResearchDraft(cwd, datasetId, {
+				draftId: "legacy-draft",
+				revision: 1,
+				expectedVersionId: "legacy-version",
+				requestId: "legacy-publish",
+			}),
+		).toThrow("read-only");
+		expect(() => restoreResearchVersion(cwd, datasetId, "legacy-version", "legacy-version")).toThrow("read-only");
+		const rejected = updateResearchDraft(cwd, datasetId, "legacy-draft", 1, content, true);
+		expect(rejected).toMatchObject({ status: "rejected", revision: 2, content: legacy });
+		const replacement = publish(cwd, content, "legacy-version", "new-document");
+		expect(replacement.version).toBe(2);
+		expect(
+			getResearchFramework(cwd, datasetId).versions.find((entry) => entry.id === "legacy-version")?.content,
+		).toEqual(legacy);
+	});
+	it("checks citations in every evidence-bearing section and rejects dangling judgment references", () => {
+		const cwd = project();
+		const invalidId = sourceId({ docId: "outside", location: { kind: "pdf", pageStart: 1, pageEnd: 1 } });
+		const addInvalidEvidence: Array<(value: FrameworkContent) => void> = [
+			(value) => {
+				value.sections.currentAssessment.evidenceIds = [invalidId];
+			},
+			(value) => {
+				value.sections.businessModel.evidenceIds = [invalidId];
+			},
+			(value) => {
+				value.sections.businessModel.drivers[0].evidenceIds = [invalidId];
+			},
+			(value) => {
+				value.sections.businessModel.kpis[0].evidenceIds = [invalidId];
+			},
+			(value) => {
+				value.sections.investmentJudgments.items[0].counterEvidenceIds = [invalidId];
+			},
+			(value) => {
+				value.sections.valuation.evidenceIds = [invalidId];
+			},
+			(value) => {
+				value.sections.valuation.forecastComparisons[0].evidenceIds = [invalidId];
+			},
+			(value) => {
+				value.sections.valuation.scenarios[0].evidenceIds = [invalidId];
+			},
+			(value) => {
+				value.sections.valuation.catalysts[0].evidenceIds = [invalidId];
+			},
+			(value) => {
+				value.sections.monitoring.rules[0].evidenceIds = [invalidId];
+			},
+			(value) => {
+				value.sections.evidenceAndChanges.sources = [
+					{ evidenceId: invalidId, description: "引用", quality: "待核实", limitations: "未获得资料" },
+				];
+			},
+			(value) => {
+				value.sections.evidenceAndChanges.changes = [
+					{ judgmentIds: [], before: "原判断", after: "新判断", reason: "新资料", evidenceIds: [invalidId] },
+				];
+			},
+		];
+		for (const add of addInvalidEvidence) {
+			const invalid = structuredClone(content);
+			add(invalid);
+			expect(() => createResearchDraft(cwd, datasetId, invalid, [], null)).toThrow("outside");
+		}
+		const addInvalidReference: Array<(value: FrameworkContent) => void> = [
+			(value) => {
+				value.sections.valuation.scenarios[0].judgmentIds = ["missing"];
+			},
+			(value) => {
+				value.sections.valuation.catalysts[0].judgmentIds = ["missing"];
+			},
+			(value) => {
+				value.sections.monitoring.rules[0].judgmentIds = ["missing"];
+			},
+			(value) => {
+				value.sections.evidenceAndChanges.openQuestions[0].judgmentIds = ["missing"];
+			},
+			(value) => {
+				value.sections.evidenceAndChanges.changes = [
+					{ judgmentIds: ["missing"], before: "旧", after: "新", reason: "变化", evidenceIds: [] },
+				];
+			},
+		];
+		for (const add of addInvalidReference) {
+			const invalid = structuredClone(content);
+			add(invalid);
+			expect(() => createResearchDraft(cwd, datasetId, invalid, [], null)).toThrow("unknown judgment");
+		}
+		expect(getResearchFramework(cwd, datasetId).drafts).toEqual([]);
+	});
 	it("publishes the version and continuation atomically and migrates the additive schema", () => {
 		const cwd = project();
 		withResearchDatabase(cwd, datasetId, (db) => {
@@ -123,6 +327,7 @@ describe("investment framework persistence", () => {
 		expect(state.currentVersionId).toBe(null);
 		expect(state.drafts).toHaveLength(1);
 		const candidate = state.drafts[0];
+		expect(result.details).toMatchObject({ rendered_report: renderInvestmentFrameworkMarkdown(candidate.content) });
 		const confirmed = publishResearchDraft(cwd, datasetId, {
 			draftId: candidate.id,
 			revision: 1,
@@ -212,16 +417,13 @@ describe("investment framework persistence", () => {
 		writeFileSync(join(cwd, "raw/report.xlsx"), Buffer.concat([workbookBytes, Buffer.from("changed")]));
 		expect(() => readResearchInput(cwd, datasetId, job.input, { docId: "excel" })).toThrow("changed");
 		writeFileSync(join(cwd, "raw/report.xlsx"), workbookBytes);
-		const verified = {
-			...content,
-			items: [
-				{
-					...content.items[0],
-					origin: "research" as const,
-					evidenceIds: [pdfId, excelId],
-				},
-			],
-		};
+		const verified = withFrameworkItems(content, [
+			{
+				...content.sections.investmentJudgments.items[0],
+				origin: "research" as const,
+				evidenceIds: [pdfId, excelId],
+			},
+		]);
 		const candidate = createResearchDraft(cwd, datasetId, verified, ["pdf", "excel"], null);
 		expect(() => createResearchDraft(cwd, datasetId, verified, ["pdf"], null)).toThrow("outside");
 		withResearchDatabase(cwd, datasetId, (db) =>
@@ -251,18 +453,32 @@ describe("investment framework persistence", () => {
 			docId: "pdf",
 			location: { kind: "pdf", pageStart: 1, pageEnd: 1 },
 		});
-		const verified: FrameworkContent = {
-			...content,
-			items: [
-				{
-					...content.items[0],
-					origin: "research",
-					evidenceIds: ["page:page", canonical],
-				},
-			],
-		};
+		const verified = withFrameworkItems(content, [
+			{
+				...content.sections.investmentJudgments.items[0],
+				origin: "research",
+				evidenceIds: ["page:page", canonical],
+			},
+		]);
+		verified.sections.currentAssessment.evidenceIds = ["page:page", canonical];
+		verified.sections.businessModel.drivers[0].evidenceIds = ["page:page", canonical];
+		verified.sections.investmentJudgments.items[0].counterEvidenceIds = ["page:page", canonical];
+		verified.sections.valuation.scenarios[0].evidenceIds = ["page:page", canonical];
+		verified.sections.monitoring.rules[0].evidenceIds = ["page:page", canonical];
+		verified.sections.evidenceAndChanges.sources = [
+			{ evidenceId: "page:page", description: "研报原页", quality: "原始资料", limitations: "仅一页" },
+		];
+		verified.sections.evidenceAndChanges.changes = [
+			{
+				judgmentIds: ["margin"],
+				before: "待核实",
+				after: "已阅读",
+				reason: "新增资料",
+				evidenceIds: ["page:page", canonical],
+			},
+		];
 		const ctx = { cwd } as Parameters<typeof peFrameworkTool.execute>[4];
-		await peFrameworkTool.execute(
+		const proposal = await peFrameworkTool.execute(
 			"pdf-proposal",
 			{
 				operation: "propose",
@@ -275,7 +491,14 @@ describe("investment framework persistence", () => {
 			ctx,
 		);
 		const state = getResearchFramework(cwd, datasetId);
-		expect(state.drafts[0].content.items[0].evidenceIds).toEqual([canonical]);
+		expect(collectFrameworkEvidenceIds(state.drafts[0].content)).toEqual([canonical]);
+		expect(JSON.stringify(state.drafts[0].content)).not.toContain("page:page");
+		expect(proposal.details).toMatchObject({
+			rendered_report: renderInvestmentFrameworkMarkdown(state.drafts[0].content),
+		});
+		expect(state.drafts[0].content).toMatchObject({
+			sections: { investmentJudgments: { items: [{ evidenceIds: [canonical] }] } },
+		});
 		expect(state.currentVersionId).toBeNull();
 		await expect(
 			peFrameworkTool.execute(
@@ -296,10 +519,9 @@ describe("investment framework persistence", () => {
 				"missing",
 				{
 					operation: "propose",
-					content: {
-						...verified,
-						items: [{ ...verified.items[0], evidenceIds: ["page:missing"] }],
-					},
+					content: withFrameworkItems(verified, [
+						{ ...verified.sections.investmentJudgments.items[0], evidenceIds: ["page:missing"] },
+					]),
 					docIds: ["pdf"],
 					expectedVersionId: null,
 				},
@@ -360,13 +582,22 @@ describe("investment framework persistence", () => {
 		expect(() => updateResearchDraft(cwd, datasetId, value.id, 1, content)).toThrow("changed");
 		expect(() => createResearchDraft(cwd, "other", content, [], null)).toThrow("does not match");
 		expect(() =>
-			createResearchDraft(cwd, datasetId, { ...content, items: [content.items[0], content.items[0]] }, [], null),
+			createResearchDraft(
+				cwd,
+				datasetId,
+				withFrameworkItems(content, [
+					content.sections.investmentJudgments.items[0],
+					content.sections.investmentJudgments.items[0],
+				]),
+				[],
+				null,
+			),
 		).toThrow("unique");
 		expect(() =>
 			createResearchDraft(
 				cwd,
 				datasetId,
-				{ ...content, items: [{ ...content.items[0], origin: "research" }] },
+				withFrameworkItems(content, [{ ...content.sections.investmentJudgments.items[0], origin: "research" }]),
 				[],
 				null,
 			),
@@ -376,37 +607,44 @@ describe("investment framework persistence", () => {
 			readResearchInput(cwd, datasetId, { objective: "test", inputs: [], asOf: "now" }, { docId: "outside" }),
 		).toThrow("outside");
 	});
-	it("accepts only selected items and restores old content as a new version", () => {
+	it("requires whole-document confirmation and restores all seven sections as a new version", () => {
 		const cwd = project();
-		const base = {
-			...content,
-			items: [...content.items, { ...content.items[0], id: "demand", claim: "需求待验证" }],
-		};
+		const base = withFrameworkItems(content, [
+			...content.sections.investmentJudgments.items,
+			{ ...content.sections.investmentJudgments.items[0], id: "demand", claim: "需求待验证" },
+		]);
 		const v1 = publish(cwd, base);
 		const changed = {
-			...base,
+			...withFrameworkItems(
+				base,
+				base.sections.investmentJudgments.items.map((item) => ({
+					...item,
+					claim: `${item.claim}已修改`,
+				})),
+			),
 			title: "New title",
-			items: base.items.map((item) => ({
-				...item,
-				claim: `${item.claim}已修改`,
-			})),
 		};
 		const proposed = createResearchDraft(cwd, datasetId, changed, [], v1.id);
-		const v2 = publishResearchDraft(cwd, datasetId, {
+		const publication = {
 			draftId: proposed.id,
 			revision: 1,
 			expectedVersionId: v1.id,
-			requestId: "partial",
-			selectedItemIds: ["margin"],
+			requestId: "complete",
+		};
+		expect(() => publishResearchDraft(cwd, datasetId, { ...publication, selectedItemIds: ["margin"] })).toThrow(
+			"complete seven-section",
+		);
+		const unchanged = getResearchFramework(cwd, datasetId);
+		expect(unchanged.currentVersionId).toBe(v1.id);
+		expect(unchanged.versions).toHaveLength(1);
+		expect(unchanged.drafts.find((entry) => entry.id === proposed.id)).toMatchObject({
+			status: "open",
+			revision: 1,
+			content: changed,
 		});
-		expect(v2.content.title).toBe(base.title);
-		expect(v2.content.items.find((item) => item.id === "demand")?.claim).toBe("需求待验证");
-		expect(v2.content.items.find((item) => item.id === "margin")?.claim).toContain("已修改");
-		expect(
-			getResearchFramework(cwd, datasetId).drafts.some(
-				(entry) => entry.status === "open" && entry.baseVersionId === v1.id,
-			),
-		).toBe(true);
+		const v2 = publishResearchDraft(cwd, datasetId, publication);
+		expect(v2.content).toEqual(changed);
+		expect(getResearchFramework(cwd, datasetId).versions[0].content).toEqual(changed);
 		const restored = restoreResearchVersion(cwd, datasetId, v1.id, v2.id);
 		const v3 = publishResearchDraft(cwd, datasetId, {
 			draftId: restored.id,

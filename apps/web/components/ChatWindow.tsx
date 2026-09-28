@@ -2,6 +2,7 @@
 import { registerAbortHandler } from "@/hooks/useKeyboardShortcuts";
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { ResearchCardView } from "@earendil-works/pe-boot";
+import { getFrameworkItems } from "@earendil-works/pe-boot/framework-report";
 import type { AgentMessage, AssistantContentBlock, AssistantMessage, BashExecutionMessage, BlockingExtensionUiRequest, CustomMessage, ExtensionUiRequest, SessionInfo, SessionTreeNode, ToolResultMessage, UserMessage } from "@/lib/types";
 import { normalizeCustomPanelLines, parseAnsiLine } from "@/lib/ansi";
 import { asBracketedPaste, toTerminalKeyData } from "@/lib/terminal-input";
@@ -14,7 +15,7 @@ import { getChatActivity } from "@/lib/chat-activity";
 import { PeFrameworkConfirmation, PeResearchRail, usePeResearch } from "./PeFrameworkPanel";
 import { PeResearchNotebook, ResearchCardCapture } from "./PeResearchNotebook";
 import { getToolNamesForPreset } from "@/lib/tool-presets";
-import { getTurnFrameworkProposal } from "@/lib/framework-proposal";
+import { getTurnFrameworkFailure, getTurnFrameworkProposal, getTurnFrameworkReport } from "@/lib/framework-proposal";
 import researchStyles from "./PeFrameworkPanel.module.css";
 import { ChatInput, type ChatInputHandle } from "./ChatInput";
 import { ChatMinimap, useMessageRefs } from "./ChatMinimap";
@@ -283,6 +284,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
   const isEmptyNew = isNew && messages.length === 0 && !streamState.isStreaming && !sessionBusy;
   const messageCwd = session?.cwd ?? newSessionCwd ?? undefined;
   const research = usePeResearch(messageCwd, `${sessionBusy}:${messages.length}`);
+  const currentFramework = research.snapshot?.framework.versions.find((version) => version.id === research.snapshot?.framework.currentVersionId)?.content;
   const [researchCardsRefresh, setResearchCardsRefresh] = useState(0);
   const [initialSourceCardId] = useState(() => typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("researchCard"));
   const activeResearchSource = researchSourceTarget?.sessionId === session?.id ? researchSourceTarget : null;
@@ -622,7 +624,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
                 if (idx === lastUserIdx) { (lastUserMsgRef as { current: HTMLDivElement | null }).current = el; }
               };
 
-              const renderMessage = (idx: number, options: { attachRef?: boolean; keyPrefix?: string; messageOverride?: AgentMessage; showTimestamp?: boolean; writtenFiles?: WrittenFile[] } = {}): ReactNode => {
+              const renderMessage = (idx: number, options: { attachRef?: boolean; keyPrefix?: string; messageOverride?: AgentMessage; showTimestamp?: boolean; writtenFiles?: WrittenFile[]; defaultMermaidPreview?: boolean } = {}): ReactNode => {
                 const msg = options.messageOverride ?? messages[idx];
                 if (isFrameworkConfirmationMessage(msg)) return null;
                 const prevAssistantEntryId =
@@ -664,6 +666,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
                     prevTimestamp={idx > 0 ? (messages[idx - 1] as AgentMessage & { timestamp?: number }).timestamp : undefined}
                     sessionId={session?.id ?? sessionIdRef.current ?? undefined}
                     writtenFiles={options.writtenFiles}
+                    defaultMermaidPreview={options.defaultMermaidPreview}
                   />
                 );
                 if (!isVisible || options.attachRef === false || currentRefIdx === undefined) return view;
@@ -687,8 +690,16 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
                 let endIdx = userIdx + 1;
                 while (endIdx < messages.length && !isGroupAnchor(messages[endIdx])) endIdx += 1;
 
+                const turnContent = messages.slice(userIdx + 1, endIdx).flatMap((message) => message.role === "assistant" ? message.content : []);
+                const proposal = getTurnFrameworkProposal(turnContent, toolResultsMap);
+                const frameworkReport = getTurnFrameworkReport(turnContent, toolResultsMap);
+                const frameworkFailure = !frameworkReport ? getTurnFrameworkFailure(turnContent, toolResultsMap) : null;
+                const frameworkAssistantIdx = frameworkReport && proposal ? messages.findIndex((message, index) => index > userIdx && index < endIdx && message.role === "assistant"
+                  && message.content.some((block) => block.type === "toolCall" && block.toolCallId === proposal.toolCallId)) : -1;
                 const isLiveTail = (agentRunning || streamState.isStreaming) && endIdx === messages.length && userIdx === lastAnchorIdx;
-                const finalAssistantIdx = isLiveTail ? -1 : findFinalAssistantIndex(messages, userIdx, endIdx);
+                // A saved framework is the turn's result, even when the model's
+                // subsequent response is empty, interrupted, or fails.
+                const finalAssistantIdx = isLiveTail || frameworkReport ? -1 : findFinalAssistantIndex(messages, userIdx, endIdx);
                 if (messages[userIdx].role === "user") rendered.push(renderMessage(userIdx));
 
                 const processIndices: number[] = [];
@@ -718,6 +729,8 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
                     retrying: isLiveTail && Boolean(retryInfo),
                     waitingForInput: isLiveTail && Boolean(extensionDialog || extensionCustomUi),
                     completed: !isLiveTail,
+                    hasSavedFramework: Boolean(frameworkReport),
+                    frameworkFailed: Boolean(frameworkFailure),
                   }, locale);
                   rendered.push(
                     <ProcessDetailsGroup key={`process-${session?.id ?? sessionIdRef.current}-${userIdx}`} label={activity} active={isLiveTail}>
@@ -765,30 +778,25 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
                   if (messages[bashIdx].role === "bashExecution") rendered.push(renderMessage(bashIdx));
                 }
 
-                if (finalAssistant && finalAnswerMessage) {
-                  // Each tool call is stored as its own assistant entry, so the
-                  // final answer alone carries no record of what the turn wrote.
-                  // Gather the turn's assistant blocks and derive the file list
-                  // from the write/edit calls among them.
-                  const turnContent: AssistantContentBlock[] = [];
-                  for (let i = userIdx + 1; i <= finalAssistantIdx; i++) {
-                    const m = messages[i];
-                    if (m?.role === "assistant") {
-                      for (const b of (m as AssistantMessage).content ?? []) turnContent.push(b);
-                    }
-                  }
+                const answerIdx = frameworkAssistantIdx !== -1 ? frameworkAssistantIdx : finalAssistantIdx;
+                const displayedAnswer: AssistantMessage | null = frameworkAssistantIdx !== -1 && frameworkReport
+                  ? { ...(messages[frameworkAssistantIdx] as AssistantMessage), content: [{ type: "text", text: frameworkReport }], stopReason: "stop", errorMessage: undefined }
+                  : finalAnswerMessage ?? (!isLiveTail && finalAssistant && frameworkFailure
+                    ? { ...finalAssistant, content: [], stopReason: "error", errorMessage: frameworkFailure.error }
+                    : null);
+                if (displayedAnswer) {
                   const writtenFiles = extractTurnWrittenFiles(turnContent, toolResultsMap, messageCwd);
-                  const answerView = renderMessage(finalAssistantIdx, { messageOverride: finalAnswerMessage, writtenFiles });
-                  const answerText = finalAnswerMessage.content.filter((block) => block.type === "text").map((block) => block.text).join("\n").trim();
+                  const answerView = renderMessage(answerIdx, { keyPrefix: frameworkReport ? "framework-result" : "message", messageOverride: displayedAnswer, writtenFiles, defaultMermaidPreview: Boolean(frameworkReport) });
+                  const answerText = displayedAnswer.content.filter((block) => block.type === "text").map((block) => block.text).join("\n").trim();
                   const sourceSessionId = session?.id ?? sessionIdRef.current;
-                  if (research.project && sourceSessionId && entryIds[finalAssistantIdx] && answerText && !getAssistantErrorMessage(finalAssistant)) {
-                    rendered.push(<ResearchCardCapture key={`capture-${sourceSessionId}-${entryIds[finalAssistantIdx]}-${sourceTarget?.entryId === entryIds[finalAssistantIdx] ? sourceTarget.requestId : 0}`} project={research.project} sessionId={sourceSessionId} entryId={entryIds[finalAssistantIdx]} text={answerText}
-                      sourceHighlight={sourceTarget?.entryId === entryIds[finalAssistantIdx] ? sourceTarget.excerpt : undefined}
+                  if (frameworkReport) rendered.push(<p key={`framework-label-${proposal?.toolCallId}`} className="mb-2 text-sm font-medium">完整投资框架</p>);
+                  if (research.project && sourceSessionId && entryIds[answerIdx] && answerText && !getAssistantErrorMessage(displayedAnswer)) {
+                    rendered.push(<ResearchCardCapture key={`capture-${sourceSessionId}-${entryIds[answerIdx]}-${sourceTarget?.entryId === entryIds[answerIdx] ? sourceTarget.requestId : 0}`} project={research.project} sessionId={sourceSessionId} entryId={entryIds[answerIdx]} text={answerText}
+                      sourceHighlight={sourceTarget?.entryId === entryIds[answerIdx] ? sourceTarget.excerpt : undefined}
                       onSaved={() => { setResearchCardsRefresh((value) => value + 1); research.setView("notebook"); }}>{answerView}</ResearchCardCapture>);
                   } else rendered.push(answerView);
-                  const proposal = getTurnFrameworkProposal(turnContent, toolResultsMap);
-                  if (proposal) rendered.push(<PeFrameworkConfirmation key={`framework-${session?.id ?? sessionIdRef.current}-${proposal.draftId}-${proposal.revision}`} proposal={proposal} research={research} sessionId={session?.id ?? sessionIdRef.current} ensureEventsConnected={ensureEventsConnected} />);
                 }
+                if (proposal) rendered.push(<PeFrameworkConfirmation key={`framework-${session?.id ?? sessionIdRef.current}-${proposal.draftId}-${proposal.revision}`} proposal={proposal} research={research} sessionId={session?.id ?? sessionIdRef.current} ensureEventsConnected={ensureEventsConnected} showPreview={!frameworkReport} />);
                 if (finalAssistantIdx !== -1) {
                   for (let trailingIdx = finalAssistantIdx + 1; trailingIdx < endIdx; trailingIdx++) rendered.push(renderMessage(trailingIdx));
                 }
@@ -851,7 +859,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
     </div>
     <PeResearchRail research={research} model={displayModelValue ?? undefined} agentUnavailable={toolPreset === "none" || modelSwitching}
       notebook={research.project ? <PeResearchNotebook key={research.project.datasetId} project={research.project} refreshKey={researchCardsRefresh}
-        frameworkItems={research.snapshot?.framework.versions.find((version) => version.id === research.snapshot?.framework.currentVersionId)?.content.items}
+        frameworkItems={currentFramework ? getFrameworkItems(currentFramework) : undefined}
         onOpenFramework={() => research.setView("framework")} onOpenSource={onResearchSourceOpen} onSessionCreated={onSessionForked} model={displayModelValue ?? undefined} toolNames={getToolNamesForPreset(toolPreset)} agentUnavailable={toolPreset === "none" || modelSwitching || sessionBusy} /> : undefined} />
     </div>
   );

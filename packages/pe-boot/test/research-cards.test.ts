@@ -11,9 +11,9 @@ import {
 	updateResearchCard,
 } from "../src/research/cards.ts";
 import { createResearchDraft, publishResearchDraft } from "../src/research/framework.ts";
-import type { FrameworkContent } from "../src/research/model.ts";
 import { withResearchDatabase } from "../src/research/storage.ts";
 import { sourceId } from "../src/source.ts";
+import { frameworkFixture, withFrameworkItems } from "./fixtures/framework.ts";
 
 const roots: string[] = [];
 function project(datasetId = "cards") {
@@ -32,7 +32,7 @@ const input: CreateResearchCard = {
 	relatedCardIds: [],
 	origin: { sessionId: "first-session", entryId: "answer", excerpt: "需求恢复尚待核实", messageTimestamp: 123 },
 };
-const framework: FrameworkContent = {
+const framework = frameworkFixture({
 	title: "投资框架",
 	objective: "验证需求恢复与盈利质量",
 	horizon: "未来三年",
@@ -50,7 +50,7 @@ const framework: FrameworkContent = {
 		},
 	],
 	coverageGaps: [],
-};
+});
 function publishFramework(cwd: string, content = framework, expectedVersionId: string | null = null) {
 	const draft = createResearchDraft(cwd, "cards", content, [], expectedVersionId);
 	return publishResearchDraft(cwd, "cards", {
@@ -91,7 +91,7 @@ describe("project research cards", () => {
 		).toThrow("框架条目已变化");
 		const current = publishFramework(
 			cwd,
-			{ ...framework, items: [{ ...framework.items[0], id: "replacement" }] },
+			withFrameworkItems(framework, [{ ...framework.sections.investmentJudgments.items[0], id: "replacement" }]),
 			firstVersion.id,
 		);
 		expect(current.version).toBe(2);

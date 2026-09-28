@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { resolvePeEvidenceRecord } from "../evidence.ts";
 import type { SqlRow } from "../tools/database.ts";
-import { ResearchError } from "./model.ts";
+import { getFrameworkItems, ResearchError, type StoredFrameworkContent } from "./model.ts";
 import { researchTransaction, withResearchDatabase } from "./storage.ts";
 
 export type ResearchCardKind = "note" | "question";
@@ -109,11 +109,7 @@ function currentFrameworkItems(db: DatabaseSync, datasetId: string) {
 			WHERE f.dataset_id=?`)
 		.get(datasetId);
 	if (!row) return [];
-	return (
-		JSON.parse(String(row.content_json)) as {
-			items: Array<{ id: string; kind: ResearchCardFrameworkItem["kind"]; subject: string }>;
-		}
-	).items;
+	return getFrameworkItems(JSON.parse(String(row.content_json)) as StoredFrameworkContent);
 }
 function checkedFrameworkItemIds(db: DatabaseSync, datasetId: string, value: unknown): string[] {
 	const selected = ids(value, 20);

@@ -11,6 +11,7 @@ import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { expect, it } from "vitest";
 import { AuthStorage } from "../../coding-agent/src/core/auth-storage.ts";
 import { createPiResearchEngine } from "../src/research/pi-engine.ts";
+import { frameworkFixture } from "./fixtures/framework.ts";
 
 it("runs the real SDK with only scoped evidence and submission tools, without project resources or paid calls", async () => {
 	const root = mkdtempSync(join(tmpdir(), "pe-research-sdk-"));
@@ -18,7 +19,7 @@ it("runs the real SDK with only scoped evidence and submission tools, without pr
 		mkdirSync(join(root, ".pi/extensions"), { recursive: true });
 		writeFileSync(join(root, ".pi/extensions/unsafe.ts"), 'throw new Error("PROJECT_EXTENSION_LOADED");');
 		writeFileSync(join(root, "AGENTS.md"), "PROJECT_CONTEXT_MUST_NOT_APPEAR");
-		const content = {
+		const content = frameworkFixture({
 			title: "框架",
 			objective: "检查需求",
 			horizon: "一年",
@@ -36,7 +37,7 @@ it("runs the real SDK with only scoped evidence and submission tools, without pr
 					evidenceIds: [],
 				},
 			],
-		};
+		});
 		const runtime = await ModelRuntime.create({
 			credentials: AuthStorage.inMemory(),
 			modelsPath: null,

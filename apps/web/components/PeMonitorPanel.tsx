@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { FrameworkState, MonitorConfig, getResearchMonitor } from "@earendil-works/pe-boot";
+import { FRAMEWORK_SECTION_TITLES, getFrameworkCoverageGaps, isFrameworkDocument } from "@earendil-works/pe-boot/framework-report";
 import type { PeProjectSummary } from "@/lib/pe-project-types";
 import { PeSourceCitation } from "./PeSourceCitation";
 import styles from "./PeFrameworkPanel.module.css";
@@ -67,9 +68,11 @@ export function PeMonitorPanel({ project, monitor, framework, refresh, mode = "a
   const current = framework.versions.find((version) => version.id === framework.currentVersionId);
   const changedItems = latest?.changes?.filter((change) => !["title", "objective", "horizon", "coverageGaps"].includes(change.id)) ?? [];
   const awaiting = candidate?.status === "open";
+  const legacyDraft = awaiting && !isFrameworkDocument(candidate.content);
   const stale = awaiting && candidate.baseVersionId !== framework.currentVersionId;
   const updated = latest?.status === "published" || candidate?.status === "published";
-  const gap = current?.content.coverageGaps.find((text) => /待核验|未完成|冲突|未核实/.test(text));
+  const coverageGaps = current ? getFrameworkCoverageGaps(current.content) : [];
+  const gap = coverageGaps.find((text) => /待核验|未完成|冲突|未核实/.test(text));
   const failedSources = latest?.events.filter((event) => event.status === "failed") ?? [];
   const headline = !latest ? "让研究持续跟上变化" : latest.status === "running" ? "正在检查最新资料" : candidate?.status === "rejected" ? "本次建议未采用" : stale ? "这份建议需要重新复盘" : awaiting ? "有一份调整建议待你确认" : updated ? "投资框架已更新" : latest.status === "no_change" ? "本次复盘未调整框架" : "本次检查尚未完成";
   return <article className={`${styles.document} ${styles.monitor}`}>
@@ -77,14 +80,15 @@ export function PeMonitorPanel({ project, monitor, framework, refresh, mode = "a
     <div className={styles.updateCard}>
       <small>最新动态{latest ? ` · ${new Date(latest.startedAt).toLocaleDateString()}` : ""}</small>
       <h2 role="status">{headline}</h2>
-      <p>{!latest ? "开启后会检查新资料，重要变化会出现在这里。" : latest.status === "running" ? "完成后会告诉你哪些判断受到影响。" : candidate?.status === "rejected" ? "保留现有框架，后续继续跟踪。" : stale ? "当前框架已有更新，请基于最新版本重新检查。" : awaiting ? "查看变化后，可以接受或暂不调整。" : updated ? `本轮调整了 ${changedItems.length} 项判断，历史版本已保留。` : latest.status === "no_change" ? "当前框架保留。这不代表已排除所有风险。" : "当前框架保留，暂不能据此判断没有重要变化。"}</p>
-      {(updated || awaiting) && changedItems.length > 0 && <><small>变化摘录</small><ul className={styles.keyChanges}>{changedItems.slice(0, 2).map((change) => <li key={change.id}><p className={styles.excerpt}>{change.after ? changeExcerpt(change.after) : "一项原有判断已移除，请查看变化依据。"}</p></li>)}</ul></>}
-      {gap && <details className={styles.attention}><summary>仍需核实：{gap.includes("：") ? gap.split("：")[0] : "存在资料缺口"}</summary>{current?.content.coverageGaps.map((item, index) => <p key={index}>{item}</p>)}</details>}
+      <p>{!latest ? "开启后会检查新资料，重要变化会出现在这里。" : latest.status === "running" ? "完成后会告诉你哪些判断受到影响。" : candidate?.status === "rejected" ? "保留现有框架，后续继续跟踪。" : stale ? "当前框架已有更新，请基于最新版本重新检查。" : awaiting ? "查看变化后，可以接受或暂不调整。" : updated ? `本轮记录了 ${changedItems.length} 项内容变化，历史版本已保留。` : latest.status === "no_change" ? "当前框架保留。这不代表已排除所有风险。" : "当前框架保留，暂不能据此判断没有重要变化。"}</p>
+      {(updated || awaiting) && changedItems.length > 0 && <><small>变化摘录</small><ul className={styles.keyChanges}>{changedItems.slice(0, 2).map((change) => <li key={change.id}><p className={styles.excerpt}>{change.id in FRAMEWORK_SECTION_TITLES ? `${FRAMEWORK_SECTION_TITLES[change.id as keyof typeof FRAMEWORK_SECTION_TITLES]}已更新，请查看前后版本。` : change.after ? changeExcerpt(change.after) : "一项原有判断已移除，请查看变化依据。"}</p></li>)}</ul></>}
+      {gap && <details className={styles.attention}><summary>仍需核实：{gap.includes("：") ? gap.split("：")[0] : "存在资料缺口"}</summary>{coverageGaps.map((item, index) => <p key={index}>{item}</p>)}</details>}
       {failedSources.length > 0 && <p className={styles.sourceNotice}>{[...new Set(failedSources.map((event) => names[event.stage as keyof typeof names] ?? "部分资料"))].join("、")}暂未核实，相关结论仍有信息缺口。</p>}
       {awaiting && <div className={styles.monitorActions}>
-        <button type="button" disabled={busy || stale} onClick={() => void request("publish", { draftId: candidate.id, revision: candidate.revision, expectedVersionId: candidate.baseVersionId, requestId: `review_${candidate.id}_${candidate.revision}` })}>接受调整</button>
+        <button type="button" disabled={busy || stale || legacyDraft} onClick={() => void request("publish", { draftId: candidate.id, revision: candidate.revision, expectedVersionId: candidate.baseVersionId, requestId: `review_${candidate.id}_${candidate.revision}` })}>接受调整</button>
         <button type="button" disabled={busy} onClick={() => void request("reject", { draftId: candidate.id, revision: candidate.revision, content: candidate.content })}>暂不调整</button>
       </div>}
+      {legacyDraft && <p>这是旧版条目草稿。请重新生成完整投资框架后确认。</p>}
       {!!latest?.changes?.length && <details><summary>查看变化</summary>{latest.changes.map((change) => <section key={change.id}><p><small>原判断</small><br />{change.before ?? "新增条目"}</p><p><small>新判断</small><br />{change.after ?? "已移除"}</p><p><small>调整依据</small><br />{change.reason}</p></section>)}</details>}
       {latest?.events.some((event) => event.evidenceId) && <details><summary>查看依据</summary>{latest.events.filter((event) => event.evidenceId).map((event, index) => <p key={index}>{names[event.stage as keyof typeof names] ?? "资料"} · <PeSourceCitation cwd={project.root} evidenceId={event.evidenceId!}>原始来源</PeSourceCitation></p>)}</details>}
     </div>
@@ -123,7 +127,7 @@ export function PeMonitorPanel({ project, monitor, framework, refresh, mode = "a
             <small>{change.id}</small><p>之前：{change.before ?? "无此条目"}</p><p>现在：{change.after ?? "已移除"}</p><p>依据：{change.reason}</p>
           </section>)}</div>}
           {draft?.status === "open" && <div className={styles.monitorActions}>
-            <button type="button" disabled={busy || stale} onClick={() => void request("publish", { draftId: draft.id, revision: draft.revision, expectedVersionId: draft.baseVersionId, requestId: `review_${draft.id}_${draft.revision}` })}>{stale ? "基准已变，请重新复盘" : "确认更新框架"}</button>
+            <button type="button" disabled={busy || stale || !isFrameworkDocument(draft.content)} onClick={() => void request("publish", { draftId: draft.id, revision: draft.revision, expectedVersionId: draft.baseVersionId, requestId: `review_${draft.id}_${draft.revision}` })}>{!isFrameworkDocument(draft.content) ? "旧版草稿，请重新生成" : stale ? "基准已变，请重新复盘" : "确认更新框架"}</button>
             <button type="button" disabled={busy} onClick={() => void request("reject", { draftId: draft.id, revision: draft.revision, content: draft.content })}>拒绝草稿</button>
           </div>}
           {run.status !== "running" && <a href={`/api/files/${project.root.split("/").filter(Boolean).map(encodeURIComponent).join("/")}/generated/monitoring/${run.id}.md?type=download`}>下载本轮 Markdown</a>}

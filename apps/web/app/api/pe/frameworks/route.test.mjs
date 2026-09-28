@@ -14,6 +14,8 @@ const { GET, POST } = await jiti.import("./route.ts");
 const { cacheSessionPath } = await jiti.import("../../../../lib/session-reader.ts");
 const { AgentSessionWrapper } = await jiti.import("../../../../lib/rpc-manager.ts");
 const { AuthStorage } = await jiti.import("../../../../../../packages/coding-agent/src/core/auth-storage.ts");
+const { frameworkFixture } = await jiti.import("../../../../../../packages/pe-boot/test/fixtures/framework.ts");
+const { renderInvestmentFrameworkMarkdown } = await jiti.import("../../../../../../packages/pe-boot/src/research/report.ts");
 
 test("project API creates, saves and publishes a draft; rejects stale, invalid and cross-project actions", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "pe-framework-route-"));
@@ -29,10 +31,10 @@ test("project API creates, saves and publishes a draft; rejects stale, invalid a
   const request = (body) => POST(new Request("http://localhost/api/pe/frameworks", {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ datasetId: project.datasetId, ...body }),
   }));
-  const content = {
+  const content = frameworkFixture({
     title: "框架", objective: "检查盈利", horizon: "未来一年", coverageGaps: ["待补财报"],
     items: [{ id: "margin", kind: "hypothesis", claim: "盈利可能恢复", rationale: "用户假设", subject: "试点公司", verification: "毛利率恢复", invalidation: "毛利率连续下降", origin: "user", evidenceIds: [] }],
-  };
+  });
   const created = await request({ action: "create", content, docIds: [], expectedVersionId: null });
   assert.equal(created.status, 201);
   const { draft } = await created.json();
@@ -44,6 +46,13 @@ test("project API creates, saves and publishes a draft; rejects stale, invalid a
   assert.equal(snapshot.status, 200);
   const { framework } = await snapshot.json();
   assert.equal(framework.versions[0].content.title, "修订");
+  assert.deepEqual(framework.versions[0].content, { ...content, title: "修订" });
+  const download = await GET(new Request(`http://localhost/api/pe/frameworks?datasetId=${project.datasetId}&download=${framework.currentVersionId}`));
+  assert.equal(download.status, 200);
+  assert.match(download.headers.get("content-type"), /text\/markdown/);
+  const markdown = await download.text();
+  assert.equal(markdown, renderInvestmentFrameworkMarkdown(framework.versions[0].content));
+  for (const heading of ["研究设定", "当前判断", "公司如何创造价值", "投资判断与其他解释", "市场预期、估值与回报", "什么情况下我们错了", "证据、未知问题与版本变化"]) assert.ok(markdown.includes(heading), heading);
   const config = { enabled: false, mode: "auto", intervalHours: 24, objective: "持续核对新资料", queries: [], includeMemos: true };
   assert.equal((await request({ action: "monitor-save", revision: 0, config })).status, 200);
   const monitorResponse = await GET(new Request(`http://localhost/api/pe/frameworks?datasetId=${project.datasetId}`));
@@ -52,6 +61,7 @@ test("project API creates, saves and publishes a draft; rejects stale, invalid a
   assert.equal((await request({ action: "monitor-run" })).status, 409, "paused plans cannot be dispatched");
   assert.equal((await request({ action: "generate", objective: "复盘", docIds: [], expectedVersionId: framework.currentVersionId, requestId: "review" })).status, 202);
   assert.equal((await request({ action: "create", content: {}, docIds: [], expectedVersionId: framework.currentVersionId })).status, 400);
+  assert.equal((await request({ action: "create", content: { title: "旧框架", objective: "目标", horizon: "一年", items: content.sections.investmentJudgments.items, coverageGaps: [] }, docIds: [], expectedVersionId: framework.currentVersionId })).status, 400);
   assert.equal((await request({ action: "unknown" })).status, 400);
   assert.equal((await POST(new Request("http://localhost/api/pe/frameworks", { method: "POST", body: "null" }))).status, 400);
 });
@@ -63,7 +73,7 @@ test("confirmation binds source, persists once, retries into real Pi and reconci
   process.env.PI_CODING_AGENT_DIR = root;
   process.env.PE_MULTI_USER_MODE = "0";
   const project = createPeProject({ name: "Confirmation integration" });
-  const content = { title: "确认测试", objective: "需求验证", horizon: "一年", coverageGaps: [], items: [{ id: "demand", kind: "hypothesis", claim: "需求稳定", rationale: "待验证", subject: "测试公司", verification: "复购", invalidation: "库存上升", origin: "user", evidenceIds: [] }] };
+  const content = frameworkFixture({ title: "确认测试", objective: "需求验证", horizon: "一年", coverageGaps: [], items: [{ id: "demand", kind: "hypothesis", claim: "需求稳定", rationale: "待验证", subject: "测试公司", verification: "复购", invalidation: "库存上升", origin: "user", evidenceIds: [] }] });
   const draft = createResearchDraft(project.root, project.datasetId, content, [], null);
   const manager = SessionManager.create(project.root, join(root, "sessions"));
   const sid = manager.getSessionId();

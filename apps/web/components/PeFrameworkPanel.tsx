@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Popover } from "@base-ui/react/popover";
 import { BookOpen, ChartNoAxesCombined, FileText, Settings } from "lucide-react";
-import type { FrameworkContent, FrameworkState, ResearchContinuation, getPeMemoVersion, getResearchMonitor } from "@earendil-works/pe-boot";
+import type { FrameworkState, ResearchContinuation, getPeMemoVersion, getResearchMonitor } from "@earendil-works/pe-boot";
+import { getFrameworkItems, isFrameworkDocument, type StoredFrameworkContent } from "@earendil-works/pe-boot/framework-report";
 import type { PeProjectCatalog, PeProjectSummary } from "@/lib/pe-project-types";
 import type { FrameworkProposal } from "@/lib/framework-proposal";
 import { PeSourceCitation } from "./PeSourceCitation";
@@ -12,7 +13,7 @@ import { FrameworkTimeline } from "./FrameworkTimeline";
 import { PeMonitorPanel } from "./PeMonitorPanel";
 import { PeStockTracking } from "./PeStockTracking";
 import { FrameworkConfirmation, ResearchRail } from "./research-ui/ResearchUI";
-import { frameworkReportMarkdown, reportParagraphs, reportCoverage } from "@/lib/framework-report";
+import { frameworkReportMarkdown } from "@/lib/framework-report";
 export { frameworkReportMarkdown } from "@/lib/framework-report";
 import styles from "./PeFrameworkPanel.module.css";
 
@@ -58,17 +59,12 @@ export function usePeResearch(cwd: string | undefined, settledKey: string) {
 type Research = ReturnType<typeof usePeResearch>;
 
 function ReportText({ text }: { text: string }) {
-  return <>{reportParagraphs(text).map((paragraph, index) => {
-    const label = paragraph.match(/^(原判断|新证据|外部证据|调整原因|新增条目|新证据为|证据可得性)：/);
-    return <p key={index}>{label ? <><strong>{label[0]}</strong>{paragraph.slice(label[0].length)}</> : paragraph}</p>;
-  })}</>;
+  return <p>{text}</p>;
 }
 
-export function FrameworkText({ content, cwd, downloadUrl }: { content: FrameworkContent; cwd: string; downloadUrl?: string }) {
+export function FrameworkText({ content, cwd, downloadUrl }: { content: StoredFrameworkContent; cwd: string; downloadUrl?: string }) {
   const [filter, setFilter] = useState("all");
   const [report, setReport] = useState(true);
-  const Item = report ? "section" : "details";
-  const ItemHeading = report ? "div" : "summary";
   function downloadReport() {
     const url = URL.createObjectURL(new Blob([frameworkReportMarkdown(content)], { type: "text/markdown;charset=utf-8" }));
     const link = document.createElement("a");
@@ -77,42 +73,50 @@ export function FrameworkText({ content, cwd, downloadUrl }: { content: Framewor
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
-  const gaps = reportCoverage(content.coverageGaps);
   const kinds = { thesis: "核心论点", hypothesis: "关键假设", metric: "跟踪指标", question: "待核实问题", event: "经营事件" };
-  const items = content.items.filter((item) => report || filter === "all" || item.kind === filter);
+  const allItems = getFrameworkItems(content);
+  const items = allItems.filter((item) => filter === "all" || item.kind === filter);
+  const completeDocument = isFrameworkDocument(content);
   return <article className={`${styles.document} ${styles.framework}`}>
     <div className={styles.reportActions}>
-      <div role="group" aria-label="报告展示方式"><button type="button" aria-pressed={report} onClick={() => setReport(true)}>完整报告</button><button type="button" aria-pressed={!report} onClick={() => setReport(false)}>按条目浏览</button></div>
-      {downloadUrl ? <a href={downloadUrl} download>下载完整报告 · Markdown</a> : <button type="button" onClick={downloadReport}>下载完整报告 · Markdown</button>}
+      <div role="group" aria-label="投资框架展示方式"><button type="button" aria-pressed={report} onClick={() => setReport(true)}>{completeDocument ? "完整投资框架" : "旧版框架全文"}</button><button type="button" aria-pressed={!report} onClick={() => setReport(false)}>按判断浏览</button></div>
+      {downloadUrl ? <a href={downloadUrl} download>下载{completeDocument ? "完整投资框架" : "旧版框架"} · Markdown</a> : <button type="button" onClick={downloadReport}>下载{completeDocument ? "完整投资框架" : "旧版框架"} · Markdown</button>}
     </div>
+    {report ? <MarkdownBody cwd={cwd} className={styles.reportBody} defaultMermaidPreview={completeDocument}>{frameworkReportMarkdown(content)}</MarkdownBody> : <>
     <h2>{content.title}</h2>
-    {report ? <div className={styles.reportIntro}><h3>研究目标</h3><ReportText text={content.objective} /><h3>研究期限</h3><ReportText text={content.horizon} /></div> : <details className={styles.scope}><summary>研究目标与期限</summary><ReportText text={content.objective} /><ReportText text={content.horizon} /></details>}
-    {!report && <div className={styles.frameworkToolbar}>
-      <strong>判断与跟踪 <span>{content.items.length}</span></strong>
+    {!completeDocument && <p className={styles.legacyNotice}>旧版条目框架，仅供查阅；缺少的研究章节尚未补齐。</p>}
+    <div className={styles.frameworkToolbar}>
+      <strong>投资判断 <span>{allItems.length}</span></strong>
       <select aria-label="筛选框架条目" value={filter} onChange={(event) => setFilter(event.target.value)}>
         <option value="all">全部条目</option>
         {Object.entries(kinds).map(([kind, label]) => <option key={kind} value={kind}>{label}</option>)}
       </select>
-    </div>}
-    {items.map((item) => <Item className={styles.frameworkItem} key={`${report}-${item.id}`}>
-      <ItemHeading>
+    </div>
+    {items.map((item) => {
+      const judgment = completeDocument ? content.sections.investmentJudgments.items.find((entry) => entry.id === item.id) : undefined;
+      return <details className={styles.frameworkItem} key={item.id}>
+      <summary>
         <span className={styles.itemMeta}>{kinds[item.kind]}{item.origin === "user" ? " · 用户假设，待验证" : ""}</span>
         <h3>{item.subject}</h3>
-        {!report && <span className={styles.claimPreview}>{item.claim}</span>}
-      </ItemHeading>
+        <span className={styles.claimPreview}>{item.claim}</span>
+      </summary>
       <div className={styles.itemBody}>
         <div className={styles.fullClaim}><ReportText text={item.claim} /></div>
-        {!report && <><h4>判断依据</h4><ReportText text={item.rationale} /></>}
+        <h4>判断依据</h4><ReportText text={item.rationale} />
+        {judgment && <><h4>置信度</h4><ReportText text={`${{ high: "高", medium: "中", low: "低", undetermined: "待判断" }[judgment.confidence.level]}：${judgment.confidence.reason}`} /></>}
+        {!!judgment?.alternativeExplanations.length && <><h4>其他解释</h4><ul>{judgment.alternativeExplanations.map((explanation, index) => <li key={index}>{explanation}</li>)}</ul></>}
         <dl className={styles.verification}><div><dt>如何验证</dt><dd><ReportText text={item.verification} /></dd></div><div><dt>何时失效</dt><dd><ReportText text={item.invalidation} /></dd></div></dl>
         {item.evidenceIds.length > 0 && <div className={styles.sources}>{item.evidenceIds.map((id, i) => <PeSourceCitation key={id} cwd={cwd} evidenceId={id}>来源 {i + 1}</PeSourceCitation>)}</div>}
+        {!!judgment?.counterEvidenceIds.length && <div className={styles.sources}>{judgment.counterEvidenceIds.map((id, i) => <PeSourceCitation key={id} cwd={cwd} evidenceId={id}>反面证据 {i + 1}</PeSourceCitation>)}</div>}
       </div>
-    </Item>)}
+    </details>;
+    })}
     {items.length === 0 && <p className={styles.empty}>当前框架没有此类条目。</p>}
-    {gaps.length > 0 && <Item className={styles.coverage} key={String(report)}><ItemHeading>影响判断的关键限制</ItemHeading><ul>{gaps.map((gap, i) => <li key={i}><ReportText text={gap} /></li>)}</ul></Item>}
+    </>}
   </article>;
 }
 
-export function PeFrameworkConfirmation({ proposal, research, sessionId, ensureEventsConnected }: { proposal: FrameworkProposal; research: Research; sessionId: string | null; ensureEventsConnected: (sessionId: string) => Promise<void> }) {
+export function PeFrameworkConfirmation({ proposal, research, sessionId, ensureEventsConnected, showPreview = true }: { proposal: FrameworkProposal; research: Research; sessionId: string | null; ensureEventsConnected: (sessionId: string) => Promise<void>; showPreview?: boolean }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const inFlight = useRef(false);
@@ -122,6 +126,10 @@ export function PeFrameworkConfirmation({ proposal, research, sessionId, ensureE
   const draft = research.snapshot?.framework.drafts.find((entry) => entry.id === proposal.draftId);
   if (!research.project || research.project.datasetId !== proposal.datasetId || !draft) return null;
   const published = !!saved || draft.status === "published";
+  if (!published && !isFrameworkDocument(draft.content)) return <div>
+    <p className={styles.legacyNotice}>这是旧版条目草稿，仅供查阅。请在对话中重新生成完整投资框架后确认。</p>
+    <FrameworkText content={draft.content} cwd={research.project.root} />
+  </div>;
   const stale = !published && (draft.revision !== proposal.revision || draft.baseVersionId !== research.snapshot?.framework.currentVersionId || draft.status !== "open");
   async function resume(receipt: ResearchContinuation) {
     if (receipt.sessionId !== sessionId) throw new Error("请回到生成框架的来源会话继续研究。");
@@ -154,7 +162,7 @@ export function PeFrameworkConfirmation({ proposal, research, sessionId, ensureE
   }
   return <div>
     <FrameworkConfirmation status={published ? "confirmed" : busy ? "pending" : stale || !sessionId ? "stale" : error ? "error" : "draft"}
-      onConfirm={() => void confirm()} error={error} preview={!stale && <FrameworkText content={draft.content} cwd={research.project.root} />} />
+      onConfirm={() => void confirm()} error={error} preview={showPreview && !stale && <FrameworkText content={draft.content} cwd={research.project.root} />} />
     {published && continuation && <div className={styles.confirmation}>
       <p role="status">{busy ? "正在连接来源会话…" : continuation.status === "delivered" ? "确认已交给 Agent；执行结果请查看对话。" : "框架已保存，等待继续研究。"}</p>
       {(continuationError || continuation.error) && <p role="alert">{continuationError || continuation.error}</p>}

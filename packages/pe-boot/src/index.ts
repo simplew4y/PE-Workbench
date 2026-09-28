@@ -29,6 +29,7 @@ export * from "./research/framework.ts";
 export * from "./research/model.ts";
 export * from "./research/monitor.ts";
 export { createPiResearchEngine } from "./research/pi-engine.ts";
+export { FRAMEWORK_SECTION_TITLES, renderInvestmentFrameworkMarkdown } from "./research/report.ts";
 export {
 	cancelResearchJob,
 	enqueueResearchJob,
