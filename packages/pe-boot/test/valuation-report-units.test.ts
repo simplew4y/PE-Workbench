@@ -321,8 +321,9 @@ describe("source-derived report units and focused numeric conditions", () => {
 			expect(result.rendered_report).toContain("百万CNY");
 			expect(result.rendered_report).toContain("CNY/股");
 			expect(result.rendered_report).toContain("隔离重算");
-			expect(result.rendered_report).toContain("=B2*(1+B7)");
-			expect(result.rendered_report).toContain("=(C2-C9)*(1-B10)/B4");
+			expect(result.rendered_report).not.toContain("B2");
+			expect(result.rendered_report).not.toContain("C2");
+			expect(result.facts.map(({ cell }) => cell.formula)).toEqual(["=B2*(1+B7)", "=(C2-C9)*(1-B10)/B4"]);
 			expect(result.rendered_report).not.toContain("untrusted saved-run citation");
 		},
 	);

@@ -245,7 +245,8 @@ describe("reports from original workbook facts", () => {
 		const result = buildPeValuationReport(root, input);
 		expect(result.status, result.issues.join("\n")).toBe("ready");
 		expect(result.rendered_report).toContain("150.00 EUR/股");
-		expect(result.rendered_report).toContain("=5*30");
+		expect(result.rendered_report).not.toContain("=5*30");
+		expect(result.facts[0].cell.formula).toBe("=5*30");
 		expect(result.rendered_report).not.toContain("125.00");
 		input.sections[0] = { title: "判断", fact_ids: [], analysis: "品牌能力影响模型假设。" };
 		expect(buildPeValuationReport(root, input).status).toBe("blocked");
@@ -327,5 +328,13 @@ describe("reports from original workbook facts", () => {
 		expect(result.rendered_report).toContain("-5.00%");
 		expect(result.rendered_report).not.toContain("untrusted");
 		expect(result.sensitivity).toMatchObject({ run_id: runId, ranked_driver_count: 1 });
+	});
+
+	it("blocks technical coordinates used as reader-facing business labels", () => {
+		const input = options([{ ...request("pe", "D6"), expected_label: "O107" }]);
+		const result = buildPeValuationReport(fixture(), input);
+		expect(result.status).toBe("blocked");
+		expect(result.issues.join(" ")).toContain("must be a business label");
+		expect(result.rendered_report).toBeUndefined();
 	});
 });

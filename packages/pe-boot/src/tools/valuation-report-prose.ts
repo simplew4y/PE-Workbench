@@ -2,7 +2,7 @@ export interface ReportSectionIssue {
 	section_index: number;
 	title: string;
 	field: "title" | "analysis";
-	code: "numeric_claim" | "financial_trend" | "citation";
+	code: "numeric_claim" | "financial_trend" | "citation" | "implementation_detail";
 	excerpt: string;
 	repair: string;
 }
@@ -12,6 +12,26 @@ const NUMERIC_CLAIM =
 const CITATION = /#pe-source|source:|https?:\/\/|\[[^\]]*\]\(/iu;
 const FINANCIAL_TREND =
 	/(?:毛利率|利润率|税率|营收|收入|每股收益|股数|利润|盈利|目标价|价格|股价|\b(?:revenue|sales|margin|tax rate|earnings|EPS|profit|share count|price)\b)[^，,。！？.!?；;\n]{0,24}?(?:扩张|收缩|提升|提高|增加|上升|下降|降低|减少|回落|稳定|增长|下滑|持平|\b(?:increas\w*|decreas\w*|rise\w*|rising|fall\w*|grow\w*|declin\w*|stable|expand\w*|contract\w*)\b)/giu;
+const QUALIFIED_CELL_REFERENCE = /(?:'[^']+'|[^\s，。！？；;()[\]{}]+)!\$?[A-Z]{1,3}\$?[1-9]\d*/iu;
+const BARE_CELL_REFERENCE = /(?<![A-Za-z0-9_])\$?([A-Z]{1,3})\$?([1-9]\d*)(?![A-Za-z0-9_])/giu;
+const EXCEL_FORMULA =
+	/(?:^|[\s：:（(])=[^\s，。！？；;]{2,}|\b(?:ROUND|ROUNDUP|ROUNDDOWN|SUM|AVERAGE|IF|IFS|VLOOKUP|HLOOKUP|XLOOKUP|INDEX|MATCH|OFFSET|INDIRECT|NPV|XNPV|IRR|XIRR)\s*\([^\n。！？；;]*\)/iu;
+const INTERNAL_RUNTIME_TERM =
+	/\b(?:run[_ -]?output|tool[_ -]?(?:output|result)|driver_id|cell_ref|sheet_name)\b|(?:run|工具)(?:\s*|的)?(?:输出|结果)|(?:公式|单元格)?传播路径/iu;
+
+/** Technical workbook locations remain in evidence metadata, never reader-facing prose. */
+export function findWorkbookImplementationDetail(value: string): string | undefined {
+	for (const pattern of [EXCEL_FORMULA, INTERNAL_RUNTIME_TERM, QUALIFIED_CELL_REFERENCE]) {
+		const match = pattern.exec(value);
+		if (match) return match[0].trim();
+	}
+	for (const match of value.matchAll(BARE_CELL_REFERENCE)) {
+		const token = `${match[1]}${match[2]}`.toUpperCase();
+		if (/^(?:Q[1-4]|H[1-2])$/u.test(token)) continue;
+		return match[0];
+	}
+	return undefined;
+}
 
 /** Hypotheses are still analyst inference; this only avoids treating them as observed trends. */
 function isConditionalTrend(clause: string, match: RegExpMatchArray): boolean {
@@ -52,6 +72,7 @@ export function validateReportSectionProse(
 		for (const sentence of field === "title" ? [section.title] : sentences) {
 			let code: ReportSectionIssue["code"] | undefined;
 			if (CITATION.test(sentence)) code = "citation";
+			else if (findWorkbookImplementationDetail(sentence)) code = "implementation_detail";
 			else if (NUMERIC_CLAIM.test(sentence)) code = "numeric_claim";
 			else {
 				for (const clause of sentence.split(/[，,。！？.!?；;\n]/u)) {
@@ -73,11 +94,13 @@ export function validateReportSectionProse(
 				code,
 				excerpt: sentence.trim().slice(0, 200),
 				repair:
-					field === "title"
-						? "改用中性标题，将数值、趋势和引用放入 facts/calculations，并在 fact_ids 中关联。"
-						: code === "citation"
-							? "移除 analysis 中手写的引用，通过 fact_ids 关联来源，由工具生成引用。"
-							: "将数值或已发生的财务趋势放入 facts/calculations，并在 fact_ids 中关联；analysis 保留有依据的定性解释，不把未核验的事实改写成假设。",
+					code === "implementation_detail"
+						? "用业务名称和白话机制重写；单元格坐标、Excel公式、传播路径及工具运行术语只保留在来源证据或审计附件。"
+						: field === "title"
+							? "改用中性标题，将数值、趋势和引用放入 facts/calculations，并在 fact_ids 中关联。"
+							: code === "citation"
+								? "移除 analysis 中手写的引用，通过 fact_ids 关联来源，由工具生成引用。"
+								: "将数值或已发生的财务趋势放入 facts/calculations，并在 fact_ids 中关联；analysis 保留有依据的定性解释，不把未核验的事实改写成假设。",
 			});
 		}
 	}

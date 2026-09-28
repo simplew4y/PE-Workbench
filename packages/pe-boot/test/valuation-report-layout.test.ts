@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { compactReportCitations, valuationOverviewLayout } from "../src/tools/valuation-report-layout.ts";
 
 describe("readable selected valuation overview", () => {
-	it("renders the selected methods, periods and original formula without inferring weights", () => {
+	it("renders selected methods and periods without exposing formulas or inferring weights", () => {
 		const result = valuationOverviewLayout([
 			{ sheet: "Valuation", label: "合理价值", method: "P/E", period: "2026E", value: "50.60 EUR/股" },
 			{ sheet: "Valuation", label: "合理价值", method: "EV/EBIT", period: "2026E", value: "57.20 EUR/股" },
@@ -18,7 +18,8 @@ describe("readable selected valuation overview", () => {
 		expect(result.outputCount).toBe(3);
 		expect(text).toContain("| P/E · 合理价值 | 2026E | 50.60 EUR/股 |");
 		expect(text).toContain("| EV/EBIT · 合理价值 | 2026E | 57.20 EUR/股 |");
-		expect(text).toContain("=ROUND((K9+K21)/2,2)");
+		expect(text).not.toContain("ROUND");
+		expect(text).not.toContain("K9");
 		expect(text).not.toContain("50%");
 	});
 

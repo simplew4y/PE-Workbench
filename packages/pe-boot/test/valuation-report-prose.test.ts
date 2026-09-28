@@ -50,6 +50,26 @@ describe("valuation report prose validation", () => {
 		},
 	);
 
+	it.each([
+		"O107=ROUND(X6,0) 使目标倍数出现分段效应。",
+		"该结论来自 TP!T6 传播路径与 run 输出。",
+		"工具结果显示 cell_ref 为 B4。",
+	])("keeps workbook coordinates, formulas and runtime terms out of reader-facing prose: %s", (analysis) => {
+		const result = validateReportSectionProse({ title: "估值机制", analysis }, 0);
+		expect(result.issues).toEqual([
+			expect.objectContaining({ field: "analysis", code: "implementation_detail", excerpt: analysis }),
+		]);
+		expect(result.issues[0].repair).toContain("业务名称");
+	});
+
+	it.each(["Q1需求仍是关键变量。", "H1盈利取决于销量假设。"])(
+		"does not mistake reporting periods for workbook implementation details: %s",
+		(analysis) => {
+			const result = validateReportSectionProse({ title: "经营假设", analysis }, 0);
+			expect(result.issues.some((issue) => issue.code === "implementation_detail")).toBe(false);
+		},
+	);
+
 	it.each(["2026E 估值", "毛利率扩张", "若利润下降", "参考 [来源](#pe-source?evidence_id=source%3Afake)"])(
 		"validates nonneutral headings separately: %s",
 		(title) => {

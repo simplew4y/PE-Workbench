@@ -15,10 +15,14 @@ import {
 	reportMetricLabel,
 	valuationOverviewLayout,
 } from "./valuation-report-layout.ts";
-import { type ReportSectionIssue, validateReportSectionProse } from "./valuation-report-prose.ts";
+import {
+	findWorkbookImplementationDetail,
+	type ReportSectionIssue,
+	validateReportSectionProse,
+} from "./valuation-report-prose.ts";
 
 export const PE_VALUATION_REPORT_PROMPT_SNIPPET =
-	"Validate source cells and render a readable valuation report with compact source links and optional recalculated Top Driver sensitivity; keep tool logs and full formula audits out of the main report";
+	"Validate source cells and render a readable valuation report with compact source links and optional recalculated Top Driver sensitivity; use business labels in prose and keep cell coordinates, formulas, tool logs and full audits out of the main report";
 
 export interface ReportFactRequest {
 	id: string;
@@ -142,11 +146,6 @@ function sensitivityLayout(
 
 function formatNumber(value: number): string {
 	return new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 6 }).format(value);
-}
-
-function formulaCode(formula: string): string {
-	const delimiter = "`".repeat(Math.max(0, ...[...formula.matchAll(/`+/gu)].map((match) => match[0].length)) + 1);
-	return `${delimiter} ${formula.replace(/\r?\n/gu, " ")} ${delimiter}`;
 }
 
 function sameFiniteValue(left: unknown, right: unknown): boolean {
@@ -273,6 +272,20 @@ export function buildPeValuationReport(cwd: string, options: PeValuationReportOp
 		}
 		ids.add(request.id);
 		const location = `${request.sheet_name}!${request.cell_ref}`;
+		let invalidBusinessLabel = false;
+		for (const [field, value] of [
+			["expected_label", request.expected_label],
+			["valuation_method", request.valuation_method],
+		] as const) {
+			const detail = value ? findWorkbookImplementationDetail(value) : undefined;
+			if (detail) {
+				issues.push(
+					`${location}: ${field} must be a business label, not workbook implementation detail (${detail})`,
+				);
+				invalidBusinessLabel = true;
+			}
+		}
+		if (invalidBusinessLabel) continue;
 		if (!/^[A-Z]{1,3}[1-9]\d*$/u.test(request.cell_ref)) {
 			issues.push(`${location}: one exact cell is required`);
 			continue;
@@ -513,7 +526,7 @@ export function buildPeValuationReport(cwd: string, options: PeValuationReportOp
 				continue;
 			}
 			value = left.base_value / right.base_value - 1;
-			text = `${markdownText(left.cell.sheet_name)} 目标结果相对 ${markdownText(right.cell.sheet_name)}!${right.cell.cell_ref} 参考价格：${value >= 0 ? "上行" : "下行"} ${formatNumber(Math.abs(value) * 100)}%（按指定基准补充计算）`;
+			text = `${markdownText(left.cell.row_label ?? "目标结果")}相对${markdownText(right.cell.row_label ?? "参考价格")}：${value >= 0 ? "上行" : "下行"} ${formatNumber(Math.abs(value) * 100)}%（按指定基准补充计算）`;
 		} else {
 			if (
 				!left.quantity.dimension.endsWith("/share") ||
@@ -557,6 +570,10 @@ export function buildPeValuationReport(cwd: string, options: PeValuationReportOp
 			else {
 				const citations = new Map<string, string>();
 				for (const driver of sensitivity.ranked_drivers.filter((item) => item.active_driver).slice(0, 5)) {
+					if (findWorkbookImplementationDetail(driver.label)) {
+						issues.push(`Sensitivity driver requires a business label: ${driver.driver_id}`);
+						continue;
+					}
 					const range = getPeExcelRange(cwd, {
 						docId: options.docId,
 						datasetId: options.datasetId,
@@ -611,7 +628,6 @@ export function buildPeValuationReport(cwd: string, options: PeValuationReportOp
 			issues.push("An overview requires agent-selected valuation outputs and their source context");
 	}
 	const usedStatements = new Set<string>();
-	const shownFormulas = new Set<string>();
 	for (const [sectionIndex, section] of options.sections.entries()) {
 		const { analysis, issues: sectionIssues } = validateReportSectionProse(section, sectionIndex, {
 			preserveGaps: options.scope === "focused",
@@ -651,19 +667,6 @@ export function buildPeValuationReport(cwd: string, options: PeValuationReportOp
 			usedStatements.add(id);
 			lines.push(`- ${text}`);
 		}
-		if (options.scope === "focused") {
-			for (const id of section.fact_ids) {
-				const fact = facts.get(id);
-				if (!fact?.cell.formula) continue;
-				const location = `${fact.cell.sheet_name}!${fact.cell.cell_ref}`;
-				if (shownFormulas.has(location)) continue;
-				shownFormulas.add(location);
-				lines.push(
-					"",
-					`原模型公式 ${markdownText(location)}：${formulaCode(fact.cell.formula)}。${fact.cell.markdown_citation}`,
-				);
-			}
-		}
 		if (analysis) lines.push("", `分析推断：${markdownText(analysis)}`);
 		lines.push("");
 	}
@@ -674,10 +677,17 @@ export function buildPeValuationReport(cwd: string, options: PeValuationReportOp
 		issues.push("A focused report must include at least one checked fact or calculation");
 	if (issues.length && issues.length === result.section_issues.length) result.repair_scope = "sections";
 	if (!issues.length) {
-		result.status = "ready";
-		result.rendered_report = compactReportCitations(
+		const renderedReport = compactReportCitations(
 			[...lines, ...overviewLines, ...sensitivityLines, ...appendix].join("\n").trim(),
 		);
+		const visibleReport = renderedReport.replace(/\]\([^)]*\)/gu, "]");
+		const implementationDetail = findWorkbookImplementationDetail(visibleReport);
+		if (implementationDetail)
+			issues.push(`Rendered report exposes workbook implementation detail: ${implementationDetail}`);
+		else {
+			result.status = "ready";
+			result.rendered_report = renderedReport;
+		}
 	}
 	return result;
 }

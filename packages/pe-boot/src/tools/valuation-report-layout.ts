@@ -42,11 +42,6 @@ export function valuationOverviewLayout(outputs: ReportOverviewOutput[]): {
 				`| ${reportText([output.method, output.label].filter(Boolean).join(" · "))} | ${reportText(output.period ?? "")} | ${output.value} |`,
 			);
 		lines.push("");
-		for (const output of items)
-			if (output.formula)
-				lines.push(
-					`- ${reportText(output.sheet)} · ${reportText(output.label)} 原表公式：\`${output.formula.replaceAll("`", "")}\``,
-				);
 		return lines;
 	};
 	const historical = outputs.filter((output) => output.periodKind === "historical");
