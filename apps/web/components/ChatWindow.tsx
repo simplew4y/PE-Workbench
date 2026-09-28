@@ -5,10 +5,12 @@ import type { ResearchCardView } from "@earendil-works/pe-boot";
 import type { AgentMessage, AssistantContentBlock, AssistantMessage, BashExecutionMessage, BlockingExtensionUiRequest, CustomMessage, ExtensionUiRequest, SessionInfo, SessionTreeNode, ToolResultMessage, UserMessage } from "@/lib/types";
 import { normalizeCustomPanelLines, parseAnsiLine } from "@/lib/ansi";
 import { asBracketedPaste, toTerminalKeyData } from "@/lib/terminal-input";
-import { isFrameworkConfirmationMessage, getAssistantErrorMessage, splitFinalAssistantBlocks } from "@/lib/message-display";
+import { isFrameworkConfirmationMessage, getAssistantErrorMessage, getDisplayableAssistantBlocks, splitFinalAssistantBlocks, withAssistantBlocks } from "@/lib/message-display";
 import { extractTurnWrittenFiles, type WrittenFile } from "@/lib/turn-written-files";
-import { hasGenerativeUiToolCall } from "@/lib/generative-ui/tool";
+import { hasGenerativeUiToolCall, isGenerativeUiToolCall } from "@/lib/generative-ui/tool";
 import { MessageView } from "./MessageView";
+import { ProcessDetailsGroup } from "./ProcessDetailsGroup";
+import { getChatActivity } from "@/lib/chat-activity";
 import { PeFrameworkConfirmation, PeResearchRail, usePeResearch } from "./PeFrameworkPanel";
 import { PeResearchNotebook, ResearchCardCapture } from "./PeResearchNotebook";
 import { getToolNamesForPreset } from "@/lib/tool-presets";
@@ -95,28 +97,20 @@ function getUserInputText(message: AgentMessage): string | null {
 }
 
 // A user message normally anchors a turn (user prompt → process → final
-// answer). Process messages are retained in session history but omitted from
-// the chat, which presents only the user's prompt and the final result. When
+// answer). Process messages share one collapsed disclosure per turn. When
 // compaction fires mid-turn, pi drops the original
 // user prompt and inserts a compaction summary (role "custom", customType
 // "compaction") in its place; the agent then keeps producing tool calls and a
 // final answer with no user message left to anchor them. Treat a compaction
 // summary as an anchor too, otherwise every post-compaction process message
-// would escape the result-only grouping.
+// would escape the process grouping.
 function isGroupAnchor(message: AgentMessage): boolean {
   if (message.role === "user") return true;
   return message.role === "custom" && (message as CustomMessage).customType === "compaction";
 }
 
-function withAssistantBlocks(
-  message: AssistantMessage,
-  content: AssistantContentBlock[],
-): AssistantMessage {
-  return { ...message, content };
-}
-
 export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionDraftKey, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, researchSourceTarget, onResearchSourceOpen, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemPromptLoaderChange, onModelSessionTargetChange, onSessionStatsChange, onSessionStatsPanelOpen, onContextUsageChange, onOpenFile, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio }: Props) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const isMobile = useIsMobile();
 
   // Wrap onAgentEnd to play the completion sound. This is more reliable than
@@ -142,7 +136,7 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
 
   const {
     loading, error, messages, entryIds, streamState,
-    agentRunning, bashRunning, pendingBash, modelNames, modelList, modelError, modelScopeWarnings, modelThinkingLevels, modelThinkingLevelMaps, toolPreset, thinkingLevel,
+    agentRunning, agentPhase, bashRunning, pendingBash, modelNames, modelList, modelError, modelScopeWarnings, modelThinkingLevels, modelThinkingLevelMaps, toolPreset, thinkingLevel,
     retryInfo, contextUsage, forkingEntryId,
     isCompacting, compactError, compactResult, displayModel: displayModelValue, modelSwitching, sessionStats,
     slashCommands, slashCommandsLoading, queuedMessages,
@@ -693,41 +687,85 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
                 let endIdx = userIdx + 1;
                 while (endIdx < messages.length && !isGroupAnchor(messages[endIdx])) endIdx += 1;
 
-                const finalAssistantIdx = findFinalAssistantIndex(messages, userIdx, endIdx);
-
-                if (finalAssistantIdx === -1) {
-                  for (let renderIdx = userIdx; renderIdx < endIdx; renderIdx++) {
-                    rendered.push(renderMessage(renderIdx));
-                  }
-                  idx = endIdx;
-                  continue;
-                }
-
-                const isLiveTail = (sessionBusy || streamState.isStreaming) && endIdx === messages.length && userIdx === lastAnchorIdx;
-                if (isLiveTail) {
-                  if (messages[userIdx].role === "user") rendered.push(renderMessage(userIdx));
-                  idx = endIdx;
-                  continue;
-                }
-
+                const isLiveTail = (agentRunning || streamState.isStreaming) && endIdx === messages.length && userIdx === lastAnchorIdx;
+                const finalAssistantIdx = isLiveTail ? -1 : findFinalAssistantIndex(messages, userIdx, endIdx);
                 if (messages[userIdx].role === "user") rendered.push(renderMessage(userIdx));
 
                 const processIndices: number[] = [];
-                for (let processIdx = userIdx + 1; processIdx < finalAssistantIdx; processIdx++) {
-                  processIndices.push(processIdx);
+                const processEndIdx = finalAssistantIdx === -1 ? endIdx : finalAssistantIdx;
+                for (let processIdx = userIdx + 1; processIdx < processEndIdx; processIdx++) {
+                  if (messages[processIdx].role !== "toolResult" && messages[processIdx].role !== "bashExecution") processIndices.push(processIdx);
                 }
                 const uiProcessIndices = processIndices.filter((processIdx) => hasGenerativeUiToolCall(messages[processIdx]));
-                const finalAssistant = messages[finalAssistantIdx] as AssistantMessage;
-                const finalSplit = splitFinalAssistantBlocks(finalAssistant);
-                const finalAnswerMessage = finalSplit.answerBlocks.length > 0 || getAssistantErrorMessage(finalAssistant)
+                const isProcessBlock = (block: AssistantContentBlock) => block.type !== "toolCall" || !isGenerativeUiToolCall(block);
+                const detailIndices = processIndices.filter((processIdx) => {
+                  const message = messages[processIdx];
+                  return message.role !== "assistant" || getDisplayableAssistantBlocks(message).some(isProcessBlock) || getAssistantErrorMessage(message);
+                });
+                const finalAssistant = finalAssistantIdx === -1 ? null : messages[finalAssistantIdx] as AssistantMessage;
+                const finalSplit = finalAssistant ? splitFinalAssistantBlocks(finalAssistant) : { answerBlocks: [], processBlocks: [] };
+                const finalProcessBlocks = finalSplit.processBlocks.filter(isProcessBlock);
+                const finalAnswerMessage = finalAssistant && (finalSplit.answerBlocks.length > 0 || getAssistantErrorMessage(finalAssistant))
                   ? withAssistantBlocks(finalAssistant, finalSplit.answerBlocks)
                   : null;
 
-                for (const uiProcessIdx of uiProcessIndices) {
-                  rendered.push(renderMessage(uiProcessIdx, { keyPrefix: "generative-ui" }));
+                if (isLiveTail || detailIndices.length > 0 || finalProcessBlocks.length > 0) {
+                  const activity = getChatActivity({
+                    messages: messages.slice(userIdx + 1, endIdx),
+                    streamingMessage: isLiveTail ? streamState.streamingMessage : null,
+                    runningTools: isLiveTail && agentPhase?.kind === "running_tools" ? agentPhase.tools : undefined,
+                    isCompacting: isLiveTail && isCompacting,
+                    retrying: isLiveTail && Boolean(retryInfo),
+                    waitingForInput: isLiveTail && Boolean(extensionDialog || extensionCustomUi),
+                    completed: !isLiveTail,
+                  }, locale);
+                  rendered.push(
+                    <ProcessDetailsGroup key={`process-${session?.id ?? sessionIdRef.current}-${userIdx}`} label={activity} active={isLiveTail}>
+                      {messages[userIdx].role === "custom" && renderMessage(userIdx, { keyPrefix: "process-anchor" })}
+                      {detailIndices.map((processIdx) => {
+                        const message = messages[processIdx];
+                        return renderMessage(processIdx, {
+                          keyPrefix: "process",
+                          showTimestamp: false,
+                          messageOverride: message.role === "assistant" ? withAssistantBlocks(message, message.content.filter(isProcessBlock)) : undefined,
+                        });
+                      })}
+                      {finalAssistant && finalProcessBlocks.length > 0 && renderMessage(finalAssistantIdx, {
+                        attachRef: false,
+                        keyPrefix: "final-process",
+                        showTimestamp: false,
+                        messageOverride: { ...withAssistantBlocks(finalAssistant, finalProcessBlocks), stopReason: undefined, errorMessage: undefined, usage: undefined },
+                      })}
+                      {isLiveTail && streamState.streamingMessage && (
+                        <MessageView
+                          message={streamState.streamingMessage}
+                          isStreaming={streamState.isStreaming}
+                          toolResults={toolResultsMap}
+                          modelNames={modelNames}
+                          cwd={messageCwd}
+                          onOpenFile={onOpenFile}
+                          sessionId={session?.id ?? sessionIdRef.current ?? undefined}
+                        />
+                      )}
+                      {isLiveTail && detailIndices.length === 0 && !streamState.streamingMessage && (
+                        <p className="py-2 text-xs text-text-muted">{t("chat.waitingModel")}</p>
+                      )}
+                    </ProcessDetailsGroup>,
+                  );
                 }
 
-                if (finalAnswerMessage) {
+                for (const uiProcessIdx of uiProcessIndices) {
+                  const message = messages[uiProcessIdx] as AssistantMessage;
+                  rendered.push(renderMessage(uiProcessIdx, { keyPrefix: "generative-ui", messageOverride: withAssistantBlocks(message, message.content.filter((block) => !isProcessBlock(block))) }));
+                }
+                if (finalAssistant && finalSplit.processBlocks.some((block) => !isProcessBlock(block))) {
+                  rendered.push(renderMessage(finalAssistantIdx, { keyPrefix: "generative-ui-process", attachRef: false, messageOverride: withAssistantBlocks(finalAssistant, finalSplit.processBlocks.filter((block) => !isProcessBlock(block))) }));
+                }
+                for (let bashIdx = userIdx + 1; bashIdx < processEndIdx; bashIdx++) {
+                  if (messages[bashIdx].role === "bashExecution") rendered.push(renderMessage(bashIdx));
+                }
+
+                if (finalAssistant && finalAnswerMessage) {
                   // Each tool call is stored as its own assistant entry, so the
                   // final answer alone carries no record of what the turn wrote.
                   // Gather the turn's assistant blocks and derive the file list
@@ -751,8 +789,8 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
                   const proposal = getTurnFrameworkProposal(turnContent, toolResultsMap);
                   if (proposal) rendered.push(<PeFrameworkConfirmation key={`framework-${session?.id ?? sessionIdRef.current}-${proposal.draftId}-${proposal.revision}`} proposal={proposal} research={research} sessionId={session?.id ?? sessionIdRef.current} ensureEventsConnected={ensureEventsConnected} />);
                 }
-                for (let renderIdx = finalAssistantIdx + 1; renderIdx < endIdx; renderIdx++) {
-                  rendered.push(renderMessage(renderIdx));
+                if (finalAssistantIdx !== -1) {
+                  for (let trailingIdx = finalAssistantIdx + 1; trailingIdx < endIdx; trailingIdx++) rendered.push(renderMessage(trailingIdx));
                 }
                 idx = endIdx;
               }
@@ -768,12 +806,6 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
                 </>
               );
             })()}
-            {agentRunning && (
-              <div className="break-words py-2 text-[13px] text-text-muted">
-                <span className="animate-[pulse_1.5s_infinite]">{t("chat.thinking")}</span>
-              </div>
-            )}
-
             {bashRunning && !pendingBash && (
               <div className="py-2 text-[13px] text-text-muted">
                  <span className="animate-[pulse_1.5s_infinite]">{t("chat.runningCommand")}</span>

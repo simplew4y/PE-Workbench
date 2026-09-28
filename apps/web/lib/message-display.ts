@@ -48,6 +48,15 @@ export function countToolCallBlocks(blocks: AssistantContentBlock[]): number {
   return blocks.filter((block): block is ToolCallContent => block.type === "toolCall").length;
 }
 
+/** Keep source indices intact for lazily loaded historical thinking blocks. */
+export function withAssistantBlocks(message: AssistantMessage, content: AssistantContentBlock[]): AssistantMessage {
+  const selected = new Set(content);
+  return {
+    ...message,
+    content: message.content.map((block) => selected.has(block) ? block : { type: "thinking", thinking: "" }),
+  };
+}
+
 /** Internal confirmation prompts stay in agent history, but are not chat content. */
 export function isFrameworkConfirmationMessage(message: AgentMessage): boolean {
   if (message.role !== "user") return false;

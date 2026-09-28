@@ -4,15 +4,15 @@ import test from "node:test";
 
 const source = await readFile(new URL("./ChatWindow.tsx", import.meta.url), "utf8");
 
-test("shows one generic thinking state instead of streamed reasoning and tool progress", () => {
-  assert.match(source, /\{agentRunning && \([\s\S]*?t\("chat\.thinking"\)/);
-  assert.doesNotMatch(source, /message=\{streamState\.streamingMessage/);
-  assert.doesNotMatch(source, /function phaseLabel/);
+test("puts live activity and streamed details in the turn disclosure", () => {
+  assert.match(source, /<ProcessDetailsGroup[\s\S]*?label=\{activity\} active=\{isLiveTail\}/);
+  assert.match(source, /<ProcessDetailsGroup[\s\S]*?message=\{streamState\.streamingMessage\}[\s\S]*?<\/ProcessDetailsGroup>/);
+  assert.doesNotMatch(source, /t\("chat\.thinking"\)/);
 });
 
-test("omits process details while retaining the final answer", () => {
-  assert.doesNotMatch(source, /ProcessDetailsGroup/);
-  assert.match(source, /const finalAnswerMessage = finalSplit\.answerBlocks/);
+test("retains final reasoning in the disclosure and the answer outside it", () => {
+  assert.match(source, /withAssistantBlocks\(finalAssistant, finalProcessBlocks\)/);
+  assert.match(source, /<\/ProcessDetailsGroup>[\s\S]*?if \(finalAssistant && finalAnswerMessage\)/);
   assert.match(source, /renderMessage\(finalAssistantIdx, \{ messageOverride: finalAnswerMessage/);
 });
 
@@ -21,6 +21,14 @@ test("renders result-bearing generative UI messages outside the hidden tool chai
   assert.match(source, /for \(const uiProcessIdx of uiProcessIndices\)[\s\S]*?keyPrefix: "generative-ui"/);
 });
 
-test("shows only the turn anchor while the live turn is running", () => {
-  assert.match(source, /if \(isLiveTail\) \{\s*if \(messages\[userIdx\]\.role === "user"\) rendered\.push\(renderMessage\(userIdx\)\)/);
+test("provides a live disclosure before the first saved assistant message", () => {
+  assert.match(source, /const finalAssistantIdx = isLiveTail \? -1/);
+  assert.match(source, /if \(isLiveTail \|\| detailIndices\.length > 0 \|\| finalProcessBlocks\.length > 0\)/);
+  assert.doesNotMatch(source, /if \(finalAssistantIdx === -1\) \{/);
+});
+
+test("keeps explicit command output visible after completion", () => {
+  assert.match(source, /messages\[processIdx\]\.role !== "bashExecution"/);
+  assert.match(source, /messages\[bashIdx\]\.role === "bashExecution"\) rendered\.push/);
+  assert.match(source, /trailingIdx = finalAssistantIdx \+ 1/);
 });

@@ -115,6 +115,33 @@ test("keeps deferred historical thinking placeholders", async () => {
   );
 });
 
+test("preserves deferred thinking source indices when separating process from answer", async () => {
+  const { withAssistantBlocks, splitFinalAssistantBlocks, getDisplayableAssistantBlocks } = await loadSubject();
+  const message = assistant([
+    { type: "thinking", thinking: "" },
+    { type: "thinking", thinking: "", deferred: true },
+    { type: "text", text: "Final answer" },
+  ]);
+  const split = splitFinalAssistantBlocks(message);
+  const process = withAssistantBlocks(message, split.processBlocks);
+  assert.equal(process.content[1], message.content[1]);
+  assert.equal(process.content[0].deferred, undefined);
+  assert.deepEqual(getDisplayableAssistantBlocks(process), [message.content[1]]);
+  assert.deepEqual(getDisplayableAssistantBlocks(withAssistantBlocks(message, split.answerBlocks)), [message.content[2]]);
+});
+
+test("separates a visualization from tools without revealing process blocks", async () => {
+  const { withAssistantBlocks, getDisplayableAssistantBlocks } = await loadSubject();
+  const message = assistant([
+    { type: "thinking", thinking: "private process detail" },
+    { type: "toolCall", toolCallId: "read-1", toolName: "read", input: {} },
+    { type: "toolCall", toolCallId: "ui-1", toolName: "pe_render_ui", input: {} },
+  ]);
+  const ui = withAssistantBlocks(message, [message.content[2]]);
+  assert.deepEqual(getDisplayableAssistantBlocks(ui), [message.content[2]]);
+  assert.deepEqual(getDisplayableAssistantBlocks(withAssistantBlocks(message, message.content.slice(0, 2))), message.content.slice(0, 2));
+});
+
 test("returns completed provider errors even when the message has no content", async () => {
   const { getAssistantErrorMessage } = await loadSubject();
   const message = {
