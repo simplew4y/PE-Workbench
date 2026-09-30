@@ -26,6 +26,8 @@ export {
 export { excelParserRevision, excelPython, validatePeExcelUpload } from "./excel-processing.ts";
 export * from "./research/cards.ts";
 export * from "./research/framework.ts";
+export * from "./research/iteration.ts";
+export { createIterationEngine } from "./research/iteration-engine.ts";
 export * from "./research/model.ts";
 export * from "./research/monitor.ts";
 export { createPiResearchEngine } from "./research/pi-engine.ts";

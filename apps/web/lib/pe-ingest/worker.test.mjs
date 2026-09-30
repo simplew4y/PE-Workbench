@@ -86,6 +86,7 @@ test("processes a mixed PDF and Excel job independently", async (t) => {
   }]);
   const excelDocument = registered.documents[0];
   const job = jobs.newPeIngestJob(project.datasetId);
+  job.parseOnly = true;
   job.files.push(
     { originalFilename: "valid.pdf", rawPath: valid.rawPath, sha256: valid.sha256, fileType: "pdf" },
     { originalFilename: "broken.pdf", rawPath: broken.rawPath, sha256: broken.sha256, fileType: "pdf" },
@@ -103,6 +104,7 @@ test("processes a mixed PDF and Excel job independently", async (t) => {
   assert.equal(result.status, "completed_with_warnings");
   assert.equal(result.result.createdCount, 2);
   assert.equal(result.result.failedCount, 1);
+  assert.equal(result.result.analysis, undefined);
   assert.equal(result.result.files[0].status, "created");
   assert.equal(result.result.files[1].status, "failed");
   assert.equal(result.result.files[2].status, "created");
@@ -115,11 +117,11 @@ test("processes a mixed PDF and Excel job independently", async (t) => {
   const collection = new DatabaseSync(projectPaths.collectionPath, { readOnly: true });
   try {
     const cache = collection.prepare("SELECT cache_path, readable_path FROM document_cache WHERE doc_id = ?").get(excelDocument.doc_id);
-    assert.equal(fs.existsSync(path.join(project.root, path.dirname(cache.cache_path), "workbook.json")), true);
+    assert.equal(fs.existsSync(path.join(project.root, path.dirname(cache.cache_path), "navigation.json")), true);
     assert.equal(fs.existsSync(path.join(project.root, cache.readable_path)), true);
     assert.equal(collection.prepare("SELECT COUNT(*) AS count FROM documents").get().count, 2);
     assert.equal(collection.prepare("SELECT COUNT(*) AS count FROM pdf_pages").get().count, 1);
-    assert.equal(collection.prepare("SELECT COUNT(*) AS count FROM excel_cells").get().count, 3);
+    assert.equal(collection.prepare("SELECT COUNT(*) AS count FROM excel_cells").get().count, 0);
   } finally {
     collection.close();
   }

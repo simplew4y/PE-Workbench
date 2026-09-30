@@ -1,0 +1,16 @@
+.page { box-sizing: border-box; height: 100dvh; overflow-y: auto; max-width: 1280px; margin: 0 auto; padding: 32px 20px 100px; color: var(--text); background: var(--bg); }
+.page header { margin-bottom: 24px; }
+.panel { padding: 24px; margin: 20px 0; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-panel); }
+.panel label { display: block; margin: 16px 0; }
+.panel select, .panel input[type="file"] { display: block; max-width: 100%; padding: 8px; margin-top: 8px; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; }
+.panel button { border: 1px solid var(--border); border-radius: 6px; padding: 9px 14px; margin: 8px 12px 8px 0; background: var(--bg-hover); color: var(--text); cursor: pointer; }
+.panel button:disabled { opacity: .45; cursor: default; }
+.panel a { color: var(--accent); margin-right: 16px; }
+.panel pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; max-height: 500px; overflow: auto; }
+.panel details { margin-top: 16px; }
+.panel article { border-bottom: 1px solid var(--border); padding: 16px 0; }
+.error { color: #ef4444; }
+.steps { display: flex; flex-wrap: wrap; gap: 12px 28px; padding-left: 20px; }
+.table { overflow: auto; }
+.table table { border-collapse: collapse; width: 100%; min-width: 650px; }
+.table th, .table td { padding: 12px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }

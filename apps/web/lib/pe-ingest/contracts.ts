@@ -52,6 +52,7 @@ export interface PeIngestJobResult {
 }
 
 export interface PeIngestJob {
+  parseOnly?: boolean;
   jobId: string;
   datasetId: string;
   status: PeIngestStatus;

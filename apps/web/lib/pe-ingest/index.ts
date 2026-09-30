@@ -40,6 +40,7 @@ export interface PeResearchUpload {
 export type PePdfUpload = PeResearchUpload;
 
 export interface QueuePeIngestOptions {
+	parseOnly?: boolean;
   project: PeProjectSummary;
   registryPath: string;
   uploads: PeResearchUpload[];
@@ -137,6 +138,7 @@ export function queuePeIngest(options: QueuePeIngestOptions): PeIngestJob {
   assertPeCollectionDataset(paths.collectionPath, paths.datasetId);
   const release = acquireSubmissionLock(paths);
   const job = newPeIngestJob(paths.datasetId);
+  job.parseOnly = options.parseOnly === true;
   try {
     if (findActivePeIngestJob(paths)) throw new Error(`项目“${options.project.name}”已有文档处理任务正在运行`);
     const uploads = options.uploads.map((upload) => ({

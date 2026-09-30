@@ -182,7 +182,7 @@ export async function runPeIngestJob(jobFile: string): Promise<PeIngestJob> {
       updatePeIngestJob(paths, job);
     }
 
-    if (job.result.createdCount > 0) {
+    if (job.result.createdCount > 0 && !job.parseOnly) {
       job.stage = "analysis";
       job.message = "文档解析完成，正在分析机构观点与共识分歧。";
       updatePeIngestJob(paths, job);
