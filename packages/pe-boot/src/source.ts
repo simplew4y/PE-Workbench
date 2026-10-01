@@ -190,3 +190,116 @@ export function sourceLink(label: string, id: string): string {
 	const escaped = label.replaceAll("\\", "\\\\").replaceAll("[", "\\[").replaceAll("]", "\\]");
 	return `[${escaped}](${sourceUrl(id)})`;
 }
+
+export interface ExcelCitationSource {
+	filename: string;
+	sheet_name?: string;
+	cell_range?: string;
+	cells: PeSourceCell[];
+}
+
+export interface ExcelCitationCheck {
+	status: "consistent" | "mismatch" | "unverified";
+	declared?: string;
+	actual?: string;
+	reason?: string;
+}
+
+/**
+ * Check an explicit locator and optional literal assertion: Sheet!B12 = 75 or
+ * Sheet!B12 = =B10*B11. Consistency never certifies surrounding prose.
+ */
+export function checkExcelCitation(
+	label: string,
+	evidenceId: string,
+	source?: ExcelCitationSource,
+): ExcelCitationCheck {
+	const reference = parseSourceId(evidenceId);
+	const location = reference?.location.kind === "excel" ? reference.location : undefined;
+	const sheet = source?.sheet_name ?? location?.sheet;
+	const range = source?.cell_range ?? location?.range;
+	if (!sheet || !range) return { status: "unverified" };
+	const actual = `${sheet}!${range}`;
+	const match = /^(.+)!\s*(\$?[A-Z]{1,3}\$?[1-9]\d*(?::\$?[A-Z]{1,3}\$?[1-9]\d*)?)(?:\s*=\s*(.+))?$/iu.exec(
+		label.trim(),
+	);
+	if (!match) return { status: "unverified", actual };
+	let declaredSheet = match[1].trim();
+	let filename: string | undefined;
+	const file = /^(.*\.(?:xlsx|xlsm))\s+(.+)$/iu.exec(declaredSheet);
+	if (file) {
+		filename = file[1];
+		declaredSheet = file[2];
+	}
+	if (declaredSheet.startsWith("'") && declaredSheet.endsWith("'"))
+		declaredSheet = declaredSheet.slice(1, -1).replaceAll("''", "'");
+	const expected = parseExcelCellRange(match[2]);
+	const observed = parseExcelCellRange(range);
+	const declared = `${declaredSheet}!${match[2]}`;
+	const mismatch = (reason: string): ExcelCitationCheck => ({ status: "mismatch", declared, actual, reason });
+	if (!expected || !observed) return { status: "unverified", declared, actual };
+	if (declaredSheet.toLowerCase() !== sheet.toLowerCase()) return mismatch("工作表不一致");
+	if (Object.keys(expected).some((key) => expected[key as keyof ExcelBounds] !== observed[key as keyof ExcelBounds]))
+		return mismatch("单元格或范围不一致");
+	if (filename && source && filename !== source.filename) return mismatch("文件名称不一致");
+	if (match[3] !== undefined) {
+		if (!source || expected.rowStart !== expected.rowEnd || expected.columnStart !== expected.columnEnd)
+			return { status: "unverified", declared, actual };
+		const cell = source.cells.find(
+			(cell) => cell.row_index === expected.rowStart && cell.col_index === expected.columnStart,
+		);
+		if (!cell) return { status: "unverified", declared, actual, reason: "未读取声明的单元格" };
+		const assertion = match[3].trim();
+		if (assertion.startsWith("=")) {
+			if (cell.formula !== assertion) return mismatch("声明公式与来源公式不一致");
+		} else if (/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?%?$/iu.test(assertion)) {
+			const number = Number(assertion.replace(/%$/u, "")) / (assertion.endsWith("%") ? 100 : 1);
+			if (
+				cell.numeric_value === undefined ||
+				!Number.isFinite(number) ||
+				Math.abs(cell.numeric_value - number) > Math.max(1, Math.abs(number)) * 1e-10
+			)
+				return mismatch("声明数值与来源数值不一致（行名不能作为数值证据）");
+		} else return { status: "unverified", declared, actual, reason: "声明内容不是可核验的数值或公式" };
+	}
+	return { status: filename && !source ? "unverified" : "consistent", declared, actual };
+}
+
+/** Shared by runtime checks and browser links; never trusts a supplied cwd. */
+export function citationEvidenceId(href: string): string | undefined {
+	let suffix: string;
+	const hash = href.indexOf("#pe-source");
+	if (hash >= 0) suffix = href.slice(hash + "#pe-source".length);
+	else {
+		try {
+			const url = new URL(href, "https://pe-workbench.local");
+			if (
+				!/^https?:$/u.test(url.protocol) ||
+				url.hostname !== "pe-workbench.local" ||
+				url.port ||
+				url.username ||
+				url.password ||
+				url.pathname !== "/pe-source"
+			)
+				return undefined;
+			suffix = url.search;
+		} catch {
+			return undefined;
+		}
+	}
+	if (!suffix.startsWith("?")) return undefined;
+	const id = new URLSearchParams(suffix.slice(1)).get("evidence_id")?.trim();
+	return id && (/^(?:page|chunk|fact|cell):[^\s:]+$/u.test(id) || parseSourceId(id)) ? id : undefined;
+}
+
+export function excelCitationWarning(check: ExcelCitationCheck): string | undefined {
+	return check.status === "mismatch"
+		? "引用不一致：声明 " +
+				check.declared +
+				"，实际来源 " +
+				check.actual +
+				"。" +
+				check.reason +
+				"；相关论述尚未核验。"
+		: undefined;
+}

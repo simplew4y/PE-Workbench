@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Children, isValidElement, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { checkExcelCitation, excelCitationWarning } from "@earendil-works/pe-boot/source";
 import {
   excelColumnLabel,
   parseExcelCellRange,
@@ -147,12 +148,38 @@ function ExcelSourcePreview({ source }: { source: PeExcelSource }) {
   );
 }
 
+function citationLabel(children: ReactNode): string {
+  return Children.toArray(children).map((child) => {
+    if (typeof child === "string" || typeof child === "number") return String(child);
+    if (!isValidElement<{ children?: ReactNode; className?: string; encoding?: string }>(child)) return "";
+    // KaTeX includes both MathML and visual text. Recover its original source once.
+    if (child.props.className?.split(" ").includes("katex")) {
+      const findTex = (nodes: ReactNode): string | undefined => {
+        for (const node of Children.toArray(nodes)) {
+          if (!isValidElement<{ children?: ReactNode; encoding?: string }>(node)) continue;
+          if (node.props.encoding === "application/x-tex") return citationLabel(node.props.children);
+          const nested = findTex(node.props.children);
+          if (nested !== undefined) return nested;
+        }
+        return undefined;
+      };
+      const tex = findTex(child.props.children);
+      if (tex !== undefined) return `$${tex}$`;
+    }
+    return citationLabel(child.props.children);
+  }).join("");
+}
+
 export function PeSourceCitation({ cwd, evidenceId, children, className, portalContainer }: PeSourceCitationProps) {
   const [open, setOpen] = useState(false);
   const [state, setState] = useState<LoadState>({ status: "idle" });
   const [retryKey, setRetryKey] = useState(0);
   const [drawerVisible, setDrawerVisible] = useState(false);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const label = citationLabel(children);
+  const source = state.status === "ready" && state.source.evidence_id === evidenceId && state.source.kind === "excel"
+    ? state.source : undefined;
+  const warning = excelCitationWarning(checkExcelCitation(label, evidenceId, source));
 
   const closeDrawer = useCallback(() => {
     setDrawerVisible(false);
@@ -251,6 +278,11 @@ export function PeSourceCitation({ cwd, evidenceId, children, className, portalC
                 关闭
               </button>
             </header>
+            {warning && (
+              <p role="alert" className="m-0 border-b border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
+                {warning} 下方展示 ID 实际指向的来源。
+              </p>
+            )}
             <div className="min-h-0 flex-1 overflow-auto bg-[var(--bg)]">
               {(state.status === "idle" || state.status === "loading") && (
                 <div className="flex h-full items-center justify-center text-sm text-[var(--text-muted)]">正在加载原始资料…</div>
@@ -289,6 +321,7 @@ export function PeSourceCitation({ cwd, evidenceId, children, className, portalC
 
   return (
     <>
+      {warning && <span className="text-xs text-amber-800 dark:text-amber-200" title={warning}>引用不一致</span>}
       <button
         aria-expanded={open}
         aria-haspopup="dialog"
@@ -298,6 +331,7 @@ export function PeSourceCitation({ cwd, evidenceId, children, className, portalC
         ].filter(Boolean).join(" ")}
         data-pe-source-citation="true"
         data-pe-evidence-id={evidenceId}
+        data-pe-citation-mismatch={warning ? "true" : undefined}
         onClick={openDrawer}
         title={typeof children === "string" ? `查看原始证据：${children}` : "查看原始证据"}
         type="button"

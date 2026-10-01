@@ -154,6 +154,16 @@ afterEach(() => {
 
 describe("valuation report final-message guard", () => {
 	it.each([
+		"请读取当前地平线项目中已上传的估值模型，只做局部模型分析，不修改原工作簿、不查市场数据、不创建框架状态或图表：\n1. 找出2026和2027年的收入、净利润/EPS、目标价或估值，列出原模型基准及其单元格和公式证据。\n2. 找到驱动收入的一个真正独立增长率输入，提高1个百分点。\n3. 给出价格条件表，只回答上述问题。",
+		"请读取估值模型，仅进行局部分析：\n核对增长输入和EPS公式。",
+		"Read the valuation model. Only focused model analysis: explain the growth input and EPS formula.",
+	])("does not mistake explicit local analysis for a whole report: %s", async (prompt) => {
+		const run = harness();
+		expect(await run.begin(prompt)).toBeUndefined();
+		expect(await run.finish()).toBeUndefined();
+	});
+
+	it.each([
 		FOCUSED_PROMPT,
 		LIVE_FOCUSED_PROMPT,
 		"不要完整估值报告，只列收入表。",

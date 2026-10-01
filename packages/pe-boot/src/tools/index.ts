@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getPeSkillPaths, type PeCapabilityOptions } from "../capabilities.ts";
 import { registerPeCapabilities } from "../capability-runtime.ts";
+import { registerCitationGuard } from "../citation-guard.ts";
 import { registerValuationReportGuard } from "../valuation-report-guard.ts";
 import { peConsensusCardsTool } from "./consensus-cards.ts";
 import { peDatasetMemoTool } from "./dataset-memo.ts";
@@ -56,6 +57,7 @@ export function registerPeTools(pi: ExtensionAPI, options: PeCapabilityOptions =
 	pi.registerTool(peDriverSensitivityTool);
 	pi.registerTool(peValuationReportTool);
 	registerValuationReportGuard(pi);
+	registerCitationGuard(pi);
 	pi.registerTool(peDatasetMemoTool);
 	pi.registerTool(peHistoryCompareTool);
 	pi.registerTool(peResearchNoteSaveTool);

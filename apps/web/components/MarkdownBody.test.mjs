@@ -261,3 +261,43 @@ test("does not normalize escaped delimiters or link destinations", () => {
   assert.equal(normalizeDisplayMath(escaped), escaped);
   assert.equal(normalizeDisplayMath(link), link);
 });
+
+test("issue 4: flags valid Excel IDs with the wrong cell, sheet or exact range", () => {
+  const cases = [
+    ["Model!B12", "A12"],
+    ["Model!B13", "A13"],
+    ["Model!B10", "A10"],
+    ["Other!B12", "B12"],
+    ["Model!B12:B13", "B12"],
+  ];
+  for (const [label, range] of cases) {
+    const id = sourceId({ docId: "doc-1", sheet: "Model", range });
+    for (const isStreaming of [false, true]) {
+      const html = renderMarkdown("[" + label + "](" + sourceUrl(id) + ")", { isStreaming });
+      assert.match(html, /data-pe-citation-mismatch="true"/);
+      assert.match(html, /引用不一致/);
+      assert.match(html, /相关论述尚未核验/);
+      // Preserve the original identity for inspecting actual evidence; do not silently repair it.
+      assert.ok(html.includes('data-pe-evidence-id="' + id + '"'));
+    }
+  }
+});
+
+test("issue 4: reads formatted labels and document-wide reference labels", () => {
+  const href = sourceUrl(sourceId({ docId: "doc-1", sheet: "Model", range: "A12" }));
+  for (const markdown of [
+    "[**Model!B12**](" + href + ")",
+    "[" + String.fromCharCode(96) + "Model!B12" + String.fromCharCode(96) + "](" + href + ")",
+    "[Model!B12][evidence]\n\n[evidence]: " + href,
+  ]) assert.match(renderMarkdown(markdown), /data-pe-citation-mismatch="true"/);
+});
+
+test("issue 4: correct, generic and non-Excel citations are not misreported as mismatches", () => {
+  const id = sourceId({ docId: "doc-1", sheet: "Model", range: "B12" });
+  for (const label of ["Model!B12", "'Model'!$B$12", "来源 1"]) {
+    const html = renderMarkdown("[" + label + "](" + sourceUrl(id) + ")");
+    assert.match(html, /data-pe-source-citation="true"/);
+    assert.doesNotMatch(html, /data-pe-citation-mismatch|引用不一致/);
+    assert.doesNotMatch(html, /已验证|已核验/);
+  }
+});

@@ -128,6 +128,14 @@ function isOverviewRequest(text: string, imageCount: number): boolean {
 		/(?:生成|撰写|出具|提供|输出|交付|整理|完成).{0,20}(?:(?:完整|整体|全面)(?:的)?(?:估值模型|估值|模型)?报告|估值报告)|\b(?:write|generate|produce|prepare|provide|deliver)\b[^.!?\n]{0,40}\b(?:(?:full|complete|overall)\s+(?:valuation\s+(?:model\s+)?)?report|valuation\s+report)\b/iu.test(
 			text,
 		);
+	// Explicit local scope can span numbered paragraphs; proximity to "valuation model" is not report intent.
+	if (
+		!explicitReport &&
+		/(?:只|仅)\s*(?:做|进行|回答)?\s*(?:以下|上述)?\s*局部(?:模型)?分析|\b(?:only|just)\s+(?:a\s+)?(?:local|focused)\s+(?:model\s+)?analysis\b/iu.test(
+			text,
+		)
+	)
+		return false;
 	// Creating/refreshing a tracker may require model analysis, but is not itself an overall valuation report.
 	if (trackingOperation && !explicitReport) return false;
 	// Mechanics and framework research have their own deliverables, not a valuation-report gate.
