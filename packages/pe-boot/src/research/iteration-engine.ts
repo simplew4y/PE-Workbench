@@ -277,7 +277,7 @@ export function createIterationEngine(
 				run,
 				"extract",
 				IterationObservationsSchema,
-				"只读取newDocIds，documents中其他文件只是冻结基线，不可读取。提取与当前投资判断直接相关的指标和事件，最多12条核心观察，不逐页抄写财报。先读目录，再选相关原文；批量读取相关页，保留未覆盖内容。若context.previousSubmission存在，它只是未通过校验的参考稿，必须重新读取所选出处、修正validationFeedback中的全部问题，并删去重复或次要观察，不能直接信任旧稿。coverage必须且仅包含每个newDocId各一条记录，readLocations会由工具实际读取记录填充。每条观察只含一个主要指标；quote复制支持该指标的短段连续原文，不拼接多个段落或表格行、不改写不加省略号。value保持原文单位且必须出现在quote，period和unit未知填null。context必须记录单期/累计/时点口径、截至日期和业务范围；basisQuote复制支持期间、单位、角色和口径的连续原文或脚注，并引用其所在页。累计交付的period用累计截至日期，不得标为季度交付。units sold为销量而非出货；EV、AI及其他业务不能拆成汽车独立盈亏。券商预测PE为forecast，现有门店数为fact。事件区分亮相、发售、订单、交付，launched不足以证明正式上市时eventKind=ambiguous；疑点写入reviewReasons，不推断需求验证充分。只有收入不能反推销量。不要修订框架。",
+				"只读取newDocIds，documents中其他文件只是冻结基线，不可读取。提取与当前投资判断直接相关的指标和事件，最多12条核心观察，不逐页抄写财报。先读目录，再选相关原文；批量读取相关页，保留未覆盖内容。若context.previousSubmission存在，它只是未通过校验的参考稿，必须重新读取所选出处、修正validationFeedback中的全部问题，并删去重复或次要观察，不能直接信任旧稿。coverage必须且仅包含每个newDocId各一条记录，readLocations会由工具实际读取记录填充。每条观察只含一个主要指标；quote复制支持该指标的短段连续原文，不拼接多个段落或表格行、不改写不加省略号。value保持原文单位且必须出现在quote，period和unit未知填null。context必须记录单期/累计/时点口径、截至日期和业务范围；basisQuote复制支持期间、单位、角色和口径的连续原文或脚注，并引用其所在页。Excel先核对指标行的表头、期间列、单位列和口径备注，basisQuote优先使用该指标的简短连续原文，避免整段混入其他指标。累计交付的period用累计截至日期，不得标为季度交付。units sold为销量而非出货；EV、AI及其他业务不能拆成汽车独立盈亏。券商预测PE为forecast，现有门店数为fact。事件区分亮相、发售、订单、交付，launched不足以证明正式上市时eventKind=ambiguous；疑点写入reviewReasons，不推断需求验证充分。只有收入不能反推销量。不要修订框架。",
 				{ basis, previousSubmission, validationFeedback },
 				signal,
 			);
@@ -287,7 +287,7 @@ export function createIterationEngine(
 				run,
 				"impact",
 				IterationImpactsSchema,
-				"比较已保存观察与原框架，必要时读取旧资料。每项影响的observationIds必须来自context.observations，evidenceIds只能选该项所关联观察的evidenceIds，不能额外添加未提取的数据或页码。judgmentIds仅可选basis.sections.investmentJudgments.items的id，问题ID不是判断ID；新增信息填空数组。sections使用basis.sections的准确键名，不翻译或猜测。保留提取项的原单位，若换算必须核对：1十亿元=10亿元，1百万元=0.01亿元；不能把24.7十亿元写成24.7亿元。comparisonBasis记录原框架实际比较对象的期间、单期/累计分类及业务范围，必须与观察一致才可comparable=true；没有明确比较对象填null且comparable=false，不计算伪偏差。修改判断的建议必须同时包含investmentJudgments章节和对应judgmentIds，不得建议后遗漏。substantive仅在需要实际修改判断、数据或新增待核实项时为true；无关资料、重复事实、纯措辞改写为false。提出明确的proposedChange，保留原因不明和冲突，不生成全文。",
+				"比较已保存观察与原框架，必要时读取旧资料。每项影响的observationIds必须来自context.observations，evidenceIds只能选该项所关联观察的evidenceIds，不能额外添加未提取的数据或页码。judgmentIds仅可选basis.sections.investmentJudgments.items的id，问题ID不是判断ID；新增信息填空数组。sections使用basis.sections的准确键名，不翻译或猜测。保留提取项的原单位，若换算必须核对：1十亿元=10亿元，1百万元=0.01亿元；不能把24.7十亿元写成24.7亿元。comparisonBasis记录原框架实际比较对象的期间、单期/累计分类及业务范围，必须与观察一致才可comparable=true；没有明确比较对象填null且comparable=false，不计算伪偏差。Q1与Q2等跨季度观察一律comparable=false，仍可记录各期原值并提出修订，不为通过校验把Q1改成Q2；同一期间的comparisonBasis.period和scope须逐字沿用观察字段。修改判断的建议必须同时包含investmentJudgments章节和对应judgmentIds，不得建议后遗漏。substantive仅在需要实际修改判断、数据或新增待核实项时为true；无关资料、重复事实、纯措辞改写为false。提出明确的proposedChange，保留原因不明和冲突，不生成全文。",
 				{ basis, observations },
 				signal,
 			),

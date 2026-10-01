@@ -63,7 +63,20 @@ export function validateObservationContext(observation: Observation): void {
 		}
 	}
 	validateObservationMoney(observation, observation.gaps.join("\n"));
-	if (/累计|cumulative|to date/i.test(basis) && context.periodKind !== "cumulative")
+	// Contrast notes can describe another value's cumulative basis. Keep all clauses
+	// containing this observation's value so ambiguous equal values stay conservative.
+	const valueClauses =
+		typeof observation.value === "number"
+			? context.basisQuote
+					.split(/[，。；;]|,(?!\d{3}(?:\D|$))/)
+					.filter((clause) =>
+						Array.from(clause.matchAll(/-?\d[\d,]*(?:\.\d+)?/g)).some(
+							(match) => Number(match[0].replace(/,/g, "")) === observation.value,
+						),
+					)
+			: [];
+	const cumulativeBasis = `${observation.quote}\n${valueClauses.length ? valueClauses.join("\n") : context.basisQuote}`;
+	if (/累计|cumulative|to date/i.test(cumulativeBasis) && context.periodKind !== "cumulative")
 		throw new ResearchError(400, `累计口径不符：${observation.id}`);
 	if (context.periodKind === "cumulative" && !context.asOf)
 		throw new ResearchError(400, `累计指标缺少截至日期：${observation.id}`);
@@ -105,7 +118,9 @@ export function validateLinkedObservationText(observation: Observation, text: st
 	if (
 		/units sold|销量/i.test(basis) &&
 		/出货|shipments/i.test(text) &&
-		!/(?:不是|非|而非|不能|不等于)[^。；\n]{0,8}(?:出货|shipments)|出货[^。；\n]{0,8}(?:纠正|改为|修正)/i.test(text)
+		!/(?:不是|非|而非|不能|不等于|不用|不得|避免)[^。；\n]{0,8}(?:出货|shipments)|出货[^。；\n]{0,8}(?:纠正|改为|修正)|(?:销量|units sold)[^。；\n]{0,12}(?:与|和)[^。；\n]{0,8}(?:出货|shipments)[^。；\n]{0,8}(?:口径混淆|混用)/i.test(
+			text,
+		)
 	)
 		throw new ResearchError(400, `销量不能改写为出货：${observation.id}`);
 	if (

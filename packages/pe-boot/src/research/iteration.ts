@@ -463,7 +463,10 @@ export function validateIterationAnalysis(
 					comparison.periodKind !== observation.context.periodKind ||
 					comparison.scope !== observation.context.scope)
 			)
-				throw new ResearchError(400, `比较期间或口径不一致：${observation.id}`);
+				throw new ResearchError(
+					400,
+					`比较期间或口径不一致：${observation.id}。观察期间=${observation.period}，分类=${observation.context.periodKind}，范围=${observation.context.scope}。若原框架是不同季度、累计或不同业务范围，保留真实comparisonBasis并将comparable设为false；仍可补充新披露或提出修订，不要改写原比较对象以通过校验。`,
+				);
 		}
 	}
 	if (impacts.substantive && !impacts.impacts.some((i) => i.proposedChange && i.relation !== "unrelated"))
