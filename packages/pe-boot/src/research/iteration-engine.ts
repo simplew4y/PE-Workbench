@@ -287,7 +287,7 @@ export function createIterationEngine(
 				run,
 				"impact",
 				IterationImpactsSchema,
-				"比较已保存观察与原框架，必要时读取旧资料。每项影响的observationIds必须来自context.observations，evidenceIds只能选该项所关联观察的evidenceIds，不能额外添加未提取的数据或页码。judgmentIds仅可选basis.sections.investmentJudgments.items的id，问题ID不是判断ID；新增信息填空数组。sections使用basis.sections的准确键名，不翻译或猜测。保留提取项的原单位，若换算必须核对：1十亿元=10亿元，1百万元=0.01亿元；不能把24.7十亿元写成24.7亿元。comparisonBasis记录原框架实际比较对象的期间、单期/累计分类及业务范围，必须与观察一致才可comparable=true；没有明确比较对象填null且comparable=false，不计算伪偏差。Q1与Q2等跨季度观察一律comparable=false，仍可记录各期原值并提出修订，不为通过校验把Q1改成Q2；同一期间的comparisonBasis.period和scope须逐字沿用观察字段。修改判断的建议必须同时包含investmentJudgments章节和对应judgmentIds，不得建议后遗漏。substantive仅在需要实际修改判断、数据或新增待核实项时为true；无关资料、重复事实、纯措辞改写为false。提出明确的proposedChange，保留原因不明和冲突，不生成全文。",
+				"比较已保存观察与原框架，必要时读取旧资料。每项影响的observationIds必须来自context.observations，evidenceIds只能选该项所关联观察的evidenceIds，不能额外添加未提取的数据或页码。judgmentIds仅可选basis.sections.investmentJudgments.items的id，问题ID不是判断ID；新增信息填空数组。sections使用basis.sections的准确键名，不翻译或猜测。保留提取项的原单位，若换算必须核对：1十亿元=10亿元，1百万元=0.01亿元；不能把24.7十亿元写成24.7亿元。comparisonBasis记录原框架实际比较对象的期间、单期/累计分类及业务范围，必须与观察一致才可comparable=true；没有明确比较对象填null且comparable=false，不计算伪偏差。Q1与Q2等跨季度观察一律comparable=false，仍可记录各期原值并提出修订，不为通过校验把Q1改成Q2；同一期间的comparisonBasis.period和scope须逐字沿用观察字段。没有新增证据的判断不要加入impacts；其缺口只写入gaps。“维持原判断”或“保持问题开放”不构成proposedChange，不能为这些条目提出修改建议或附上其他指标的证据。修改判断的建议必须同时包含investmentJudgments章节和对应judgmentIds，不得建议后遗漏。substantive仅在需要实际修改判断、数据或新增待核实项时为true；无关资料、重复事实、纯措辞改写为false。提出明确的proposedChange，保留原因不明和冲突，不生成全文。",
 				{ basis, observations },
 				signal,
 			),
