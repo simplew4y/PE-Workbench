@@ -5,6 +5,31 @@ import { ResearchError } from "./model.ts";
 
 const text = Type.String({ minLength: 1, maxLength: 8000 });
 const strings = Type.Array(text, { maxItems: 100 });
+const nullableText = Type.Union([text, Type.Null()]);
+const periodKind = Type.Union([
+	Type.Literal("single"),
+	Type.Literal("cumulative"),
+	Type.Literal("point_in_time"),
+	Type.Literal("unknown"),
+]);
+export const ObservationContextSchema = Type.Object(
+	{
+		periodKind,
+		asOf: nullableText,
+		scope: nullableText,
+		basisQuote: text,
+		eventKind: Type.Union([
+			Type.Literal("none"),
+			Type.Literal("unveiling"),
+			Type.Literal("sale"),
+			Type.Literal("orders"),
+			Type.Literal("delivery"),
+			Type.Literal("ambiguous"),
+		]),
+		reviewReasons: strings,
+	},
+	{ additionalProperties: false },
+);
 export const IterationObservationsSchema = Type.Object(
 	{
 		observations: Type.Array(
@@ -26,6 +51,7 @@ export const IterationObservationsSchema = Type.Object(
 					quote: text,
 					evidenceIds: Type.Array(text, { minItems: 1, maxItems: 20 }),
 					gaps: strings,
+					context: ObservationContextSchema,
 				},
 				{ additionalProperties: false },
 			),
@@ -57,6 +83,10 @@ export const IterationImpactsSchema = Type.Object(
 						Type.Literal("unrelated"),
 					]),
 					comparable: Type.Boolean(),
+					comparisonBasis: Type.Union([
+						Type.Object({ period: text, periodKind, scope: text }, { additionalProperties: false }),
+						Type.Null(),
+					]),
 					reason: text,
 					proposedChange: Type.Union([text, Type.Null()]),
 					evidenceIds: Type.Array(text, { minItems: 1, maxItems: 100 }),
@@ -95,6 +125,7 @@ export interface FrameworkIteration {
 	modelId: string;
 	processorVersion: string;
 	automatic: boolean;
+	reviewReasons: string[];
 	status: IterationStatus;
 	stage: IterationStage;
 	ingestJobId: string | null;

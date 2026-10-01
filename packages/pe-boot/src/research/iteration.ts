@@ -23,11 +23,17 @@ import {
 	validateIterationImpacts,
 	validateIterationObservations,
 } from "./iteration-model.ts";
+import {
+	observationReviewReasons,
+	synchronizeIterationScope,
+	validateLinkedObservationText,
+	validateObservationContext,
+} from "./iteration-quality.ts";
 import { type FrameworkContent, isFrameworkDocument, ResearchError, validateFrameworkContent } from "./model.ts";
 import { researchTransaction, withResearchDatabase } from "./storage.ts";
 
 export * from "./iteration-model.ts";
-export const ITERATION_PROCESSOR_VERSION = "1";
+export const ITERATION_PROCESSOR_VERSION = "2";
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS framework_iteration_settings(dataset_id TEXT PRIMARY KEY, test_project INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS framework_iterations(
@@ -215,6 +221,7 @@ export function createFrameworkIteration(
 					db.prepare("SELECT test_project FROM framework_iteration_settings WHERE dataset_id=?").get(datasetId)
 						?.test_project === 1,
 				status: "queued",
+				reviewReasons: [],
 				stage: "ingest",
 				ingestJobId: null,
 				inputs: JSON.parse(String(basis.inputs_json)),
@@ -335,6 +342,8 @@ function owns(db: DatabaseSync, run: FrameworkIteration): void {
 		throw new ResearchError(409, "Iteration cancelled or lease expired");
 }
 function fresh(db: DatabaseSync, run: FrameworkIteration): void {
+	if (run.processorVersion !== ITERATION_PROCESSOR_VERSION)
+		throw new ResearchError(409, "处理器版本已变化，请新建运行；旧产物保留。");
 	if (currentResearchVersion(db, run.datasetId) !== run.basisVersionId)
 		throw new ResearchError(409, "框架基线已变化，请基于最新版本新建运行。");
 	if (
@@ -404,12 +413,23 @@ export function validateIterationAnalysis(
 			)
 		)
 			quoteErrors.push(observation.id);
+		if (
+			quotes.length &&
+			!quotes.some((q) =>
+				q
+					.replace(/\s/g, "")
+					.toLowerCase()
+					.includes(observation.context.basisQuote.replace(/\s/g, "").toLowerCase()),
+			)
+		)
+			quoteErrors.push(`${observation.id}.context`);
 	}
 	if (quoteErrors.length)
 		throw new ResearchError(
 			400,
 			`原文引述不匹配：${quoteErrors.join("、")}。每项请复制一个连续原文片段，不拼接删掉中间行的表格或句子。`,
 		);
+	for (const observation of observations.observations) validateObservationContext(observation);
 	if (!impacts) return;
 	const judgments = new Set(basis.sections.investmentJudgments.items.map((j) => j.id));
 	const sections = new Set(Object.keys(basis.sections));
@@ -428,6 +448,23 @@ export function validateIterationAnalysis(
 				400,
 				`影响未关联提取证据：observationIds=${impact.observationIds.join("、")}。证据仅可使用这些提取项的evidenceIds，不能添加其他页的ID。可用观察ID：${observations.observations.map((o) => o.id).join("、")}。`,
 			);
+		if (impact.proposedChange && impact.judgmentIds.length && !impact.sections.includes("investmentJudgments"))
+			throw new ResearchError(400, "修改判断的建议必须包含investmentJudgments章节。");
+		if (impact.proposedChange && !impact.sections.length) throw new ResearchError(400, "修改建议缺少目标章节。");
+		for (const observation of linked) {
+			validateLinkedObservationText(observation, `${impact.reason}\n${impact.proposedChange || ""}`);
+			const comparison = impact.comparisonBasis;
+			if (
+				impact.comparable &&
+				(!comparison ||
+					!observation.context.scope ||
+					observation.context.periodKind === "unknown" ||
+					comparison.period !== observation.period ||
+					comparison.periodKind !== observation.context.periodKind ||
+					comparison.scope !== observation.context.scope)
+			)
+				throw new ResearchError(400, `比较期间或口径不一致：${observation.id}`);
+		}
 	}
 	if (impacts.substantive && !impacts.impacts.some((i) => i.proposedChange && i.relation !== "unrelated"))
 		throw new ResearchError(400, "Substantive change has no supported proposal");
@@ -441,30 +478,71 @@ export function validateIterationRevision(
 	observations?: IterationObservations,
 ): void {
 	if (observations) {
-		const text = JSON.stringify(candidate);
 		for (const observation of observations.observations) {
-			for (const match of observation.quote.matchAll(/RMB\s*([\d,]+(?:\.\d+)?)\s*(billion|million)/gi)) {
-				const amount = Number(match[1].replace(/,/g, ""));
-				const scale = match[2].toLowerCase() === "billion" ? 1e9 : 1e6;
-				for (const stated of text.matchAll(/([\d,]+(?:\.\d+)?)\s*(十亿元|百万元|亿元)/g)) {
-					const statedScale = stated[2] === "十亿元" ? 1e9 : stated[2] === "百万元" ? 1e6 : 1e8;
-					if (Number(stated[1].replace(/,/g, "")) === amount && statedScale !== scale)
-						throw new ResearchError(
-							400,
-							`金额单位不符：${observation.id}原文RMB${match[1]} ${match[2]}，不能写成${stated[0]}。请保留原单位或正确换算。`,
-						);
+			function visit(value: unknown): void {
+				if (!value || typeof value !== "object") return;
+				if (Array.isArray(value)) {
+					for (const entry of value) visit(entry);
+					return;
 				}
+				const record = value as Record<string, unknown>;
+				const ids = record.evidenceIds ?? (typeof record.evidenceId === "string" ? [record.evidenceId] : undefined);
+				if (Array.isArray(ids) && ids.some((id) => observation.evidenceIds.includes(String(id)))) {
+					const text = Object.entries(record)
+						.filter(([key]) => key !== "before")
+						.map(([, entry]) => entry)
+						.flatMap((entry) =>
+							typeof entry === "string"
+								? [entry]
+								: Array.isArray(entry)
+									? entry.filter((item) => typeof item === "string")
+									: [],
+						)
+						.join("\n");
+					validateLinkedObservationText(observation, text);
+				}
+				for (const entry of Object.values(record)) visit(entry);
 			}
+			visit(candidate.sections);
 		}
 	}
 	if (candidate.title !== basis.title) throw new ResearchError(400, "Framework title must remain stable");
+	if (candidate.sections.researchSetup.informationCutoff !== null)
+		throw new ResearchError(400, "新增资料的信息截止日未经核实，必须置空。");
+	if (
+		/只使用|仅使用|仅依据|只依据|only (?:use|using|based on)/i.test(basis.sections.researchSetup.objective) &&
+		candidate.sections.researchSetup.objective === basis.sections.researchSetup.objective
+	)
+		throw new ResearchError(400, "新增资料后必须更新研究设置中的旧资料范围说明。");
 	const changedSections = new Set(impacts.impacts.filter((i) => i.proposedChange).flatMap((i) => i.sections));
 	const changedIds = new Set(impacts.impacts.filter((i) => i.proposedChange).flatMap((i) => i.judgmentIds));
+	for (const impact of impacts.impacts.filter((i) => i.proposedChange && i.relation !== "unrelated")) {
+		for (const section of impact.sections) {
+			const key = section as keyof FrameworkContent["sections"];
+			if (isDeepStrictEqual(basis.sections[key], candidate.sections[key]))
+				throw new ResearchError(400, `修改建议未落实：${section}`);
+		}
+		for (const id of impact.judgmentIds) {
+			if (
+				isDeepStrictEqual(
+					basis.sections.investmentJudgments.items.find((i) => i.id === id),
+					candidate.sections.investmentJudgments.items.find((i) => i.id === id),
+				)
+			)
+				throw new ResearchError(400, `修改判断建议未落实：${id}`);
+		}
+	}
 	for (const [key, value] of Object.entries(basis.sections)) {
-		if (["evidenceAndChanges", "currentAssessment"].includes(key) || changedSections.has(key)) continue;
+		if (["researchSetup", "evidenceAndChanges", "currentAssessment"].includes(key) || changedSections.has(key))
+			continue;
 		if (!isDeepStrictEqual(value, candidate.sections[key as keyof FrameworkContent["sections"]]))
 			throw new ResearchError(400, `Unrelated section changed: ${key}`);
 	}
+	if (
+		candidate.sections.researchSetup.horizon !== basis.sections.researchSetup.horizon ||
+		candidate.sections.researchSetup.preferences !== basis.sections.researchSetup.preferences
+	)
+		throw new ResearchError(400, "不能改变用户研究期限或偏好。");
 	for (const item of basis.sections.investmentJudgments.items) {
 		const updated = candidate.sections.investmentJudgments.items.find((i) => i.id === item.id);
 		if (!updated) throw new ResearchError(400, `Stable judgment ID removed: ${item.id}`);
@@ -566,10 +644,21 @@ export async function runFrameworkIteration(
 		const completed = run.artifacts.find((a) => a.stage === name);
 		if (completed) {
 			try {
-				if (name === "revise")
+				if (name === "revise") {
+					const storedBasis = getResearchFramework(cwd, datasetId).versions.find(
+						(v) => v.id === run.basisVersionId,
+					)!.content;
+					if (!isFrameworkDocument(storedBasis)) throw new ResearchError(409, "Complete framework required");
+					validateIterationRevision(
+						storedBasis,
+						validateFrameworkContent(completed.value),
+						validateIterationImpacts(run.artifacts.find((a) => a.stage === "impact")?.value),
+						validateIterationObservations(run.artifacts.find((a) => a.stage === "extract")?.value),
+					);
 					database(cwd, datasetId, (db) =>
 						validateResearchEvidence(db, datasetId, validateFrameworkContent(completed.value), run.inputs),
 					);
+				}
 				return completed.value as T;
 			} catch (error) {
 				if (!(error instanceof ResearchError) || error.status !== 400) throw error;
@@ -577,16 +666,28 @@ export async function runFrameworkIteration(
 					researchTransaction(db, () => {
 						owns(db, run);
 						fresh(db, run);
-						db.prepare("INSERT INTO framework_iteration_invalid_artifacts VALUES(?,?,?,?)").run(
-							randomUUID(),
-							id,
-							JSON.stringify(completed),
-							error.message,
+						const invalid = run.artifacts.filter(
+							(a) => a === completed || (name === "revise" && a.stage === "validate"),
 						);
+						for (const entry of invalid) {
+							db.prepare("INSERT INTO framework_iteration_invalid_artifacts VALUES(?,?,?,?)").run(
+								randomUUID(),
+								id,
+								JSON.stringify(entry),
+								error.message,
+							);
+							run.invalidArtifacts.push({ ...entry, reason: error.message });
+						}
+						run.artifacts = run.artifacts.filter((a) => !invalid.includes(a));
+						if (name === "revise") {
+							if (run.draftId)
+								db.prepare(
+									"UPDATE research_drafts SET status='rejected',revision=revision+1 WHERE dataset_id=? AND draft_id=? AND status='open'",
+								).run(datasetId, run.draftId);
+							run.draftId = null;
+						}
 					}),
 				);
-				run.artifacts = run.artifacts.filter((a) => a.stage !== name);
-				run.invalidArtifacts.push({ ...completed, reason: error.message });
 			}
 		}
 		run.stage = name;
@@ -659,21 +760,39 @@ export async function runFrameworkIteration(
 			database(cwd, datasetId, (db) => validateIterationAnalysis(db, run, basis, result));
 			return result;
 		});
+		database(cwd, datasetId, (db) =>
+			validateIterationAnalysis(db, run, basis, validateIterationObservations(observations)),
+		);
+		run.reviewReasons = observationReviewReasons(observations);
+		for (const input of run.inputs.filter((i) => run.newDocIds.includes(i.docId))) {
+			const fileType = database(
+				cwd,
+				datasetId,
+				(db) =>
+					db.prepare("SELECT file_type FROM documents WHERE dataset_id=? AND doc_id=?").get(datasetId, input.docId)
+						?.file_type,
+			);
+			if (fileType !== "pdf") run.reviewReasons.push(`${input.docId}：表格原文、表头和脚注需人工核查`);
+		}
 		const impacts = await stage("impact", async (stageSignal) => {
 			const result = validateIterationImpacts(await engine.impact(run, basis, observations, stageSignal));
 			database(cwd, datasetId, (db) => validateIterationAnalysis(db, run, basis, observations, result));
 			return result;
 		});
+		database(cwd, datasetId, (db) =>
+			validateIterationAnalysis(db, run, basis, observations, validateIterationImpacts(impacts)),
+		);
 		if (!impacts.substantive) run.status = "no_change";
 		else {
 			const candidate = await stage("revise", async (stageSignal) => {
 				const content = validateFrameworkContent(
-					await engine.revise(run, basis, observations, impacts, stageSignal),
+					synchronizeIterationScope(await engine.revise(run, basis, observations, impacts, stageSignal)),
 				);
 				validateIterationRevision(basis, content, impacts, observations);
 				database(cwd, datasetId, (db) => validateResearchEvidence(db, datasetId, content, run.inputs));
 				return content;
 			});
+			validateIterationRevision(basis, candidate, impacts, observations);
 			if (isDeepStrictEqual(candidate, basis)) run.status = "no_change";
 			else {
 				const existingValidation = run.artifacts.find((a) => a.stage === "validate");
@@ -700,6 +819,7 @@ export async function runFrameworkIteration(
 							}),
 						);
 				run.draftId = result.draftId;
+				if (run.reviewReasons.length) run.automatic = false;
 				if (run.automatic) {
 					run.stage = "publish";
 					database(cwd, datasetId, (db) =>

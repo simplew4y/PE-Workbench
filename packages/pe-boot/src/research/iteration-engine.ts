@@ -23,6 +23,7 @@ import {
 	type IterationObservations,
 	IterationObservationsSchema,
 } from "./iteration-model.ts";
+import { synchronizeIterationScope } from "./iteration-quality.ts";
 import { type FrameworkContent, FrameworkContentSchema, ResearchError, validateFrameworkContent } from "./model.ts";
 import { readResearchInput } from "./pi-engine.ts";
 import { withResearchDatabase } from "./storage.ts";
@@ -158,13 +159,15 @@ export function createIterationEngine(
 								),
 							);
 						if (name === "revise" && context.impacts) {
-							const candidate = validateFrameworkContent({
-								...context.basis,
-								sections: {
-									...context.basis.sections,
-									...(params as { sections: Partial<FrameworkContent["sections"]> }).sections,
-								},
-							});
+							const candidate = validateFrameworkContent(
+								synchronizeIterationScope({
+									...context.basis,
+									sections: {
+										...context.basis.sections,
+										...(params as { sections: Partial<FrameworkContent["sections"]> }).sections,
+									},
+								}),
+							);
 							validateIterationRevision(context.basis, candidate, context.impacts, context.observations);
 							withResearchDatabase(cwd, datasetId, (db) =>
 								validateResearchEvidence(db, datasetId, candidate, run.inputs),
@@ -274,7 +277,7 @@ export function createIterationEngine(
 				run,
 				"extract",
 				IterationObservationsSchema,
-				"只读取newDocIds，documents中其他文件只是冻结基线，不可读取。提取与当前投资判断直接相关的指标和事件，最多12条核心观察，不逐页抄写财报。先读目录，再选相关原文；批量读取相关页，保留未覆盖内容。若context.previousSubmission存在，它只是未通过校验的参考稿，必须重新读取所选出处、修正validationFeedback中的全部问题，并删去重复或次要观察，不能直接信任旧稿。coverage必须且仅包含每个newDocId各一条记录，readLocations会由工具实际读取记录填充。每条观察只含一个主要指标；quote复制支持该指标的短段连续原文，不拼接多个段落或表格行、不改写不加省略号。value保持原文单位且必须出现在quote，period和unit未知填null。只有收入不能反推销量。不要修订框架。",
+				"只读取newDocIds，documents中其他文件只是冻结基线，不可读取。提取与当前投资判断直接相关的指标和事件，最多12条核心观察，不逐页抄写财报。先读目录，再选相关原文；批量读取相关页，保留未覆盖内容。若context.previousSubmission存在，它只是未通过校验的参考稿，必须重新读取所选出处、修正validationFeedback中的全部问题，并删去重复或次要观察，不能直接信任旧稿。coverage必须且仅包含每个newDocId各一条记录，readLocations会由工具实际读取记录填充。每条观察只含一个主要指标；quote复制支持该指标的短段连续原文，不拼接多个段落或表格行、不改写不加省略号。value保持原文单位且必须出现在quote，period和unit未知填null。context必须记录单期/累计/时点口径、截至日期和业务范围；basisQuote复制支持期间、单位、角色和口径的连续原文或脚注，并引用其所在页。累计交付的period用累计截至日期，不得标为季度交付。units sold为销量而非出货；EV、AI及其他业务不能拆成汽车独立盈亏。券商预测PE为forecast，现有门店数为fact。事件区分亮相、发售、订单、交付，launched不足以证明正式上市时eventKind=ambiguous；疑点写入reviewReasons，不推断需求验证充分。只有收入不能反推销量。不要修订框架。",
 				{ basis, previousSubmission, validationFeedback },
 				signal,
 			);
@@ -284,12 +287,13 @@ export function createIterationEngine(
 				run,
 				"impact",
 				IterationImpactsSchema,
-				"比较已保存观察与原框架，必要时读取旧资料。每项影响的observationIds必须来自context.observations，evidenceIds只能选该项所关联观察的evidenceIds，不能额外添加未提取的数据或页码。judgmentIds仅可选basis.sections.investmentJudgments.items的id，问题ID不是判断ID；新增信息填空数组。sections使用basis.sections的准确键名，不翻译或猜测。保留提取项的原单位，若换算必须核对：1十亿元=10亿元，1百万元=0.01亿元；不能把24.7十亿元写成24.7亿元。期间或口径不一致comparable=false，不计算伪偏差。substantive仅在需要实际修改判断、数据或新增待核实项时为true；无关资料、重复事实、纯措辞改写为false。提出明确的proposedChange，保留原因不明和冲突，不生成全文。",
+				"比较已保存观察与原框架，必要时读取旧资料。每项影响的observationIds必须来自context.observations，evidenceIds只能选该项所关联观察的evidenceIds，不能额外添加未提取的数据或页码。judgmentIds仅可选basis.sections.investmentJudgments.items的id，问题ID不是判断ID；新增信息填空数组。sections使用basis.sections的准确键名，不翻译或猜测。保留提取项的原单位，若换算必须核对：1十亿元=10亿元，1百万元=0.01亿元；不能把24.7十亿元写成24.7亿元。comparisonBasis记录原框架实际比较对象的期间、单期/累计分类及业务范围，必须与观察一致才可comparable=true；没有明确比较对象填null且comparable=false，不计算伪偏差。修改判断的建议必须同时包含investmentJudgments章节和对应judgmentIds，不得建议后遗漏。substantive仅在需要实际修改判断、数据或新增待核实项时为true；无关资料、重复事实、纯措辞改写为false。提出明确的proposedChange，保留原因不明和冲突，不生成全文。",
 				{ basis, observations },
 				signal,
 			),
 		revise: async (run, basis, observations, impacts, signal) => {
 			const permitted = new Set([
+				"researchSetup",
 				"currentAssessment",
 				"evidenceAndChanges",
 				...impacts.impacts.filter((i) => i.proposedChange).flatMap((i) => i.sections),
@@ -304,7 +308,7 @@ export function createIterationEngine(
 					{ sections: Type.Object(sections, { additionalProperties: false }) },
 					{ additionalProperties: false },
 				),
-				"依据已保存影响分析修订工具schema列出的sections章节，返回这些章节的完整内容。服务端保留title、schemaVersion和未涉及的章节，并组装完整七节候选。保持稳定ID，仅修改proposedChange涉及的judgmentIds；未涉及条目逐字段原样保留。currentAssessment与evidenceAndChanges可补充本轮变化。数值回查context.observations的期间、单位及quote，影响文字不是新的事实来源；1十亿元=10亿元，1百万元=0.01亿元。汽车等分部不等于汽车独立盈亏，不把管理层归因写成已证明因果，不把累计或期后交付计入本季度。修改判断必须在changes关联原ID和新证据；新增判断用新ID，origin=user只用于用户真实提出的假设。证据不足记为问题而非事实，不改变原Excel，不凭空重算估值。",
+				"依据已保存影响分析修订工具schema列出的sections章节，返回这些章节的完整内容。服务端保留title、schemaVersion和未涉及的章节，并组装完整七节候选。保持稳定ID，仅修改proposedChange涉及的judgmentIds；未涉及条目逐字段原样保留。researchSetup必须同步新增资料后的范围说明，保留原研究目标、期限和偏好；不要保留只使用旧研报的限制。informationCutoff由服务端置空，实际冻结资料清单以运行inputs为准，不把上传日期当披露日期。currentAssessment与evidenceAndChanges可补充本轮变化。逐项落实proposedChange指定的章节和判断，否则提交将被拒绝。数值回查context.observations的期间、单位及quote，影响文字不是新的事实来源；1十亿元=10亿元，1百万元=0.01亿元。汽车等分部不等于汽车独立盈亏，不把管理层归因写成已证明因果，不把累计或期后交付计入本季度。修改判断必须在changes关联原ID和新证据；新增判断用新ID，origin=user只用于用户真实提出的假设。证据不足记为问题而非事实，不改变原Excel，不凭空重算估值。",
 				{ basis, observations, impacts },
 				signal,
 			);

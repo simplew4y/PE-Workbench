@@ -81,6 +81,14 @@ it("uses restricted SDK tools, rejects a fabricated quote and records actual rea
 					quote: "revenue 9 million in Q2",
 					evidenceIds: [sourceId({ docId: "new", location: { kind: "pdf", pageStart: 1, pageEnd: 1 } })],
 					gaps: ["Volume unknown"],
+					context: {
+						periodKind: "single",
+						asOf: null,
+						scope: "Company",
+						basisQuote: "Revenue 9 million in Q2",
+						eventKind: "none",
+						reviewReasons: [],
+					},
 				},
 			],
 			coverage: [{ docId: "new", readLocations: ["pretend"], gaps: [] }],
@@ -88,6 +96,7 @@ it("uses restricted SDK tools, rejects a fabricated quote and records actual rea
 		let calls = 0;
 		let revision = false;
 		const candidate = structuredClone(content);
+		candidate.sections.researchSetup.informationCutoff = null;
 		candidate.sections.investmentJudgments.items[0].claim = "Revenue is 9 million; volume unknown";
 		candidate.sections.evidenceAndChanges.changes.push({
 			judgmentIds: ["demand"],
@@ -98,6 +107,7 @@ it("uses restricted SDK tools, rejects a fabricated quote and records actual rea
 		});
 		const patch = {
 			sections: {
+				researchSetup: candidate.sections.researchSetup,
 				currentAssessment: candidate.sections.currentAssessment,
 				investmentJudgments: candidate.sections.investmentJudgments,
 				evidenceAndChanges: candidate.sections.evidenceAndChanges,
@@ -117,7 +127,7 @@ it("uses restricted SDK tools, rejects a fabricated quote and records actual rea
 				const call = calls++;
 				if (revision) {
 					const submit = context.tools?.find((t) => t.name === "pe_iteration_submit");
-					expect(JSON.stringify(submit?.parameters)).not.toContain("researchSetup");
+					expect(JSON.stringify(submit?.parameters)).toContain("researchSetup");
 				}
 				const message: AssistantMessage = {
 					role: "assistant",
@@ -216,6 +226,7 @@ it("uses restricted SDK tools, rejects a fabricated quote and records actual rea
 							observationIds: ["rev"],
 							relation: "supplements",
 							comparable: true,
+							comparisonBasis: { period: "Q2", periodKind: "single", scope: "Company" },
 							reason: "New quarter",
 							proposedChange: "Record revenue and unknown volume",
 							evidenceIds: output.observations[0].evidenceIds,

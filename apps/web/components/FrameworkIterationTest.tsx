@@ -89,7 +89,7 @@ export function FrameworkIterationTest() {
       <label>项目<select value={datasetId} disabled={busy} onChange={(event) => { setDatasetId(event.target.value); setRunId(""); setSnapshot(null); setFiles([]); requestId.current = null; }}>{projects.map((p) => <option key={p.datasetId} value={p.datasetId}>{p.name}</option>)}</select></label>
       <p>平台模型：{snapshot?.modelId || platform?.platform.selected_model || "未连接"} · 基线：{basis ? `v${basis.version}` : "请先在聊天中确认七节框架"}</p>
       {snapshot && <label><input type="checkbox" checked={snapshot.settings.testProject} disabled={busy || snapshot.runs.some((r) => ["queued", "running", "review_required"].includes(r.status))} onChange={(event) => void action("test-project", { enabled: event.target.checked })} />明确登记此项目为测试项目，校验通过后自动发布</label>}
-      <p>{snapshot?.settings.testProject ? "测试项目：新版本将自动成为有效框架。" : "普通项目：生成草稿后由你确认。"}</p>
+      <p>{snapshot?.settings.testProject ? "测试项目：没有待核实研究问题时自动发布；有疑点时仍需人工确认。" : "普通项目：生成草稿后由你确认。"}</p>
       {snapshot?.files?.length ? <p>本轮资料：{snapshot.files.map((f) => f.originalFilename).join("、")}</p> : null}
       <label>新增资料（PDF / XLSX / XLSM）<input type="file" multiple accept=".pdf,.xlsx,.xlsm" disabled={busy} onChange={(event) => { setFiles(Array.from(event.target.files || [])); requestId.current = null; }} /></label>
       <button disabled={busy || !files.length || !snapshot?.framework.currentVersionId || platform?.source !== "platform" || snapshot.runs.some((r) => ["queued", "running"].includes(r.status))} onClick={() => void start()}>上传并运行完整流程</button>
@@ -100,6 +100,9 @@ export function FrameworkIterationTest() {
         <p>已记录调用 {run.usage.reduce((n, u) => n + u.requests, 0)} 次 · 未缓存输入 {run.usage.reduce((n, u) => n + u.inputTokens, 0)} Token · 缓存读取 {run.usage.reduce((n, u) => n + (u.cacheReadTokens || 0), 0)} Token · 输出 {run.usage.reduce((n, u) => n + u.outputTokens, 0)} Token · 平台目录估算 ¥{run.usage.reduce((n, u) => n + u.cost, 0).toFixed(4)}（实际结算以平台为准）</p>
         <ol className={styles.steps}>{Object.entries(stages).map(([key, label]) => <li key={key}>{label}：{run.artifacts.some((a) => a.stage === key) || key === "publish" && run.status === "published" ? "完成" : run.stage === key ? states[run.status] : "未执行"}</li>)}</ol>
         {run.error && <p role="alert">{run.error}</p>}
+        <p>流程状态不代表研究结论已通过人工核查。</p>
+        {!!run.reviewReasons?.length && <div role="status"><strong>需要人工核查</strong><ul>{run.reviewReasons.map((reason) => <li key={reason}>{reason}</li>)}</ul></div>}
+        <details><summary>实际冻结资料范围与版本</summary><pre>{JSON.stringify(run.inputs, null, 2)}</pre><p>资料纳入时间：{run.createdAt}。纳入时间不等于资料披露日期，新增资料后的统一信息截止日待核实。</p></details>
         {["blocked", "failed", "queued"].includes(run.status) && <button disabled={busy} onClick={() => void action("resume")}>从有效检查点恢复</button>}
         {["running", "queued", "blocked", "failed", "review_required"].includes(run.status) && <button disabled={busy} onClick={() => void action("cancel")}>取消</button>}
         {run.status === "review_required" && <><button disabled={busy} onClick={() => void action("accept")}>接受并发布</button><button disabled={busy} onClick={() => void action("reject")}>拒绝草稿</button></>}
