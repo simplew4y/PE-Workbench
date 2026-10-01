@@ -284,6 +284,7 @@ export interface PublishResearchDraft {
 	selectedItemIds?: string[];
 	continuation?: { sessionId: string; toolCallId: string };
 	monitorRunId?: string;
+	iteration?: { runId: string; leaseToken?: string; automatic: boolean };
 }
 export function publishResearchDraft(cwd: string, datasetId: string, input: PublishResearchDraft): FrameworkVersion {
 	return publishResearchDraftWithEvidence(cwd, datasetId, input);
@@ -410,6 +411,35 @@ function publishResearchDraftWithEvidence(
 					.get(datasetId, input.monitorRunId, Date.now())
 			)
 				throw new ResearchError(409, "Monitor paused, changed, or lease expired; draft preserved");
+			if (input.iteration) {
+				const guard = input.iteration;
+				const run = database
+					.prepare("SELECT * FROM framework_iterations WHERE id=? AND dataset_id=?")
+					.get(guard.runId, datasetId);
+				const record = run
+					? (JSON.parse(String(run.record_json)) as {
+							draftId: string | null;
+							automatic: boolean;
+							basisVersionId: string;
+						})
+					: null;
+				const allowed = guard.automatic
+					? run?.status === "running" &&
+						run.lease_token === guard.leaseToken &&
+						Number(run.lease_until) > Date.now() &&
+						database
+							.prepare("SELECT test_project FROM framework_iteration_settings WHERE dataset_id=?")
+							.get(datasetId)?.test_project === 1
+					: run?.status === "review_required";
+				if (
+					!allowed ||
+					!record ||
+					record.draftId !== input.draftId ||
+					record.automatic !== guard.automatic ||
+					record.basisVersionId !== input.expectedVersionId
+				)
+					throw new ResearchError(409, "Iteration cancelled, expired, or changed; draft preserved");
+			}
 			const row = database
 				.prepare("SELECT * FROM research_drafts WHERE dataset_id=? AND draft_id=?")
 				.get(datasetId, input.draftId);
@@ -478,6 +508,18 @@ function publishResearchDraftWithEvidence(
 			database
 				.prepare("UPDATE research_drafts SET status='published',revision=revision+1 WHERE draft_id=?")
 				.run(candidate.id);
+			if (input.iteration) {
+				database
+					.prepare(`UPDATE framework_iterations SET status='published',lease_token=NULL,lease_until=0,
+				 record_json=json_set(record_json,'$.status','published','$.versionId',?,'$.error',NULL,'$.updatedAt',?)
+				 WHERE id=? AND dataset_id=?`)
+					.run(result.id, result.createdAt, input.iteration.runId, datasetId);
+				database
+					.prepare(
+						"UPDATE framework_iteration_attempts SET finished_at=?,status='published' WHERE run_id=? AND finished_at IS NULL",
+					)
+					.run(result.createdAt, input.iteration.runId);
+			}
 			if (input.continuation)
 				database
 					.prepare("INSERT INTO research_continuations VALUES(?,?,?,?,?,'pending',NULL,?)")

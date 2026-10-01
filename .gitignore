@@ -22,6 +22,9 @@ __pycache__/
 *.pyc
 .playwright-cli/
 
+# Local framework iteration run artifacts
+/docs/framework-iteration-runs/
+
 # Editor files
 .vscode/
 .zed/
