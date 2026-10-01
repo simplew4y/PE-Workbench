@@ -13,10 +13,12 @@ import { registerValuationReportGuard } from "../src/valuation-report-guard.ts";
 const PROJECTS: string[] = [];
 const PROMPT = "请全面分析这个 Excel 估值模型，生成完整估值报告。";
 const REPORT = "## 模型估值结果\n\n- 目标价：2,338.00 欧元。";
-const FOCUSED_PROMPT = `请读取当前项目中的 model.xlsx，只做以下局部分析，不修改原工作簿：
+const ISSUE4_PROMPT = `请读取当前项目中的 model.xlsx，只做以下局部分析，不修改原工作簿：
 1. 用模型中2026年的EPS上下浮动10%，配合18、20、22倍P/E，给出价格表，区分原模型基准和补充设定。
 2. 找到原模型中增长率的真正独立输入，将它提高1个百分点，其余原始假设固定。按原模型的实际引用关系，复算2026和2027年的收入、EPS及目标价，列出原基准与变动后的结果，并说明跨期传播、固定条件和复算范围。
 最后说明这两项分析分别回答什么问题，第一项能否证明经营驱动敏感性。请给出可核验的工作表、输入角色和公式证据。只回答这些问题，不生成完整投资报告、不查市场数据、不创建框架状态或图表。`;
+const FOCUSED_PROMPT =
+	"请读取 model.xlsx，只做局部数值表：给出2026年EPS上下浮动10%配合18、20、22倍P/E的价格表，保留原单位，区分原基准与补充条件。不要完整投资报告。";
 const LIVE_FOCUSED_PROMPT =
 	"请读取当前项目的 model.xlsx，只做局部数值对照表：列出2026和2027年的收入、EPS、目标价原模型基准，保留原单位；收入再给出按元换算的对照。另以2027年目标价为输出，找到增长率的真正独立输入并将它相对上调10%，其余原始假设固定，用可用重算引擎在隔离副本验证，列出2027年收入、EPS、目标价的基准与情景对照，并简述传播机制与固定条件。每项保留可核验来源和单位，说明原值与重算值。不要生成完整投资报告，不查市场数据，不改原工作簿，不创建框架或图表；允许保存重算工具自动产生的审计附件。";
 
@@ -153,6 +155,17 @@ afterEach(() => {
 });
 
 describe("valuation report final-message guard", () => {
+	it.each([
+		ISSUE4_PROMPT,
+		"Only local model analysis: show an EPS price table and formula evidence with input roles. Do not generate a full valuation report.",
+	])("preserves the complete formula analysis instead of replacing it with a report: %s", async (prompt) => {
+		const run = harness();
+		expect(await run.begin(prompt)).toBeUndefined();
+		await run.call("focused", "doc-a", "pe_valuation_report", "focused");
+		await run.result("focused", { rendered_report: "Baseline only" });
+		expect(await run.finish()).toBeUndefined();
+		expect(run.repairs).toEqual([]);
+	});
 	it.each([
 		"请读取当前地平线项目中已上传的估值模型，只做局部模型分析，不修改原工作簿、不查市场数据、不创建框架状态或图表：\n1. 找出2026和2027年的收入、净利润/EPS、目标价或估值，列出原模型基准及其单元格和公式证据。\n2. 找到驱动收入的一个真正独立增长率输入，提高1个百分点。\n3. 给出价格条件表，只回答上述问题。",
 		"请读取估值模型，仅进行局部分析：\n核对增长输入和EPS公式。",

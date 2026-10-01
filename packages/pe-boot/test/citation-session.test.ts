@@ -9,9 +9,16 @@ import { sourceId, sourceLink } from "../src/source.ts";
 import { registerPeTools } from "../src/tools/index.ts";
 import { writeWorkbookFixture } from "./workbook-source-fixture.ts";
 
-it.each([true, false])(
-	"real SDK tool-to-answer flow repairs citations once (repair succeeds=%s)",
-	async (succeeds) => {
+it.each([
+	[true, "Model!B12"],
+	[false, "Model!B12"],
+	[true, "Model!A12"],
+	[false, "Model!A12"],
+	[true, "来源"],
+	[false, "来源"],
+] as const)(
+	"real SDK tool-to-answer flow repairs citations once (repair succeeds=%s, label=%s)",
+	async (succeeds, label) => {
 		const h = await createHarness({ extensionFactories: [registerPeTools] });
 		try {
 			for (const dir of ["raw", "meta"]) mkdirSync(join(h.tempDir, dir));
@@ -35,7 +42,7 @@ it.each([true, false])(
 			]);
 			const wrongId = sourceId({ docId, sheet: "Model", range: "A12" });
 			const correctId = sourceId({ docId, sheet: "Model", range: "B12" });
-			const wrong = `目标价为 75。${sourceLink("Model!B12", wrongId)}`;
+			const wrong = `目标价为 75。${sourceLink(label, wrongId)}`;
 			const correct = `目标价为 75。${sourceLink("model.xlsx Model!B12", correctId)}`;
 			h.session.setActiveToolsByName(["pe_excel_range"]);
 			let attempts = 0;

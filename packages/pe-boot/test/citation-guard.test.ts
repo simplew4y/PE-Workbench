@@ -103,6 +103,25 @@ describe("issue 4 citation consistency", () => {
 		expect(await checkAnswerCitations(root, sourceLink("Model!A12 = 75", label.evidence_id))).toHaveLength(1);
 		expect(await checkAnswerCitations(root, sourceLink("Model!B12 = 75", number.evidence_id))).toEqual([]);
 		expect(await checkAnswerCitations(root, number.markdown_citation)).toEqual([]);
+		for (const draft of [
+			`目标价为 75（${label.markdown_citation}）。`,
+			`目标价为 75（${sourceLink("来源", label.evidence_id)}）。`,
+			`目标价公式为 \`=B10*B11\`（${label.markdown_citation}）。`,
+			`| 指标 | 值 | 来源 |\n|---|---|---|\n| 目标价 | 75 | ${label.markdown_citation} |`,
+		]) {
+			expect((await checkAnswerCitations(root, draft)).join(" ")).toContain("实际仅包含文本");
+		}
+		for (const draft of [
+			`目标价为 75（${number.markdown_citation}）。`,
+			`目标价公式为 \`=B10*B11\`（${number.markdown_citation}）。`,
+			`| 指标 | 值 | 来源 |\n|---|---|---|\n| 目标价 | 75 | ${number.markdown_citation} |`,
+			`行名为 Target price（${label.markdown_citation}）。`,
+			`2026 年的行名为 Target price（${label.markdown_citation}）。`,
+			`目标价为 75，数值证据 ${number.markdown_citation}，行名证据 ${label.markdown_citation}。`,
+			`| 指标 | 值 |\n|---|---|\n| 目标价 ${label.markdown_citation} | 75 ${number.markdown_citation} |`,
+			`目标价为 75。\n\n行名为 Target price（${label.markdown_citation}）。`,
+		])
+			expect(await checkAnswerCitations(root, draft)).toEqual([]);
 		const text = result.content.find((block) => block.type === "text")!;
 		expect(text.text).toContain(number.markdown_citation);
 		const batch = vi.spyOn(reader, "readWorkbookDocumentAsync");
