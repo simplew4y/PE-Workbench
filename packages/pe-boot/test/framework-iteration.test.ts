@@ -3,7 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { initializePeCollectionDatabase } from "../src/collection-schema.ts";
-import { createResearchDraft, getResearchFramework, publishResearchDraft } from "../src/research/framework.ts";
+import {
+	createResearchDraft,
+	getResearchFramework,
+	publishResearchDraft,
+	updateResearchDraft,
+} from "../src/research/framework.ts";
 import {
 	cancelFrameworkIteration,
 	createFrameworkIteration,
@@ -149,6 +154,18 @@ it("keeps ordinary projects as drafts and confirms without duplicate publication
 	);
 	expect(getResearchFramework(cwd, dataset).versions).toHaveLength(2);
 });
+it("confirms the current draft revision after a reviewer corrects it", async () => {
+	const { cwd, run, engine, candidate } = setup(false);
+	const result = await runFrameworkIteration(cwd, dataset, run.id, engine, ingest, AbortSignal.timeout(5000));
+	const draft = getResearchFramework(cwd, dataset).drafts.find((entry) => entry.id === result.draftId)!;
+	const corrected = structuredClone(candidate);
+	corrected.sections.valuation.marketExpectations = "未提供市场一致预期";
+	updateResearchDraft(cwd, dataset, draft.id, draft.revision, corrected);
+	const published = await decideFrameworkIteration(cwd, dataset, run.id, true, AbortSignal.timeout(5000));
+	expect(published.status).toBe("published");
+	expect(getResearchFramework(cwd, dataset).versions[0].content).toEqual(corrected);
+});
+
 it("does not revise or publish unrelated observations", async () => {
 	const { cwd, run, engine } = setup();
 	engine.impact = async () => ({ ...impacts, substantive: false, impacts: [] });

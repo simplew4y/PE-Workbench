@@ -890,12 +890,14 @@ export async function decideFrameworkIteration(
 	if (run.status === "published" && accept) return run;
 	if (run.status !== "review_required" || !run.draftId) throw new ResearchError(409, "没有待确认草稿。");
 	if (accept) {
+		const draft = getResearchFramework(cwd, datasetId).drafts.find((entry) => entry.id === run.draftId);
+		if (!draft || draft.status !== "open") throw new ResearchError(409, "待确认草稿已变化。");
 		const version = await publishResearchDraftAsync(
 			cwd,
 			datasetId,
 			{
 				draftId: run.draftId,
-				revision: 1,
+				revision: draft.revision,
 				expectedVersionId: run.basisVersionId,
 				requestId: `iteration_${id}`,
 				iteration: { runId: id, automatic: false },

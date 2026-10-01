@@ -308,7 +308,7 @@ export function createIterationEngine(
 					{ sections: Type.Object(sections, { additionalProperties: false }) },
 					{ additionalProperties: false },
 				),
-				"依据已保存影响分析修订工具schema列出的sections章节，返回这些章节的完整内容。服务端保留title、schemaVersion和未涉及的章节，并组装完整七节候选。保持稳定ID，仅修改proposedChange涉及的judgmentIds；未涉及条目逐字段原样保留。researchSetup必须同步新增资料后的范围说明，保留原研究目标、期限和偏好；不要保留只使用旧研报的限制。informationCutoff由服务端置空，实际冻结资料清单以运行inputs为准，不把上传日期当披露日期。currentAssessment与evidenceAndChanges可补充本轮变化。逐项落实proposedChange指定的章节和判断，否则提交将被拒绝。数值回查context.observations的期间、单位及quote，影响文字不是新的事实来源；1十亿元=10亿元，1百万元=0.01亿元。汽车等分部不等于汽车独立盈亏，不把管理层归因写成已证明因果，不把累计或期后交付计入本季度。修改判断必须在changes关联原ID和新证据；新增判断用新ID，origin=user只用于用户真实提出的假设。证据不足记为问题而非事实，不改变原Excel，不凭空重算估值。",
+				"依据已保存影响分析修订工具schema列出的sections章节，返回这些章节的完整内容。服务端保留title、schemaVersion和未涉及的章节，并组装完整七节候选。保持稳定ID，仅修改proposedChange涉及的judgmentIds；未涉及条目逐字段原样保留。researchSetup必须同步新增资料后的范围说明，保留原研究目标、期限和偏好；不要保留只使用旧研报的限制。informationCutoff由服务端置空，实际冻结资料清单以运行inputs为准，不把上传日期当披露日期。currentAssessment与evidenceAndChanges可补充本轮变化。逐项落实proposedChange指定的章节和判断，否则提交将被拒绝。数值回查context.observations的期间、单位及quote，影响文字不是新的事实来源；1十亿元=10亿元，1百万元=0.01亿元。汽车等分部不等于汽车独立盈亏，不把管理层归因写成已证明因果，不把累计或期后交付计入本季度。修改判断必须在changes关联原ID和新证据；新增判断用新ID，origin=user只用于用户真实提出的假设。证据不足记为问题而非事实，不改变原Excel，不凭空重算估值。forecastComparisons.marketExpectation只记录有证据的市场一致预期；单个研究员预测不能放在这个字段，没有一致预期证据时填null，研究员预测及其与原预测的差异写在ownForecast、difference和summary中。",
 				{ basis, observations, impacts },
 				signal,
 			);
