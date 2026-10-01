@@ -39,9 +39,21 @@ export interface PePlatformAccessToken {
   gatewayBaseUrl: string;
 }
 
+const backendErrorBrand = Symbol.for("pe-workbench.backend-error");
+
 export class PeBackendError extends Error {
+  readonly [backendErrorBrand] = true;
   readonly status: number;
   readonly code: string;
+
+  // Cached gateway services survive development reloads, including their error constructors.
+  static [Symbol.hasInstance](value: unknown): boolean {
+    return value instanceof Error
+      && backendErrorBrand in value
+      && value[backendErrorBrand] === true
+      && "status" in value && typeof value.status === "number"
+      && "code" in value && typeof value.code === "string";
+  }
 
   constructor(status: number, code: string, message: string) {
     super(message);
