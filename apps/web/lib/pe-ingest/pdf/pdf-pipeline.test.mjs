@@ -14,16 +14,22 @@ test("keeps PDF.js recovery enabled for malformed hidden font objects", () => {
   assert.doesNotMatch(source, /stopAtErrors:\s*true/u);
 });
 
-function minimalTextPdf(text) {
+function minimalTextPdf(text, cjk = false) {
   const escaped = text.replaceAll("\\", "\\\\").replaceAll("(", "\\(").replaceAll(")", "\\)");
-  const stream = `BT /F1 12 Tf 72 720 Td (${escaped}) Tj ET`;
+  // Big5 text needs PDF.js's external Adobe-CNS1 mapping; no embedded ToUnicode.
+  const stream = cjk
+    ? "BT /F1 12 Tf 72 720 Td <ace3b56fb67da4e420a448a5c1b9f4a464a4b8> Tj ET"
+    : `BT /F1 12 Tf 72 720 Td (${escaped}) Tj ET`;
   const objects = [
     "<< /Type /Catalog /Pages 2 0 R >>",
     "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
     "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
-    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    cjk
+      ? "<< /Type /Font /Subtype /Type0 /BaseFont /MSung-Light /Encoding /ETen-B5-H /DescendantFonts [6 0 R] >>"
+      : "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
     `<< /Length ${Buffer.byteLength(stream)} >>\nstream\n${stream}\nendstream`,
   ];
+  if (cjk) objects.push("<< /Type /Font /Subtype /CIDFontType0 /BaseFont /MSung-Light /CIDSystemInfo << /Registry (Adobe) /Ordering (CNS1) /Supplement 0 >> /DW 1000 >>");
   let body = "%PDF-1.4\n";
   const offsets = [0];
   for (let index = 0; index < objects.length; index += 1) {
@@ -68,4 +74,23 @@ test("extracts one page and writes Markdown, layout JSON, and a 110 DPI PNG", as
   assert.equal(png.subarray(1, 4).toString("ascii"), "PNG");
   assert.equal(png.readUInt32BE(16), 935);
   assert.equal(png.readUInt32BE(20), 1210);
+});
+
+test("preserves Traditional Chinese financial labels using external CMaps", async (t) => {
+  const { processPePdf } = await jiti.import("./parser.ts");
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "pe-pdf-cmap-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const rawPath = path.join(root, "report.pdf");
+  const content = minimalTextPdf("", true);
+  fs.writeFileSync(rawPath, content);
+  const parsed = await processPePdf({
+    datasetId: "dataset_fixture",
+    originalFilename: "report.pdf",
+    rawPath: "raw/report.pdf",
+    rawAbsolutePath: rawPath,
+    sha256: createHash("sha256").update(content).digest("hex"),
+    stagingDocumentDirectory: path.join(root, "staging"),
+  });
+  assert.match(parsed.pages[0].text, /研發開支/u);
+  assert.match(parsed.pages[0].text, /人民幣千元/u);
 });

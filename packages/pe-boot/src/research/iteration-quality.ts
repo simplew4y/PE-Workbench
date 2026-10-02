@@ -13,8 +13,20 @@ export function synchronizeIterationScope(candidate: FrameworkContent): Framewor
 }
 
 type Observation = IterationObservations["observations"][number];
+/** Financial statements use parentheses for negative amounts; retain literal amounts too. */
+export function quoteContainsNumber(quote: string, value: number): boolean {
+	return Array.from(quote.matchAll(/(?:[（(]\s*)?-?\d[\d,]*(?:\.\d+)?(?:\s*[）)])?/g)).some((match) => {
+		const literal = Number(match[0].replace(/[（()）\s,]/g, ""));
+		return literal === value || (/^[（(].*[）)]$/.test(match[0]) && -Math.abs(literal) === value);
+	});
+}
 const moneyPattern = /(?:RMB\s*|人民币\s*)?(-?\d[\d,]*(?:\.\d+)?)\s*(billion|million|十亿元|百万元|亿元)/gi;
 const scales: Record<string, number> = { billion: 1e9, million: 1e6, 十亿元: 1e9, 百万元: 1e6, 亿元: 1e8 };
+function calendarDates(text: string): string[] {
+	return Array.from(text.matchAll(/(?<!\d)(\d{4})[年/.\-\s]+(\d{1,2})[月/.\-\s]+(\d{1,2})(?!\d)日?/g)).map(
+		(match) => `${match[1]}-${Number(match[2])}-${Number(match[3])}`,
+	);
+}
 function quarters(text: string): string[] {
 	return [
 		...text
@@ -80,8 +92,19 @@ export function validateObservationContext(observation: Observation): void {
 		throw new ResearchError(400, `累计口径不符：${observation.id}`);
 	if (context.periodKind === "cumulative" && !context.asOf)
 		throw new ResearchError(400, `累计指标缺少截至日期：${observation.id}`);
-	if (context.periodKind === "cumulative" && context.asOf && !observation.period?.includes(context.asOf))
-		throw new ResearchError(400, `累计期间必须包含截至日期，不能标为单季度：${observation.id}`);
+	if (context.periodKind === "cumulative" && context.asOf) {
+		const asOfDates = calendarDates(context.asOf);
+		const periodDates = calendarDates(observation.period || "");
+		if (
+			asOfDates.length
+				? !asOfDates.every((date) => periodDates.includes(date))
+				: !observation.period?.includes(context.asOf)
+		)
+			throw new ResearchError(
+				400,
+				`累计期间必须包含截至日期 ${context.asOf}，不能仅标为单季度；当前期间为 ${observation.period || "空"}：${observation.id}`,
+			);
+	}
 	if (context.asOf && !basis.replace(/\s/g, "").toLowerCase().includes(context.asOf.replace(/\s/g, "").toLowerCase()))
 		throw new ResearchError(400, `截至日期必须沿用原文表述并有引述支持：${observation.id}`);
 	if (/预测|forecast|\b20\d{2}E\b/i.test(basis) && observation.role === "fact")

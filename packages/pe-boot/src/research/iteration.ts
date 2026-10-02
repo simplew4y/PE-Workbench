@@ -12,6 +12,7 @@ import {
 	publishResearchDraftAsync,
 	validateResearchEvidence,
 } from "./framework.ts";
+import { equivalentComparisonPeriod } from "./iteration-impact.ts";
 import {
 	type FrameworkIteration,
 	type IterationArtifact,
@@ -25,6 +26,7 @@ import {
 } from "./iteration-model.ts";
 import {
 	observationReviewReasons,
+	quoteContainsNumber,
 	synchronizeIterationScope,
 	validateLinkedObservationText,
 	validateObservationContext,
@@ -385,20 +387,18 @@ export function validateIterationAnalysis(
 	)
 		throw new ResearchError(400, "新资料读取覆盖记录不完整。");
 	const quoteErrors: string[] = [];
+	const errors: string[] = [];
 	for (const observation of observations.observations) {
 		if (!newIds.has(observation.docId)) throw new ResearchError(400, "Observation is outside new documents");
-		if (
-			typeof observation.value === "number" &&
-			!Array.from(observation.quote.matchAll(/-?\d[\d,]*(?:\.\d+)?/g)).some(
-				(m) => Number(m[0].replace(/,/g, "")) === observation.value,
-			)
-		)
-			throw new ResearchError(400, `提取数值不在原文引述中：${observation.id}`);
+		if (typeof observation.value === "number" && !quoteContainsNumber(observation.quote, observation.value))
+			errors.push(`提取数值不在原文引述中：${observation.id}`);
 		const quotes: string[] = [];
 		for (const id of observation.evidenceIds) {
 			const reference = parseSourceId(id);
-			if (!reference || reference.docId !== observation.docId || !resolvePeEvidenceRecord(db, run.datasetId, id))
-				throw new ResearchError(400, "Invalid observation evidence");
+			if (!reference || reference.docId !== observation.docId || !resolvePeEvidenceRecord(db, run.datasetId, id)) {
+				errors.push(`Invalid observation evidence：${observation.id}，请原样复制读取工具返回的ID：${id}`);
+				continue;
+			}
 			if (reference.location.kind === "pdf") {
 				const pages = db
 					.prepare("SELECT page_text FROM pdf_pages WHERE doc_id=? AND page_number BETWEEN ? AND ?")
@@ -423,56 +423,67 @@ export function validateIterationAnalysis(
 			)
 		)
 			quoteErrors.push(`${observation.id}.context`);
+		try {
+			validateObservationContext(observation);
+		} catch (error) {
+			if (!(error instanceof ResearchError) || error.status !== 400) throw error;
+			errors.push(error.message);
+		}
 	}
 	if (quoteErrors.length)
-		throw new ResearchError(
-			400,
-			`原文引述不匹配：${quoteErrors.join("、")}。每项请复制一个连续原文片段，不拼接删掉中间行的表格或句子。`,
+		errors.unshift(
+			`原文引述不匹配：${quoteErrors.join("、")}。引述必须存在于该观察 evidenceIds 所引用的原文页中。若 basisQuote 来自另一页，先读取该页，再把工具返回的 source ID 加入本观察 evidenceIds；不能只引用指标所在页。若引述本身被拼接或改写，则复制连续原文，不删掉中间行。`,
 		);
-	for (const observation of observations.observations) validateObservationContext(observation);
+	if (errors.length) throw new ResearchError(400, errors.join("\n"));
 	if (!impacts) return;
 	const judgments = new Set(basis.sections.investmentJudgments.items.map((j) => j.id));
 	const sections = new Set(Object.keys(basis.sections));
-	for (const impact of impacts.impacts) {
+	const impactErrors: string[] = [];
+	for (const [index, impact] of impacts.impacts.entries()) {
+		const label = `impacts[${index}]`;
 		if (impact.judgmentIds.some((id) => !judgments.has(id)) || impact.sections.some((s) => !sections.has(s)))
-			throw new ResearchError(
-				400,
-				`影响引用了未知框架内容。judgmentIds仅可用：${[...judgments].join("、")}（问题ID不是判断ID）；sections仅可用：${[...sections].join("、")}。新增信息的judgmentIds填空数组。`,
+			impactErrors.push(
+				`${label}：未知判断或章节；judgmentIds仅可用${[...judgments].join("、")}，sections仅可用${[...sections].join("、")}。`,
 			);
 		const linked = observations.observations.filter((o) => impact.observationIds.includes(o.id));
 		if (
 			linked.length !== new Set(impact.observationIds).size ||
 			impact.evidenceIds.some((id) => !linked.some((o) => o.evidenceIds.includes(id)))
 		)
-			throw new ResearchError(
-				400,
-				`影响未关联提取证据：observationIds=${impact.observationIds.join("、")}。证据仅可使用这些提取项的evidenceIds，不能添加其他页的ID。可用观察ID：${observations.observations.map((o) => o.id).join("、")}。`,
+			impactErrors.push(
+				`${label}：影响未关联提取证据；只能引用所关联观察的evidenceIds。可用观察ID：${observations.observations.map((o) => o.id).join("、")}。`,
 			);
 		if (impact.proposedChange && impact.judgmentIds.length && !impact.sections.includes("investmentJudgments"))
-			throw new ResearchError(400, "修改判断的建议必须包含investmentJudgments章节。");
-		if (impact.proposedChange && !impact.sections.length) throw new ResearchError(400, "修改建议缺少目标章节。");
+			impactErrors.push(`${label}：修改判断的建议必须包含investmentJudgments章节。`);
+		if (impact.proposedChange && !impact.sections.length) impactErrors.push(`${label}：修改建议缺少目标章节。`);
 		for (const observation of linked) {
-			validateLinkedObservationText(observation, `${impact.reason}\n${impact.proposedChange || ""}`);
+			try {
+				validateLinkedObservationText(observation, `${impact.reason}\n${impact.proposedChange || ""}`);
+			} catch (error) {
+				if (!(error instanceof ResearchError) || error.status !== 400) throw error;
+				impactErrors.push(`${label}：${error.message}`);
+			}
 			const comparison = impact.comparisonBasis;
 			if (
 				impact.comparable &&
 				(!comparison ||
 					!observation.context.scope ||
 					observation.context.periodKind === "unknown" ||
-					comparison.period !== observation.period ||
+					!equivalentComparisonPeriod(observation.period, comparison.period) ||
 					comparison.periodKind !== observation.context.periodKind ||
-					comparison.scope !== observation.context.scope)
+					comparison.scope.normalize("NFKC").replace(/\s/g, "").toLowerCase() !==
+						observation.context.scope.normalize("NFKC").replace(/\s/g, "").toLowerCase())
 			)
-				throw new ResearchError(
-					400,
-					`比较期间或口径不一致：${observation.id}。观察期间=${observation.period}，分类=${observation.context.periodKind}，范围=${observation.context.scope}。若原框架是不同季度、累计或不同业务范围，保留真实comparisonBasis并将comparable设为false；仍可补充新披露或提出修订，不要改写原比较对象以通过校验。`,
+				impactErrors.push(
+					`${label}：比较期间或口径不一致：${observation.id}。观察期间=${observation.period}，分类=${observation.context.periodKind}，范围=${observation.context.scope}；提交比较=${JSON.stringify(comparison)}。scope只写业务范围，数值与比较解释放reason；确认同口径后使用规范范围。口径未确认时保留真实comparisonBasis并设comparable=false，不计算确定偏差。多项观察范围不同应拆分影响，不强行统一。`,
 				);
 		}
 	}
 	if (impacts.substantive && !impacts.impacts.some((i) => i.proposedChange && i.relation !== "unrelated"))
-		throw new ResearchError(400, "Substantive change has no supported proposal");
+		impactErrors.push("Substantive change has no supported proposal");
 	if (!impacts.substantive && impacts.impacts.some((i) => i.proposedChange && i.relation !== "unrelated"))
-		throw new ResearchError(400, "无实质变化的结果不能同时提出需要修订的判断。");
+		impactErrors.push("无实质变化的结果不能同时提出需要修订的判断。");
+	if (impactErrors.length) throw new ResearchError(400, impactErrors.join("\n"));
 }
 export function validateIterationRevision(
 	basis: FrameworkContent,

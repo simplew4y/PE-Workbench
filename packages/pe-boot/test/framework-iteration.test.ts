@@ -19,6 +19,7 @@ import {
 	type IterationObservations,
 	runFrameworkIteration,
 	setIterationTestProject,
+	validateIterationAnalysis,
 	validateIterationRevision,
 } from "../src/research/iteration.ts";
 import {
@@ -357,6 +358,17 @@ it("rejects fabricated original quotes", async () => {
 	expect(result.status).toBe("failed");
 	expect(result.error).toContain("原文引述");
 });
+it("returns quote and date failures together for all observations", () => {
+	const { cwd, run } = setup();
+	run.newDocIds = ["new"];
+	const facts = structuredClone(observations);
+	facts.observations[0].context.basisQuote = "二季度 ... 收入9亿元";
+	facts.observations[0].context.asOf = "2025-12-31";
+	facts.observations.push({ ...structuredClone(facts.observations[0]), id: "second", value: -9 });
+	expect(() =>
+		withResearchDatabase(cwd, dataset, (db) => validateIterationAnalysis(db, run, frameworkFixture(), facts)),
+	).toThrow(/原文引述不匹配[\s\S]*revenue[\s\S]*截至日期[\s\S]*提取数值[\s\S]*second/);
+});
 it("blocks evidence mutation between stages", async () => {
 	const { cwd, run, engine } = setup();
 	engine.impact = async () => {
@@ -645,4 +657,34 @@ it("does not reuse a validated draft after its saved revision becomes invalid", 
 	expect(getResearchFramework(cwd, dataset).drafts.find((d) => d.id === result.draftId)?.content).toEqual(candidate);
 	const published = await decideFrameworkIteration(cwd, dataset, run.id, true, AbortSignal.timeout(5000));
 	expect(published.status).toBe("published");
+});
+
+it("reports all impact failures with repair indices in one response", () => {
+	const { cwd, run } = setup();
+	run.newDocIds = ["new"];
+	const invalid = structuredClone(impacts);
+	invalid.impacts[0].sections = ["currentAssessment"];
+	invalid.impacts[0].comparisonBasis!.scope = "其他业务";
+	invalid.impacts.push({ ...structuredClone(invalid.impacts[0]), observationIds: ["missing"] });
+	expect(() =>
+		withResearchDatabase(cwd, dataset, (db) =>
+			validateIterationAnalysis(db, run, frameworkFixture(), observations, invalid),
+		),
+	).toThrow(/impacts\[0\][\s\S]*investmentJudgments[\s\S]*比较期间或口径[\s\S]*impacts\[1\][\s\S]*影响未关联/);
+});
+
+it("accepts scope typography differences without equating different businesses", () => {
+	const { cwd, run } = setup();
+	run.newDocIds = ["new"];
+	const facts = structuredClone(observations);
+	facts.observations[0].context.scope = "公司(合并)";
+	const compared = structuredClone(impacts);
+	compared.impacts[0].comparisonBasis!.scope = "公司（合并）";
+	const check = () =>
+		withResearchDatabase(cwd, dataset, (db) =>
+			validateIterationAnalysis(db, run, frameworkFixture(), facts, compared),
+		);
+	expect(check).not.toThrow();
+	compared.impacts[0].comparisonBasis!.scope = "公司(调整后)";
+	expect(check).toThrow("比较期间或口径");
 });
