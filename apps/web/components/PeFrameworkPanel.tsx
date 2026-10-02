@@ -188,6 +188,7 @@ export function PeResearchRail({ research, model, agentUnavailable = false, note
   return <ResearchRail selectedId={view} onSelect={(id) => setView(id === "framework" || id === "memo" || id === "tracking" || id === "notebook" ? id : null)} artifacts={[
     ...(notebook ? [{ id: "notebook", label: "研究积累", icon: <BookOpen size={18} />, subtitle: project?.name, content: notebook, footer: false as const }] : []),
     { id: "framework", label: "投资框架", icon: <BookOpen size={18} />, subtitle: `${project?.name ?? ""}${displayed ? ` · 阅读 v${displayed.version}${displayed.id === current?.id ? " · 最新版本" : " · 历史版本"}` : ""}`,
+      actions: project && <div className={styles.reportActions}><a href={`/framework-iteration-test?${new URLSearchParams({ datasetId: project.datasetId })}`}>迭代测试</a></div>,
       headerActions: <Popover.Root open={settingsOpen} onOpenChange={setSettingsOpen}>
         <Popover.Trigger aria-label="投资框架设置" title="投资框架设置"><Settings size={18} /></Popover.Trigger>
         <Popover.Portal><Popover.Positioner side="bottom" align="end" sideOffset={10} className={styles.settingsPositioner}>
