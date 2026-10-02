@@ -15,6 +15,8 @@ import { WorkbookRequestProperties } from "../workbook-reader.ts";
 import { formatWorkbookResultText } from "../workbook-text.ts";
 import { validateResearchEvidence } from "./framework.ts";
 import { validateIterationAnalysis, validateIterationRevision } from "./iteration.ts";
+import { IterationExtractionSubmissionSchema, mergeExtractionSubmission } from "./iteration-extraction.ts";
+import { IterationImpactSubmissionSchema, mergeImpactSubmission } from "./iteration-impact.ts";
 import {
 	type FrameworkIteration,
 	type IterationEngine,
@@ -74,6 +76,8 @@ export function createIterationEngine(
 		const directory = mkdtempSync(join(tmpdir(), "pe-iteration-"));
 		const validator = Compile(schema);
 		let result: Static<T> | undefined;
+		let pendingExtraction: IterationObservations | undefined;
+		let pendingImpacts: IterationImpacts | undefined;
 		const reads = new Map<string, string[]>();
 		const readEvidence = new Set<string>();
 		const metrics: IterationModelUsage = {
@@ -127,37 +131,63 @@ export function createIterationEngine(
 				defineTool({
 					name: "pe_iteration_submit",
 					label: "Submit stage result",
-					description: "Submit the complete structured result and finish. No publication occurs in this tool.",
-					parameters: schema,
+					description:
+						name === "extract"
+							? "First submit complete observations and coverage. After rejection, submit corrections by observation ID; unchanged entries are retained. Explicit removals require coverage gaps. The merged result is fully validated. No publication occurs."
+							: name === "impact"
+								? "First submit complete substantive, summary, impacts and gaps. After rejection, repair impactUpdates [{index, impact}] using zero-based impacts array indices; unchanged entries are retained. All merged entries are validated. Alternatively replace the full impacts array. No publication occurs."
+								: "Submit the complete structured result and finish. No publication occurs in this tool.",
+					parameters:
+						name === "extract"
+							? IterationExtractionSubmissionSchema
+							: name === "impact"
+								? IterationImpactSubmissionSchema
+								: schema,
 					async execute(_id, params) {
 						signal.throwIfAborted();
-						if (!validator.Check(params)) throw new ResearchError(400, "Invalid stage result");
+						const submitted =
+							name === "extract"
+								? mergeExtractionSubmission(pendingExtraction, params)
+								: name === "impact"
+									? mergeImpactSubmission(pendingImpacts, params)
+									: params;
+						if (!validator.Check(submitted)) throw new ResearchError(400, "Invalid stage result");
 						if (name === "extract") {
-							const extracted = params as {
-								observations?: { evidenceIds: string[] }[];
-								coverage?: { docId: string; readLocations: string[]; gaps: string[] }[];
-							};
-							if (
-								run.newDocIds.some((id) => !reads.has(id)) ||
-								extracted.observations?.some((o) => o.evidenceIds.some((id) => !readEvidence.has(id)))
-							)
-								throw new ResearchError(400, "必须实际读取每份新资料；引用仅限读取工具返回的ID。");
-							for (const coverage of extracted.coverage || [])
+							pendingExtraction = submitted as IterationObservations;
+							const extracted = pendingExtraction;
+							const unread = run.newDocIds.filter((id) => !reads.has(id));
+							const invalidIds = extracted.observations.flatMap((o) =>
+								o.evidenceIds.filter((id) => !readEvidence.has(id)).map((id) => `${o.id}: ${id}`),
+							);
+							for (const coverage of extracted.coverage)
 								coverage.readLocations = reads.get(coverage.docId) || [];
+							diagnostic?.({
+								stage: name,
+								tool: "pe_iteration_checkpoint",
+								args: extracted,
+								at: new Date().toISOString(),
+							});
+							if (unread.length || invalidIds.length)
+								throw new ResearchError(
+									400,
+									`必须实际读取每份新资料；引用仅限读取工具返回的ID。未读取：${unread.join("、")}；错误引用：${invalidIds.join("、")}。不要编码或修改ID；请重读对应页并原样复制。`,
+								);
 							withResearchDatabase(cwd, datasetId, (db) =>
-								validateIterationAnalysis(db, run, context.basis, params as IterationObservations),
+								validateIterationAnalysis(db, run, context.basis, extracted),
 							);
 						}
-						if (name === "impact" && context.observations)
+						if (name === "impact" && context.observations) {
+							pendingImpacts = submitted as IterationImpacts;
+							diagnostic?.({
+								stage: name,
+								tool: "pe_iteration_checkpoint",
+								args: structuredClone(pendingImpacts),
+								at: new Date().toISOString(),
+							});
 							withResearchDatabase(cwd, datasetId, (db) =>
-								validateIterationAnalysis(
-									db,
-									run,
-									context.basis,
-									context.observations!,
-									params as IterationImpacts,
-								),
+								validateIterationAnalysis(db, run, context.basis, context.observations!, pendingImpacts!),
 							);
+						}
 						if (name === "revise" && context.impacts) {
 							const candidate = validateFrameworkContent(
 								synchronizeIterationScope({
@@ -173,7 +203,7 @@ export function createIterationEngine(
 								validateResearchEvidence(db, datasetId, candidate, run.inputs),
 							);
 						}
-						result = structuredClone(params);
+						result = structuredClone(submitted);
 						return { content: [{ type: "text", text: "Stage complete. Stop." }], details: {} };
 					},
 				}),
@@ -217,11 +247,27 @@ export function createIterationEngine(
 					diagnostic?.({
 						stage: name,
 						tool: event.toolName,
-						error: JSON.stringify(value).slice(0, 2000),
+						error: JSON.stringify(value).slice(0, name === "impact" ? 16000 : 2000),
 						at: new Date().toISOString(),
 					});
 				}
 				if (event.type === "message_end" && event.message.role === "assistant") {
+					diagnostic?.({
+						stage: name,
+						tool: "pe_iteration_model",
+						args: {
+							stopReason: event.message.stopReason,
+							text: event.message.content
+								.filter((block) => block.type === "text")
+								.map((block) => block.text)
+								.join("\n")
+								.slice(0, 4000),
+							toolNames: event.message.content
+								.filter((block) => block.type === "toolCall")
+								.map((block) => block.name),
+						},
+						at: new Date().toISOString(),
+					});
 					metrics.requests++;
 					metrics.inputTokens += event.message.usage.input;
 					metrics.outputTokens += event.message.usage.output;
@@ -243,6 +289,20 @@ export function createIterationEngine(
 					expandPromptTemplates: false,
 				});
 				await session.waitForIdle();
+				for (let reminder = 1; !result && !modelError && turns < 40 && reminder <= 2; reminder++) {
+					signal.throwIfAborted();
+					diagnostic?.({
+						stage: name,
+						tool: "pe_iteration_completion_retry",
+						args: { attempt: reminder },
+						at: new Date().toISOString(),
+					});
+					await session.prompt(
+						"本阶段尚未收到通过校验的 pe_iteration_submit，普通文字回复不会完成阶段。请根据已读取原文和工具反馈调用该工具提交结构化结果；若证据不足，明确记录缺口和待核查原因，不编造事实、不等待用户补充。必要时继续读取冻结资料。首次提取提交仍须包含 observations 和 coverage；被拒后的提取修正可按 ID 局部提交。",
+						{ expandPromptTemplates: false },
+					);
+					await session.waitForIdle();
+				}
 				signal.throwIfAborted();
 				if (!result) {
 					if (modelError && /\b(401|402|403)\b|余额不足|insufficient.*balance/i.test(modelError))
@@ -250,7 +310,9 @@ export function createIterationEngine(
 							/余额|balance|\b402\b/i.test(modelError) ? 402 : 401,
 							"平台授权失效或余额不足，请重新登录并检查账户。",
 						);
-					throw new Error(modelError || "研究阶段没有提交结构化结果。");
+					throw new Error(
+						modelError || "研究阶段未提交通过校验的结构化结果；已提醒提交最多两次，请查看模型结束诊断。",
+					);
 				}
 				return result;
 			} finally {
@@ -266,9 +328,11 @@ export function createIterationEngine(
 	}
 	return {
 		extract: (run, basis, signal) => {
-			const previousSubmission = [...run.diagnostics]
-				.reverse()
-				.find((d) => d.stage === "extract" && d.tool === "pe_iteration_submit" && d.args)?.args;
+			const previousDiagnostics = [...run.diagnostics].reverse();
+			const previousSubmission =
+				previousDiagnostics.find((d) => d.stage === "extract" && d.tool === "pe_iteration_checkpoint" && d.args)
+					?.args ??
+				previousDiagnostics.find((d) => d.stage === "extract" && d.tool === "pe_iteration_submit" && d.args)?.args;
 			const validationFeedback = run.diagnostics
 				.filter((d) => d.stage === "extract" && d.error)
 				.slice(-5)
@@ -277,7 +341,7 @@ export function createIterationEngine(
 				run,
 				"extract",
 				IterationObservationsSchema,
-				"只读取newDocIds，documents中其他文件只是冻结基线，不可读取。提取与当前投资判断直接相关的指标和事件，最多12条核心观察，不逐页抄写财报。先读目录，再选相关原文；批量读取相关页，保留未覆盖内容。若context.previousSubmission存在，它只是未通过校验的参考稿，必须重新读取所选出处、修正validationFeedback中的全部问题，并删去重复或次要观察，不能直接信任旧稿。coverage必须且仅包含每个newDocId各一条记录，readLocations会由工具实际读取记录填充。每条观察只含一个主要指标；quote复制支持该指标的短段连续原文，不拼接多个段落或表格行、不改写不加省略号。value保持原文单位且必须出现在quote，period和unit未知填null。context必须记录单期/累计/时点口径、截至日期和业务范围；basisQuote复制支持期间、单位、角色和口径的连续原文或脚注，并引用其所在页。Excel先核对指标行的表头、期间列、单位列和口径备注，basisQuote优先使用该指标的简短连续原文，避免整段混入其他指标。累计交付的period用累计截至日期，不得标为季度交付。units sold为销量而非出货；EV、AI及其他业务不能拆成汽车独立盈亏。券商预测PE为forecast，现有门店数为fact。事件区分亮相、发售、订单、交付，launched不足以证明正式上市时eventKind=ambiguous；疑点写入reviewReasons，不推断需求验证充分。只有收入不能反推销量。不要修订框架。",
+				"只读取newDocIds，documents中其他文件只是冻结基线，不可读取。提取与当前投资判断直接相关的指标和事件，最多12条核心观察，不逐页抄写财报。先读目录，再选相关原文；批量读取相关页，保留未覆盖内容。若context.previousSubmission存在，它只是未通过校验的参考稿，必须重新读取所选出处、修正validationFeedback中的全部问题，并删去重复或次要观察，不能直接信任旧稿。coverage必须且仅包含每个newDocId各一条记录，readLocations会由工具实际读取记录填充。每条观察只含一个主要指标；quote复制支持该指标的短段连续原文，不拼接多个段落或表格行、不改写不加省略号。value保持原文单位且必须出现在quote，period和unit未知填null。context必须记录单期/累计/时点口径、截至日期和业务范围；asOf非空时必须逐字出现在quote或basisQuote，例如原文2025 12 31不能写成2025-12-31。单期指标无法提供日期引述时asOf填null，并在gaps说明，不猜测日期。财报括号负数可用负数value，但quote保留原文括号。basisQuote复制支持期间、单位、角色和口径的连续原文或脚注，并引用其所在页。quote与basisQuote不在同一页时，evidenceIds必须同时包含这两页实际读取返回的source ID；读取了另一页但未在本观察引用它，仍会被拒绝。Excel先核对指标行的表头、期间列、单位列和口径备注，basisQuote优先使用该指标的简短连续原文，避免整段混入其他指标。累计交付的period用累计截至日期，不得标为季度交付。units sold为销量而非出货；EV、AI及其他业务不能拆成汽车独立盈亏。券商预测PE为forecast，现有门店数为fact。事件区分亮相、发售、订单、交付，launched不足以证明正式上市时eventKind=ambiguous；疑点写入reviewReasons，不推断需求验证充分。只有收入不能反推销量。PDF文本若只剩数字、日期而缺失科目名称、单位或表头，不按财报常见排列猜测业务含义；无法确定的指标不标为fact，记录coverage.gaps及reviewReasons。不要自行生成、编码或添加等号到source ID。首次submit提交完整observations和coverage；被拒后只提交需要修正的observations（按id合并），未改项由服务端保留，可单独更新coverage。无法核实的条目用removeObservationIds显式移除，同时在coverage.gaps保留遗漏及原因；合并后仍执行所有校验。一次修正全部反馈，不重复输出未改条目。不要修订框架。",
 				{ basis, previousSubmission, validationFeedback },
 				signal,
 			);
@@ -287,8 +351,18 @@ export function createIterationEngine(
 				run,
 				"impact",
 				IterationImpactsSchema,
-				"比较已保存观察与原框架，必要时读取旧资料。每项影响的observationIds必须来自context.observations，evidenceIds只能选该项所关联观察的evidenceIds，不能额外添加未提取的数据或页码。judgmentIds仅可选basis.sections.investmentJudgments.items的id，问题ID不是判断ID；新增信息填空数组。sections使用basis.sections的准确键名，不翻译或猜测。保留提取项的原单位，若换算必须核对：1十亿元=10亿元，1百万元=0.01亿元；不能把24.7十亿元写成24.7亿元。comparisonBasis记录原框架实际比较对象的期间、单期/累计分类及业务范围，必须与观察一致才可comparable=true；没有明确比较对象填null且comparable=false，不计算伪偏差。Q1与Q2等跨季度观察一律comparable=false，仍可记录各期原值并提出修订，不为通过校验把Q1改成Q2；同一期间的comparisonBasis.period和scope须逐字沿用观察字段。没有新增证据的判断不要加入impacts；其缺口只写入gaps。“维持原判断”或“保持问题开放”不构成proposedChange，不能为这些条目提出修改建议或附上其他指标的证据。修改判断的建议必须同时包含investmentJudgments章节和对应judgmentIds，不得建议后遗漏。substantive仅在需要实际修改判断、数据或新增待核实项时为true；无关资料、重复事实、纯措辞改写为false。提出明确的proposedChange，保留原因不明和冲突，不生成全文。",
-				{ basis, observations },
+				"首次提交完整substantive、summary、impacts和gaps。被拒后按反馈impacts[index]使用impactUpdates:[{index,impact}]只提交错误项的完整内容，服务端保留未改项并重新校验全部结果；一次修正全部反馈。summary、gaps和substantive可单独更新。scope只写业务范围，比较数值、假设和解释写在reason，不能拼进scope。同一公历完整年度2025、2025e和截至2025年12月31日止年度允许格式差异；这不证明IFRS与Non-IFRS等业务口径可比，未确认仍设comparable=false。比较已保存观察与原框架，必要时读取旧资料。每项影响的observationIds必须来自context.observations，evidenceIds只能选该项所关联观察的evidenceIds，不能额外添加未提取的数据或页码。judgmentIds仅可选basis.sections.investmentJudgments.items的id，问题ID不是判断ID；新增信息填空数组。sections使用basis.sections的准确键名，不翻译或猜测。保留提取项的原单位，若换算必须核对：1十亿元=10亿元，1百万元=0.01亿元；不能把24.7十亿元写成24.7亿元。comparisonBasis记录原框架实际比较对象的期间、单期/累计分类及业务范围，必须与观察一致才可comparable=true；没有明确比较对象填null且comparable=false，不计算伪偏差。Q1与Q2等跨季度观察一律comparable=false，仍可记录各期原值并提出修订，不为通过校验把Q1改成Q2；同一期间的comparisonBasis.period可用明确完整年度的等价写法，scope确认同口径后沿用观察的规范业务范围；差异解释写reason。没有新增证据的判断不要加入impacts；其缺口只写入gaps。“维持原判断”或“保持问题开放”不构成proposedChange，不能为这些条目提出修改建议或附上其他指标的证据。修改判断的建议必须同时包含investmentJudgments章节和对应judgmentIds，不得建议后遗漏。substantive仅在需要实际修改判断、数据或新增待核实项时为true；无关资料、重复事实、纯措辞改写为false。提出明确的proposedChange，保留原因不明和冲突，不生成全文。",
+				{
+					basis,
+					observations,
+					previousSubmission: [...run.diagnostics]
+						.reverse()
+						.find((d) => d.stage === "impact" && d.tool === "pe_iteration_checkpoint" && d.args)?.args,
+					validationFeedback: run.diagnostics
+						.filter((d) => d.stage === "impact" && d.error)
+						.slice(-2)
+						.map((d) => d.error!),
+				},
 				signal,
 			),
 		revise: async (run, basis, observations, impacts, signal) => {

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { IterationObservations } from "../src/research/iteration-model.ts";
-import { validateLinkedObservationText, validateObservationContext } from "../src/research/iteration-quality.ts";
+import {
+	quoteContainsNumber,
+	validateLinkedObservationText,
+	validateObservationContext,
+} from "../src/research/iteration-quality.ts";
 
 function delivery(value: number, basisQuote: string): IterationObservations["observations"][number] {
 	return {
@@ -27,6 +31,32 @@ function delivery(value: number, basisQuote: string): IterationObservations["obs
 }
 
 describe("iteration evidence context", () => {
+	it("accepts equivalent cumulative cutoff formats while retaining exact evidence checks", () => {
+		const observation = delivery(30000, "截至2026 6 30累计30,000辆");
+		observation.context.periodKind = "cumulative";
+		observation.context.asOf = "2026 6 30";
+		for (const period of ["2026-06-30止六个月", "截至2026年6月30日止六个月", "截至2026/06/30累计"]) {
+			observation.period = period;
+			expect(() => validateObservationContext(observation)).not.toThrow();
+		}
+		for (const period of ["截至2026年6月3日", "2026 H1"]) {
+			observation.period = period;
+			expect(() => validateObservationContext(observation)).toThrow();
+		}
+		observation.period = "截至2026 6 30";
+		observation.context.asOf = "2026 6 3";
+		expect(() => validateObservationContext(observation)).toThrow("累计期间");
+		observation.period = "截至2026年6月30日止六个月";
+		observation.context.asOf = "2026-06-30";
+		expect(() => validateObservationContext(observation)).toThrow("引述支持");
+	});
+	it("matches accounting negatives without inventing a minus for positive text", () => {
+		expect(quoteContainsNumber("(3,338,791) (2,144,240)", -3338791)).toBe(true);
+		expect(quoteContainsNumber("（0.81）", -0.81)).toBe(true);
+		expect(quoteContainsNumber("-3,338,791", -3338791)).toBe(true);
+		expect(quoteContainsNumber("3,338,791", -3338791)).toBe(false);
+		expect(quoteContainsNumber("(3,338,791)", -3338792)).toBe(false);
+	});
 	it("separates quarter delivery from another value's cumulative contrast note", () => {
 		expect(() =>
 			validateObservationContext(delivery(30000, "历史累计交付为超过90,000辆，不能替代Q2单季度30,000辆。")),

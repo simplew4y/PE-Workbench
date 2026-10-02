@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import {
   getDocument,
   PasswordException,
@@ -66,10 +66,6 @@ function textTokens(page: PDFPageProxy, items: Array<TextItem | TextMarkedConten
   });
 }
 
-function pdfResourceUrl(directory: string): string {
-  return `${pathToFileURL(directory).href.replace(/\/$/u, "")}/`;
-}
-
 function pdfJsRoot(): string {
   return path.dirname(fileURLToPath(import.meta.resolve("pdfjs-dist/package.json")));
 }
@@ -83,10 +79,12 @@ async function openPdf(content: Buffer): Promise<OpenPePdfResult> {
   const dependencyRoot = pdfJsRoot();
   const task = getDocument({
     data: new Uint8Array(content),
-    cMapUrl: pdfResourceUrl(path.join(dependencyRoot, "cmaps")),
+    // PDF.js's NodeBinaryDataFactory calls fs.readFile with these strings,
+    // so local resources require filesystem paths rather than file:// URLs.
+    cMapUrl: `${path.join(dependencyRoot, "cmaps")}${path.sep}`,
     cMapPacked: true,
-    standardFontDataUrl: pdfResourceUrl(path.join(dependencyRoot, "standard_fonts")),
-    wasmUrl: pdfResourceUrl(path.join(dependencyRoot, "wasm")),
+    standardFontDataUrl: `${path.join(dependencyRoot, "standard_fonts")}${path.sep}`,
+    wasmUrl: `${path.join(dependencyRoot, "wasm")}${path.sep}`,
     useSystemFonts: true,
     // Recover usable text and page images when optional or hidden PDF objects
     // contain malformed font references. Page quality checks still flag weak text.
