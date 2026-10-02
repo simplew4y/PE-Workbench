@@ -1,0 +1,35 @@
+Existing hook source assertions: unchanged failure set on HEAD and current worktree.
+✔ keeps the session event stream open through the idle grace window (1.222386ms)
+✔ a rejected submission preserves a different run reported by the server (0.252136ms)
+✔ opening System lazily starts a dormant session without sending a prompt (0.261955ms)
+✔ new-session promotion rekeys drafts before publishing the real session (0.16579ms)
+✔ fresh-session model display follows the model confirmed by the server (0.245091ms)
+✔ fresh sessions restore the preferred tool preset without overriding existing sessions (0.203613ms)
+✔ submission recovery updates live refs before a possible session rekey (0.124635ms)
+✔ stale fresh-session completion cannot replace the active composer (0.275178ms)
+✔ abandoned fresh-session drafts are cleared and cannot be recreated by late rejection (0.280133ms)
+✔ streaming submissions cannot be stranded in an idle direct queue (0.279489ms)
+✔ post-accept prompt errors do not duplicate the user submission (0.156254ms)
+✖ delegates event stream readiness and keeps streamed content out of the chat (1.479487ms)
+✔ uses one absolute agent-readiness deadline instead of a five-second transport deadline (0.172327ms)
+✔ connects a selected session when another browser reports it running (0.418776ms)
+✔ keeps one reducer-owned assistant partial and consumes Pi JSON deltas (0.468644ms)
+✖ tracks streamed tool execution progress without exposing it in the chat (0.679595ms)
+✔ plays the enabled sound once for each extension dialog (0.076831ms)
+✔ routes blocking extension requests through deduplicated browser attention notifications (0.168075ms)
+✔ keeps live following cancellable when the user scrolls away from the tail (0.531153ms)
+✔ keeps a newly sent user message at the top while its response starts (0.333104ms)
+✔ keeps prompt anchor measurement outside the React update cycle (0.339503ms)
+✔ uses the prompt anchor as the only trailing message spacer (0.220374ms)
+✔ keeps a detached viewport in place when streaming completes (0.225596ms)
+ℹ tests 23
+ℹ suites 0
+ℹ pass 21
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 70.62914
+✖ failing tests:
+✖ delegates event stream readiness and keeps streamed content out of the chat (1.479487ms)
+✖ tracks streamed tool execution progress without exposing it in the chat (0.679595ms)

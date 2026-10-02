@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useMemo, useRef, useEffect } from "react";
-import type { BranchPreview, SessionEntry, SessionTreeNode } from "@/lib/types";
+import type { BranchPreview, SessionTreeNode } from "@/lib/types";
 import { useI18n } from "@/hooks/useI18n";
 
 interface Props {
@@ -42,7 +42,7 @@ function buildActivePath(nodes: SessionTreeNode[], targetId: string | null): Set
   return new Set(search(nodes, []) ?? []);
 }
 
-function isMessageEntry(entry: SessionEntry): boolean {
+function isMessageEntry(entry: SessionTreeNode["entry"]): boolean {
   return entry.type === "message" && "message" in entry;
 }
 
@@ -54,11 +54,11 @@ export function compressChain(node: SessionTreeNode): {
   node: SessionTreeNode;
   skipped: number;
   branchPreview?: BranchPreview;
-  labelEntry: SessionEntry;
+  labelEntry: SessionTreeNode["entry"];
 } {
   let current = node;
   let branchPreview = current.branchPreview;
-  let labelEntry: SessionEntry | null = isMessageEntry(current.entry) ? current.entry : null;
+  let labelEntry: SessionTreeNode["entry"] | null = isMessageEntry(current.entry) ? current.entry : null;
   let skipped = current.compressedEntryIds?.length ?? 0;
   while (current.children.length === 1) {
     current = current.children[0];
@@ -79,7 +79,7 @@ export function selectTopLevelBranches(tree: SessionTreeNode[]): SessionTreeNode
   return first.children.length > 1 ? first.children : [];
 }
 
-function getLabel(entry: SessionEntry): string {
+function getLabel(entry: SessionTreeNode["entry"]): string {
   if (entry.type === "message" && "message" in entry) {
     const msg = entry.message as { role: string; content: unknown };
     const content = msg.content;

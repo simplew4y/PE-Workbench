@@ -351,6 +351,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const modelSwitchPendingRef = useRef(false);
   const draftKeyAliasesRef = useRef(new Map<string, string>());
   const sessionHookMountedRef = useRef(true);
+  const historyLoadIdRef = useRef(0);
 
   sessionPropIdRef.current = session?.id ?? null;
   sessionRunningRef.current = Boolean(sessionRunning);
@@ -494,11 +495,14 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   }, [messages, sessionStatsOverride, contextUsage, data?.filePath, data?.totalActiveMs, session?.id, session?.name]);
 
   const loadSession = useCallback(async (sid: string, showLoading = false, includeState = false) => {
-    let messagesLoaded = false;
+    const loadId = ++historyLoadIdRef.current;
+    const isCurrent = () => sessionHookMountedRef.current
+      && sessionIdRef.current === sid && historyLoadIdRef.current === loadId;
     try {
       if (showLoading) setLoading(true);
       const params = new URLSearchParams({ deferThinking: "1", deferMedia: "1" });
       const res = await fetch(`/api/sessions/${encodeURIComponent(sid)}?${params}`);
+      if (!isCurrent()) return null;
       if (res.status === 404) {
         if (showLoading) {
           setData(null);
@@ -510,7 +514,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const d = await res.json() as SessionData;
-      if (sessionIdRef.current !== sid) return null;
+      if (!isCurrent()) return null;
       const persistedMessages = d.context.messages;
       setData(d);
       setActiveLeafId(d.leafId);
@@ -522,15 +526,14 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         setThinkingLevel(d.context.thinkingLevel as ThinkingLevelOption);
       }
 
-      messagesLoaded = true;
-      if (showLoading) setLoading(false);
+      setLoading(false);
       if (!includeState) return null;
 
       try {
         const stateRes = await fetch(`/api/sessions/${encodeURIComponent(sid)}/state`);
         if (!stateRes.ok) throw new Error(`HTTP ${stateRes.status}`);
         const agentState = await stateRes.json() as { running: boolean; state?: AgentStateResponse };
-        if (sessionIdRef.current !== sid) return null;
+        if (!isCurrent()) return null;
 
         const liveState = agentState.state;
         if (liveState) {
@@ -549,14 +552,18 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         return null;
       }
     } catch (e) {
-      setError(String(e));
+      if (isCurrent()) setError(String(e));
       return null;
     } finally {
-      if (showLoading && !messagesLoaded) setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
   }, []);
 
   const loadContext = useCallback(async (sid: string, leafId: string | null) => {
+    const loadId = ++historyLoadIdRef.current;
+    const isCurrent = () => sessionHookMountedRef.current
+      && sessionIdRef.current === sid && historyLoadIdRef.current === loadId;
+    setLoading(true);
     try {
       const params = new URLSearchParams({ deferThinking: "1", deferMedia: "1" });
       if (leafId) params.set("leafId", leafId);
@@ -564,10 +571,17 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const d = await res.json() as { context: { messages: AgentMessage[]; entryIds: string[] } };
+      if (!isCurrent()) return false;
       setMessages(d.context.messages);
       setEntryIds(d.context.entryIds ?? []);
+      setActiveLeafId(leafId);
+      setError(null);
+      return true;
     } catch (e) {
-      console.error("Failed to load context:", e);
+      if (isCurrent()) setError(String(e));
+      return false;
+    } finally {
+      if (isCurrent()) setLoading(false);
     }
   }, []);
 
@@ -1516,18 +1530,16 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     if (bashRunningRef.current) return;
     const sid = sessionIdRef.current;
     if (!sid) return;
-    sendAgentCommand(sid, { type: "navigate_tree", targetId: entryId }).catch(() => {});
-    setActiveLeafId(entryId);
-    await loadContext(sid, entryId);
+    if (await loadContext(sid, entryId)) {
+      sendAgentCommand(sid, { type: "navigate_tree", targetId: entryId }).catch(() => {});
+    }
   }, [loadContext]);
 
   const handleLeafChange = useCallback(async (leafId: string | null) => {
     if (bashRunningRef.current) return;
-    setActiveLeafId(leafId);
     const sid = sessionIdRef.current;
     if (!sid) return;
-    await loadContext(sid, leafId);
-    if (leafId) {
+    if (await loadContext(sid, leafId) && leafId) {
       sendAgentCommand(sid, { type: "navigate_tree", targetId: leafId }).catch(() => {});
     }
   }, [loadContext]);
@@ -1934,6 +1946,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
     return () => {
       sessionHookMountedRef.current = false;
+      historyLoadIdRef.current += 1;
       const abandonedDraftKey = isNew ? newSessionDraftKey : null;
       if (abandonedDraftKey) {
         queueMicrotask(() => {

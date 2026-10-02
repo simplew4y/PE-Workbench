@@ -290,9 +290,11 @@ export interface BranchPreview {
 }
 
 export interface SessionTreeNode {
-  entry: SessionEntry;
+  /** Navigation responses omit entry bodies; full entries can still be used locally. */
+  entry: Pick<SessionEntryBase, "id" | "type"> | SessionEntry;
   children: SessionTreeNode[];
   label?: string;
+  labelTimestamp?: string;
   compressedEntryIds?: string[];
   branchPreview?: BranchPreview;
 }

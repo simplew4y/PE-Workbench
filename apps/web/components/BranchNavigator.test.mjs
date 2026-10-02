@@ -104,3 +104,20 @@ test("multi-root metadata chains use their user previews and assistant represent
   assert.deepEqual(topLevel.map((n) => compressChain(n).branchPreview.text), ["第一问", "第二问"]);
   assert.deepEqual(topLevel.map((n) => compressChain(n).node.entry.id), ["a1", "a2"]);
 });
+
+test("navigation works with body-free projected entries", () => {
+  const tree = [{
+    entry: { id: "root", type: "message" },
+    branchPreview: { role: "user", text: "question" },
+    children: [{
+      entry: { id: "fork", type: "message" }, children: [
+        { entry: { id: "a", type: "message" }, children: [], compressedEntryIds: ["hidden-a"], branchPreview: { role: "user", text: "branch A" } },
+        { entry: { id: "b", type: "message" }, children: [], compressedEntryIds: ["hidden-b"], branchPreview: { role: "user", text: "branch B" } },
+      ],
+    }],
+  }];
+  const rows = selectTopLevelBranches(tree).map(compressChain);
+  assert.deepEqual(rows.map((row) => [row.node.entry.id, row.branchPreview.text, row.skipped]), [
+    ["a", "branch A", 1], ["b", "branch B", 1],
+  ]);
+});

@@ -1,0 +1,29 @@
+[
+  {
+    "cycle": 1,
+    "loadingShown": true,
+    "messages": [
+      "BRANCH ROOT",
+      "BRANCH QUESTION 1",
+      "BRANCH ANSWER 1"
+    ]
+  },
+  {
+    "cycle": 2,
+    "loadingShown": true,
+    "messages": [
+      "BRANCH ROOT",
+      "BRANCH QUESTION 1",
+      "BRANCH ANSWER 1"
+    ]
+  },
+  {
+    "cycle": 3,
+    "loadingShown": true,
+    "messages": [
+      "BRANCH ROOT",
+      "BRANCH QUESTION 1",
+      "BRANCH ANSWER 1"
+    ]
+  }
+]

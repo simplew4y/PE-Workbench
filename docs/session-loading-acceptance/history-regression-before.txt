@@ -1,0 +1,202 @@
+Failed to load context: Error: HTTP 500
+    at evalmachine.<anonymous>:86:19
+    at async Object.handleNavigate (evalmachine.<anonymous>:103:5)
+    at async TestContext.<anonymous> (file:///tmp/pe-history-regression-_qv27mib/session-history-loading.test.mjs:104:3)
+    at async Test.run (node:internal/test_runner/test:1054:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+✖ late branch success cannot replace the latest messages, IDs, leaf or navigation command (2.308642ms)
+✖ late branch failure cannot replace a successful branch with an error (0.861056ms)
+✖ older completion cannot dismiss a newer request's loading indicator (0.657414ms)
+✖ branch failure is visible and retry recovers without premature backend navigation (1.275008ms)
+✖ late initial session fetch cannot overwrite a newer branch choice (1.384421ms)
+✖ newer session refresh supersedes pending branch data and clears its loader (0.780551ms)
+✖ session switch and unmount prevent late branch navigation and state updates (0.714211ms)
+✖ messages are usable while optional state is pending; late state cannot overwrite a branch (7.948848ms)
+✖ late detail 404 and network failure cannot clear newer content or set errors (1.202942ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 0
+ℹ fail 9
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 396.058269
+
+✖ failing tests:
+
+test at ../../../../tmp/pe-history-regression-_qv27mib/session-history-loading.test.mjs:59:1
+✖ late branch success cannot replace the latest messages, IDs, leaf or navigation command (2.308642ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  false !== true
+
+      at TestContext.<anonymous> (file:///tmp/pe-history-regression-_qv27mib/session-history-loading.test.mjs:63:10)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1047:25)
+      at Test.start (node:internal/test_runner/test:944:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:296:17) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../tmp/pe-history-regression-_qv27mib/session-history-loading.test.mjs:75:1
+✖ late branch failure cannot replace a successful branch with an error (0.861056ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + undefined
+  - true
+
+      at TestContext.<anonymous> (file:///tmp/pe-history-regression-_qv27mib/session-history-loading.test.mjs:80:10)
+      at async Test.run (node:internal/test_runner/test:1054:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:744:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../tmp/pe-history-regression-_qv27mib/session-history-loading.test.mjs:87:1
+✖ older completion cannot dismiss a newer request's loading indicator (0.657414ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  false !== true
+
+      at TestContext.<anonymous> (file:///tmp/pe-history-regression-_qv27mib/session-history-loading.test.mjs:93:10)
+      at async Test.run (node:internal/test_runner/test:1054:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:744:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../tmp/pe-history-regression-_qv27mib/session-history-loading.test.mjs:100:1
+✖ branch failure is visible and retry recovers without premature backend navigation (1.275008ms)
+  AssertionError [ERR_ASSERTION]: The "string" argument must be of type string. Received type object (null)
+      at TestContext.<anonymous> (file:///tmp/pe-history-regression-_qv27mib/session-history-loading.test.mjs:105:10)
+      at async Test.run (node:internal/test_runner/test:1054:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:744:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: null,
+    expected: /HTTP 500/,
+    operator: 'match',
+    diff: 'simple'
+  }
+
+test at ../../../../tmp/pe-history-regression-_qv27mib/session-history-loading.test.mjs:118:1
+✖ late initial session fetch cannot overwrite a newer branch choice (1.384421ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    [
+  +   'initial'
+  -   'branch'
+    ]
+
+      at TestContext.<anonymous> (file:///tmp/pe-history-regression-_qv27mib/session-history-loading.test.mjs:126:10)
+      at async Test.run (node:internal/test_runner/test:1054:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:744:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ 'initial' ],
+    expected: [ 'branch' ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../tmp/pe-history-regression-_qv27mib/session-history-loading.test.mjs:130:1
+✖ newer session refresh supersedes pending branch data and clears its loader (0.780551ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    [
+  +   'branch'
+  -   'refresh'
+    ]
+
+      at TestContext.<anonymous> (file:///tmp/pe-history-regression-_qv27mib/session-history-loading.test.mjs:138:10)
+      at async Test.run (node:internal/test_runner/test:1054:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:744:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ 'branch' ],
+    expected: [ 'refresh' ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../tmp/pe-history-regression-_qv27mib/session-history-loading.test.mjs:142:1
+✖ session switch and unmount prevent late branch navigation and state updates (0.714211ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    [
+  +   'old'
+  -   'original'
+    ]
+
+      at TestContext.<anonymous> (file:///tmp/pe-history-regression-_qv27mib/session-history-loading.test.mjs:153:12)
+      at async Test.run (node:internal/test_runner/test:1054:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:744:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ 'old' ],
+    expected: [ 'original' ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../tmp/pe-history-regression-_qv27mib/session-history-loading.test.mjs:158:1
+✖ messages are usable while optional state is pending; late state cannot overwrite a branch (7.948848ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + {
+  +   running: true,
+  +   state: {
+  +     systemPrompt: 'stale'
+  +   }
+  + }
+  - null
+
+      at TestContext.<anonymous> (file:///tmp/pe-history-regression-_qv27mib/session-history-loading.test.mjs:173:10)
+      at async Test.run (node:internal/test_runner/test:1054:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:744:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { running: true, state: { systemPrompt: 'stale' } },
+    expected: null,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../tmp/pe-history-regression-_qv27mib/session-history-loading.test.mjs:178:1
+✖ late detail 404 and network failure cannot clear newer content or set errors (1.202942ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+  + []
+  - [
+  -   'current'
+  - ]
+
+      at TestContext.<anonymous> (file:///tmp/pe-history-regression-_qv27mib/session-history-loading.test.mjs:188:12)
+      at async Test.run (node:internal/test_runner/test:1054:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:744:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [],
+    expected: [ 'current' ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }

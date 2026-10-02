@@ -1,0 +1,17 @@
+✔ late branch success cannot replace the latest messages, IDs, leaf or navigation command (3.3423ms)
+✔ late branch failure cannot replace a successful branch with an error (0.966802ms)
+✔ older completion cannot dismiss a newer request's loading indicator (0.88886ms)
+✔ branch failure is visible and retry recovers without premature backend navigation (1.010828ms)
+✔ late initial session fetch cannot overwrite a newer branch choice (0.957372ms)
+✔ newer session refresh supersedes pending branch data and clears its loader (0.719652ms)
+✔ session switch and unmount prevent late branch navigation and state updates (2.512481ms)
+✔ messages are usable while optional state is pending; late state cannot overwrite a branch (8.318649ms)
+✔ late detail 404 and network failure cannot clear newer content or set errors (1.430062ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 503.412411
