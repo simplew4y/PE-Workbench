@@ -94,7 +94,7 @@ it("renders one cell as a short line instead of a ~1 KB record and keeps the evi
 	expect(lines).toContain("## IS");
 	expect(lines).toContain(`B1\t123.5\t=A1*2\tfmt=#,##0.0\tsource:${"A".repeat(96)}`);
 	expect(lines).toContain(`B2\t42\t-\tfmt=#,##0.0\tsource:${"A".repeat(96)}`);
-	expect(rendered.text).not.toContain("markdown_citation");
+	expect(rendered.text).toContain("markdown_citation");
 	expect(rendered.text).not.toContain("fill_background");
 	const withoutIds = formatWorkbookCellsText({ cells }, { includeEvidenceIds: false });
 	expect(withoutIds.text).not.toContain("source:");
@@ -291,12 +291,16 @@ it("sends compact text to the model from every project workbook tool while detai
 	);
 	const citedText = (cited.content[0] as { text: string }).text;
 	expect(citedText).toContain("ranges=Model!C2,Model!D1");
-	expect(citedText).toMatch(/^C2\t40\t=B2\*2\tfont=theme:1\tsource:[A-Za-z0-9_-]+$/mu);
-	expect(citedText).toMatch(/^D1\t147600\t=SUM\(C2:C121\)\tfont=theme:1\tsource:[A-Za-z0-9_-]+$/mu);
-	expect(citedText).toContain("cite a cell as [Budget.xlsx <sheet>!<cell>](#pe-source?evidence_id=<evidence_id>)");
+	expect(citedText).toMatch(
+		/^C2\t40\t=B2\*2\tfont=theme:1\t\[Budget\.xlsx Model![^\]]+\]\(#pe-source\?evidence_id=source%3A[A-Za-z0-9_-]+\)$/mu,
+	);
+	expect(citedText).toMatch(
+		/^D1\t147600\t=SUM\(C2:C121\)\tfont=theme:1\t\[Budget\.xlsx Model![^\]]+\]\(#pe-source\?evidence_id=source%3A[A-Za-z0-9_-]+\)$/mu,
+	);
+	expect(citedText).toContain("Copy the entire markdown_citation");
 	const citedCells = (cited.details as { cells: Array<{ cell_ref: string; evidence_id: string }> }).cells;
 	for (const cell of citedCells) expect(citedText).toContain(`${cell.cell_ref}\t`);
-	for (const cell of citedCells) expect(citedText).toContain(cell.evidence_id);
+	for (const cell of citedCells) expect(citedText).toContain(encodeURIComponent(cell.evidence_id));
 
 	// With ids on for a wide range, the byte budget cuts the page and points at the continuation offset.
 	const wide = await peExcelRangeTool.execute(
@@ -325,7 +329,7 @@ it("sends compact text to the model from every project workbook tool while detai
 	);
 	const searchText = (search.content[0] as { text: string }).text;
 	expect(searchText).toContain('query="Line 1"');
-	expect(searchText).toMatch(/^A10\t"Line 10"\t-\tmatch=value\tsource:/mu);
+	expect(searchText).toMatch(/^A10\t"Line 10"\t-\tmatch=value\t\[Budget\.xlsx /mu);
 	expect((search.details as { model_text: { truncated: boolean } }).model_text.truncated).toBe(false);
 
 	const trace = await peFormulaTraceTool.execute(
@@ -337,7 +341,7 @@ it("sends compact text to the model from every project workbook tool while detai
 	);
 	const traceText = (trace.content[0] as { text: string }).text;
 	expect(traceText).toContain("trace upstream from Model!D1");
-	expect(traceText).toMatch(/^D1\t147600\t=SUM\(C2:C121\)\tdepth=0\tsource:/mu);
+	expect(traceText).toMatch(/^D1\t147600\t=SUM\(C2:C121\)\tdepth=0\t\[Budget\.xlsx /mu);
 	expect(traceText).toContain("Model!D1 -> Model!C2:C121 [range]");
 	expect(Buffer.byteLength(traceText)).toBeLessThanOrEqual(DEFAULT_WORKBOOK_TEXT_BYTES);
 	expect((trace.details as { nodes: unknown[] }).nodes.length).toBeGreaterThan(100);
@@ -360,8 +364,8 @@ it("sends compact text to the model from every project workbook tool while detai
 	);
 	const outputsText = (outputs.content[0] as { text: string }).text;
 	expect(outputsText).toContain('status="search_results" selection_method="source_text_search" search_complete=true');
-	expect(outputsText).toMatch(/^A12\t"Line 12"\t-\tmatch=value\tsource:/mu);
-	expect(outputsText).not.toContain("markdown_citation");
+	expect(outputsText).toMatch(/^A12\t"Line 12"\t-\tmatch=value\t\[Budget\.xlsx /mu);
+	expect(outputsText).toContain("markdown_citation");
 	expect((outputs.details as { matches: unknown[] }).matches.length).toBeGreaterThan(0);
 
 	const dates = await peValuationDateTool.execute(
@@ -373,7 +377,7 @@ it("sends compact text to the model from every project workbook tool while detai
 	);
 	const datesText = (dates.content[0] as { text: string }).text;
 	expect(datesText).toContain('status="search_results" resolution_method="source_text_search" evidence_ids=[]');
-	expect(datesText).toMatch(/^A1\t"Revenue"\t-\tmatch=value\tsource:/mu);
+	expect(datesText).toMatch(/^A1\t"Revenue"\t-\tmatch=value\t\[Budget\.xlsx /mu);
 
 	const citedC2 = citedCells.find((cell) => cell.cell_ref === "C2")!;
 	const detail = await peSourceDetailTool.execute(
@@ -388,7 +392,7 @@ it("sends compact text to the model from every project workbook tool while detai
 	expect(detailText).toContain(`evidence_id="${citedC2.evidence_id}"`);
 	expect(detailText).toContain("range=Model!C2");
 	expect(detailText).toContain("grid_window=");
-	expect(detailText).toMatch(/^C2\t40\t=B2\*2\t-\tsource:/mu);
+	expect(detailText).toMatch(/^C2\t40\t=B2\*2\t-\t\[Budget\.xlsx /mu);
 	expect(detailPayload.model_text.shown_cells).toBe(detailPayload.cells.length);
 	expect(Buffer.byteLength(detailText)).toBeLessThan(Buffer.byteLength(JSON.stringify(detailPayload.cells)) / 4);
 
@@ -399,6 +403,6 @@ it("sends compact text to the model from every project workbook tool while detai
 	>;
 	const researchText = formatWorkbookResultText(research, { docId }).text;
 	expect(researchText).toContain("# Budget.xlsx");
-	expect(researchText).toMatch(/^C2\t40\t=B2\*2\t-\tsource:/mu);
+	expect(researchText).toMatch(/^C2\t40\t=B2\*2\t-\t\[Budget\.xlsx /mu);
 	expect(researchText).toContain("note: Stored values only");
 }, 60_000);

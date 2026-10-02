@@ -7,6 +7,8 @@
  * style objects and duplicated value fields used to cost.
  */
 
+import { parseSourceId, sourceLink } from "./source.ts";
+
 export const DEFAULT_WORKBOOK_TEXT_BYTES = 32 * 1024;
 const MAX_TEXT_CELL_CHARS = 200;
 const MAX_COMMENT_CHARS = 160;
@@ -103,6 +105,7 @@ interface NormalizedCell {
 	formula: string;
 	notes: string;
 	evidenceId: string;
+	citation: string;
 }
 
 /** Accepts raw reader records (metadata_json string, numeric is_formula) and ExcelCellDetail objects. */
@@ -159,7 +162,21 @@ function normalizeCell(row: Row, options: WorkbookTextOptions): NormalizedCell {
 		if (style) notes.push(style);
 	}
 
+	const evidenceId = options.includeEvidenceIds === false ? "" : (text(row.evidence_id) ?? "");
+	const reference = parseSourceId(evidenceId);
+	const citation =
+		reference?.location.kind === "excel"
+			? sourceLink(
+					(options.filename ?? text(row.original_filename) ?? "workbook") +
+						" " +
+						reference.location.sheet +
+						"!" +
+						reference.location.range,
+					evidenceId,
+				)
+			: "";
 	return {
+		citation,
 		sheet: text(row.sheet_name) ?? "",
 		ref: text(row.cell_ref) ?? "",
 		value,
@@ -171,7 +188,7 @@ function normalizeCell(row: Row, options: WorkbookTextOptions): NormalizedCell {
 
 function cellLine(cell: NormalizedCell): string {
 	const columns = [cell.ref, cell.value, cell.formula, cell.notes];
-	if (cell.evidenceId) columns.push(cell.evidenceId);
+	if (cell.evidenceId) columns.push(cell.citation || cell.evidenceId);
 	return columns.join("\t");
 }
 
@@ -192,7 +209,7 @@ function cellLines(rows: Row[], options: WorkbookTextOptions): string[] {
 
 function columnsLegend(options: WorkbookTextOptions): string {
 	const columns = ["cell", "saved value", "formula", "notes"];
-	if (options.includeEvidenceIds !== false) columns.push("evidence_id");
+	if (options.includeEvidenceIds !== false) columns.push("markdown_citation");
 	return `columns: ${columns.join(" ⇥ ")}. Text values are quoted; numbers are bare; formulas keep saved (not recalculated) values.`;
 }
 
@@ -223,7 +240,7 @@ function citationRule(options: WorkbookTextOptions, filename: string): string {
 		return `cite cells as "${filename} <sheet>!<cell>"; this attachment has no project evidence ids, do not invent any.`;
 	if (options.includeEvidenceIds === false)
 		return "evidence ids omitted to save context; before citing, re-read the decisive cells (ranges accepts scattered cells) with include_evidence_ids=true.";
-	return `cite a cell as [${filename} <sheet>!<cell>](#pe-source?evidence_id=<evidence_id>); keep evidence_id verbatim.`;
+	return "Copy the entire markdown_citation from the decisive cell verbatim; never pair a label from one cell with another cell's id. Row labels do not prove numeric values or formulas.";
 }
 
 interface BudgetedSection {
@@ -314,7 +331,7 @@ export function formatWorkbookCellsText(result: Row, options: WorkbookTextOption
 	return assemble(
 		{
 			head,
-			body: cellLines(rows, options),
+			body: cellLines(rows, { ...options, filename }),
 			isCellLine,
 			tail,
 			offset,
@@ -388,7 +405,7 @@ export function formatWorkbookTraceText(result: Row, options: WorkbookTextOption
 		if (sheet !== 0) return sheet;
 		return Number(a.row_index ?? 0) - Number(b.row_index ?? 0) || Number(a.col_index ?? 0) - Number(b.col_index ?? 0);
 	});
-	const body = ["# nodes (depth 0 = root)", ...cellLines(sorted, options)];
+	const body = ["# nodes (depth 0 = root)", ...cellLines(sorted, { ...options, filename })];
 	const budget = workbookTextBudget(options.maxBytes);
 	// Edges are structural and cheap to re-derive from formulas; when the budget is tight, cut edges before nodes.
 	const edgeLines = edges.map(edgeLine);

@@ -128,6 +128,14 @@ function isOverviewRequest(text: string, imageCount: number): boolean {
 		/(?:生成|撰写|出具|提供|输出|交付|整理|完成).{0,20}(?:(?:完整|整体|全面)(?:的)?(?:估值模型|估值|模型)?报告|估值报告)|\b(?:write|generate|produce|prepare|provide|deliver)\b[^.!?\n]{0,40}\b(?:(?:full|complete|overall)\s+(?:valuation\s+(?:model\s+)?)?report|valuation\s+report)\b/iu.test(
 			text,
 		);
+	// Explicit local scope can span numbered paragraphs; proximity to "valuation model" is not report intent.
+	if (
+		!explicitReport &&
+		/(?:只|仅)\s*(?:做|进行|回答)?\s*(?:以下|上述)?\s*局部(?:模型)?分析|\b(?:only|just)\s+(?:a\s+)?(?:local|focused)\s+(?:model\s+)?analysis\b/iu.test(
+			text,
+		)
+	)
+		return false;
 	// Creating/refreshing a tracker may require model analysis, but is not itself an overall valuation report.
 	if (trackingOperation && !explicitReport) return false;
 	// Mechanics and framework research have their own deliverables, not a valuation-report gate.
@@ -168,6 +176,16 @@ function requestMode(text: string, imageCount: number): ReportMode {
 		/(?:不(?:要|用|必|需要)?|无需|别|勿)\s*(?:再|为此)?\s*(?:给我|给出|提供|生成|输出|创建|制作|写|做|给)?\s*(?:(?:完整|整体|全面)(?:的)?\s*)?(?:投资|估值|模型|研究)?(?:分析)?报告|\b(?:do not|don't|no|without)\s+(?:(?:generate|write|produce|provide)\s+)?(?:(?:a|the)\s+)?(?:(?:full|complete|overall)\s+)?(?:(?:valuation|investment|research)\s+)?report\b/giu;
 	const affirmative = text.replace(reportOptOut, "");
 	const declinesOverview = affirmative !== text;
+	// Formula/driver explanations need coordinates and propagation evidence that the report
+	// renderer deliberately strips. An incidental price table must not replace that analysis.
+	if (
+		declinesOverview &&
+		/(?:只|仅)\s*(?:做|进行|回答)?\s*(?:以下|上述)?\s*局部(?:模型)?分析|\b(?:only|just)\s+(?:a\s+)?(?:local|focused)\s+(?:model\s+)?analysis\b/iu.test(
+			affirmative,
+		) &&
+		/(?:公式证据|实际引用关系|输入角色)|\b(?:formula evidence|actual references|input roles)\b/iu.test(affirmative)
+	)
+		return "none";
 	if (!declinesOverview && isOverviewRequest(text, imageCount)) return "overview";
 	if (
 		isTrackingOperation(affirmative) ||
