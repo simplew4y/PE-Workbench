@@ -113,3 +113,43 @@ test("linear sessions still project to root + leaf only", () => {
   assert.equal(projected.children.length, 1);
   assert.equal(projected.children[0].entry.id, "a1");
 });
+
+test("retained roots, branch points and leaves contain navigation data only", () => {
+  const secret = "payload-secret-".repeat(10000);
+  const leaf = node(msg("leaf", "toolResult", [{ type: "image", data: secret, mimeType: "image/png" }]));
+  const fork = node(msg("fork", "assistant", [
+    { type: "thinking", thinking: secret },
+    { type: "text", text: "fork answer" },
+    { type: "toolCall", arguments: { secret } },
+  ]), [leaf, node({ ...info("metadata"), data: secret, summary: secret })]);
+  const root = { ...node(msg("root", "user", [{ type: "text", text: "question" }, { type: "image", data: secret }]), [fork]),
+    label: "bookmark", labelTimestamp: "2026-01-01", extraPayload: secret };
+  const original = structuredClone(root);
+  const projected = projectTreeForResponse([root]);
+  const pending = [...projected];
+  const ids = [];
+  while (pending.length) {
+    const current = pending.pop();
+    ids.push(current.entry.id);
+    assert.deepEqual(Object.keys(current.entry).sort(), ["id", "type"]);
+    pending.push(...current.children);
+  }
+  assert.deepEqual(ids.sort(), ["fork", "leaf", "metadata", "root"]);
+  assert.equal(projected[0].label, "bookmark");
+  assert.equal(projected[0].labelTimestamp, "2026-01-01");
+  assert.deepEqual(projected[0].branchPreview, { role: "user", text: "question" });
+  assert.deepEqual(projected[0].children[0].branchPreview, { role: "assistant", text: "fork answer" });
+  assert.ok(JSON.stringify(projected).length < 1000);
+  assert.ok(!JSON.stringify(projected).includes("payload-secret"));
+  assert.deepEqual(root, original, "projection must not mutate live messages");
+});
+
+test("depth-flattened retained leaves also omit message bodies", () => {
+  let deep = node(msg("image-leaf", "toolResult", [{ type: "image", data: "deep-image-secret" }]));
+  for (let i = 0; i < MAX_PROJECTED_TREE_DEPTH + 2; i++) {
+    deep = node(info("fork-" + i), [deep, node(info("side-" + i))]);
+  }
+  const projected = projectTreeForResponse([deep]);
+  assert.deepEqual(findProjectedNode(projected, "image-leaf").entry, { id: "image-leaf", type: "message" });
+  assert.ok(!JSON.stringify(projected).includes("deep-image-secret"));
+});

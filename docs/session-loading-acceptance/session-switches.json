@@ -1,0 +1,35 @@
+[
+  {
+    "switchMs": 1598,
+    "returnMs": 869,
+    "switchMessages": [
+      "accept-switch QUESTION 000",
+      "accept-switch ANSWER 000",
+      "accept-switch QUESTION 001",
+      "accept-switch ANSWER 001"
+    ],
+    "historyVisibleCount": 50
+  },
+  {
+    "switchMs": 854,
+    "returnMs": 1109,
+    "switchMessages": [
+      "accept-switch QUESTION 000",
+      "accept-switch ANSWER 000",
+      "accept-switch QUESTION 001",
+      "accept-switch ANSWER 001"
+    ],
+    "historyVisibleCount": 50
+  },
+  {
+    "switchMs": 887,
+    "returnMs": 933,
+    "switchMessages": [
+      "accept-switch QUESTION 000",
+      "accept-switch ANSWER 000",
+      "accept-switch QUESTION 001",
+      "accept-switch ANSWER 001"
+    ],
+    "historyVisibleCount": 50
+  }
+]

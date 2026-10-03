@@ -1,4 +1,4 @@
-import type { BranchPreview } from "@/lib/types";
+import type { BranchPreview, SessionTreeNode } from "@/lib/types";
 
 // BranchNavigator still traverses recursively, so keep the response tree shallow.
 export const MAX_PROJECTED_TREE_DEPTH = 200;
@@ -13,6 +13,8 @@ type ProjectableEntry = {
 type ProjectableTreeNode<T> = {
   entry: ProjectableEntry;
   children: T[];
+  label?: string;
+  labelTimestamp?: string;
   compressedEntryIds?: string[];
   branchPreview?: BranchPreview;
 };
@@ -77,7 +79,7 @@ function previewForEntry(entry: ProjectableEntry): BranchPreview | undefined {
  */
 export function projectTreeForResponse<T extends ProjectableTreeNode<T>>(
   nodes: T[]
-): T[] {
+): SessionTreeNode[] {
   const keep = new Set<T>();
   const roots = new Set(nodes);
   const seen = new Set<T>();
@@ -100,8 +102,13 @@ export function projectTreeForResponse<T extends ProjectableTreeNode<T>>(
     }
   }
 
-  const cloneNode = (node: T, compressedEntryIds?: string[], branchPreview?: BranchPreview): T => ({
-    ...node,
+  const cloneNode = (node: T, compressedEntryIds?: string[], branchPreview?: BranchPreview): SessionTreeNode => ({
+    // Navigation needs identity and a bounded preview, never the raw entry.
+    // Spreading node here re-sent images/thinking from retained roots, branch
+    // points and leaves, bypassing the history endpoint's deferral options.
+    entry: { id: node.entry.id, type: node.entry.type },
+    ...(node.label !== undefined ? { label: node.label } : {}),
+    ...(node.labelTimestamp !== undefined ? { labelTimestamp: node.labelTimestamp } : {}),
     children: [],
     ...(compressedEntryIds?.length ? { compressedEntryIds } : {}),
     ...(branchPreview ? { branchPreview } : {}),
@@ -113,7 +120,7 @@ export function projectTreeForResponse<T extends ProjectableTreeNode<T>>(
     depth: 1,
   }));
 
-  const appendFlattenedKeptDescendants = (source: T, projectedParent: T) => {
+  const appendFlattenedKeptDescendants = (source: T, projectedParent: SessionTreeNode) => {
     const pending = [{
       node: source,
       compressedEntryIds: [] as string[],
