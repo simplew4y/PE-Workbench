@@ -44,7 +44,7 @@ it.each(["tool", "text", "stubborn", "error"] as const)(
 					"INSERT INTO documents(doc_id,dataset_id,original_filename,filename_key,sha256,file_type,status,created_at,updated_at) VALUES('new','dataset_test','new.pdf','new.pdf','hash','pdf','completed','before','before')",
 				);
 				db.exec(
-					"INSERT INTO pdf_pages VALUES('p1','new',1,'Revenue 9 million in Q2','p1','body','{}','good','{}',100,100,0,'[]',0,0,0)",
+					"INSERT INTO pdf_pages VALUES('p1','new',1,'Revenue 9 million in Q2；經營虧損','p1','body','{}','good','{}',100,100,0,'[]',0,0,0)",
 				);
 			});
 			const run = createFrameworkIteration(root, "dataset_test", {
@@ -81,14 +81,14 @@ it.each(["tool", "text", "stubborn", "error"] as const)(
 						period: "Q2",
 						unit: "million",
 						role: "fact",
-						quote: "revenue 9 million in Q2",
+						quote: "Revenue 9 million in Q2；經營虧損",
 						evidenceIds: [sourceId({ docId: "new", location: { kind: "pdf", pageStart: 1, pageEnd: 1 } })],
 						gaps: ["Volume unknown"],
 						context: {
 							periodKind: "single",
 							asOf: null,
 							scope: "Company",
-							basisQuote: "Revenue 9 million in Q2",
+							basisQuote: "Revenue 9 million in Q2；經營虧損",
 							eventKind: "none",
 							reviewReasons: [],
 						},
@@ -146,6 +146,8 @@ it.each(["tool", "text", "stubborn", "error"] as const)(
 				streamSimple(_model, context) {
 					expect(context.tools?.map((t) => t.name).sort()).toEqual(["pe_iteration_read", "pe_iteration_submit"]);
 					expect(context.systemPrompt).not.toContain("UNTRUSTED_PROJECT_INSTRUCTIONS");
+					expect(context.systemPrompt).toContain("统一使用简体中文");
+					expect(context.systemPrompt).toContain("quote、context.basisQuote 必须保留原文，不做繁简转换");
 					const rawCall = calls++;
 					const call = !revision && completion === "text" && rawCall >= 2 ? rawCall - 1 : rawCall;
 					const textOnly =
@@ -269,6 +271,8 @@ it.each(["tool", "text", "stubborn", "error"] as const)(
 			expect(errors[0]).toContain("rev");
 			const extracted = result.artifacts.find((a) => a.stage === "extract")!.value as IterationObservations;
 			expect(extracted.observations.map((observation) => observation.id)).toEqual(["rev", "second"]);
+			expect(extracted.observations[0].quote).toBe(output.observations[0].quote);
+			expect(extracted.observations[0].context.basisQuote).toBe(output.observations[0].context.basisQuote);
 			expect(extracted.coverage[0].readLocations).toEqual(['{"docId":"new","page":1}']);
 			revision = true;
 			calls = 0;
