@@ -3,6 +3,7 @@ import { execFile } from "child_process";
 import { mkdir, readFile, stat, writeFile } from "fs/promises";
 import { join, resolve } from "path";
 import { promisify } from "util";
+import { excelPython } from "@earendil-works/pe-boot";
 import {
   SESSION_ATTACHMENT_CONTEXT_END,
   SESSION_ATTACHMENT_CONTEXT_START,
@@ -27,7 +28,7 @@ export async function prepareSessionDocuments(
   const targetDir = join(projectRoot, "meta", "session-attachments", safeSessionId(sessionId));
   await mkdir(targetDir, { recursive: true });
   const serviceRoot = resolve(process.cwd(), "services", "session-attachments");
-  const python = join(serviceRoot, ".venv", "bin", "python");
+  const python = excelPython();
   const extractor = join(serviceRoot, "extract_session_attachment.py");
   const references: string[] = [];
 
