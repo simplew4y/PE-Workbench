@@ -26,6 +26,10 @@ description: 检索 PE 项目上传的 PDF、Excel、Word、PowerPoint 和文本
 
 用原生文件发现工具选择目标文档，调用 pe_document_open，然后 read/grep 返回的 readable_path。保留 source: 引用绑定的原文行或 Office 内容块。
 
+## 录音转写
+
+项目资料中的 wav/mp3/flac/m4a/ogg/aac/webm 由 ASR 转成不可变转录稿。用原生文件发现或项目资料列表选中原音频文件名，调用 pe_document_open，再 read/grep 返回的 readable_path。引用绑定该音频版本的转录行，不要把录音内容当成实时行情或未转写的现场事实。转写为空或任务未完成时说明限制，不要编造对白。
+
 ## 原件证据定位
 
 Excel 的 source: 链接绑定文档版本、工作表和单元格范围，不依赖解析缓存。旧 cell: 链接仍可解析，旧 fact: 引用保留原版本。pe_source_detail 与原文预览定位一致；历史引用不得被悄悄替换成最新版。不要手写 evidence_id 或把内部引用改为网站、文件地址或 source_collection。

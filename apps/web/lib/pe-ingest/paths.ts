@@ -12,6 +12,7 @@ import {
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { portablePeFilename } from "@earendil-works/pe-boot";
+import { PE_AUDIO_EXTENSIONS } from "./contracts.ts";
 
 interface PeProjectReference {
   datasetId: string;
@@ -66,7 +67,8 @@ export function normalizePeDocumentFilename(value: string): string {
   ) {
     throw new Error(`Invalid portable document filename: ${value || "(empty)"}`);
   }
-  if (![".pdf", ".xlsx", ".xlsm"].includes(path.extname(filename).toLocaleLowerCase())) {
+  const extension = path.extname(filename).toLocaleLowerCase();
+  if (![".pdf", ".xlsx", ".xlsm"].includes(extension) && !PE_AUDIO_EXTENSIONS.has(extension)) {
     throw new Error(`Unsupported research file: ${filename}`);
   }
   return filename;

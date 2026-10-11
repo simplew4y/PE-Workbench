@@ -12,6 +12,7 @@ import {
 } from "@/lib/file-paths";
 import type { GitFileStatus, GitFileStatusKind, GitStatusResponse } from "@/lib/git-types";
 import { useI18n } from "@/hooks/useI18n";
+import { isPeAudioSuffix, PE_RESEARCH_UPLOAD_ACCEPT } from "@/lib/pe-asr/constants";
 type Translate = ReturnType<typeof useI18n>["t"];
 
 interface FileEntry {
@@ -83,7 +84,7 @@ interface ResearchIngestJob {
   message: string;
 }
 
-const RESEARCH_UPLOAD_SUFFIXES = new Set(["pdf", "xlsx", "xlsm"]);
+const RESEARCH_UPLOAD_SUFFIXES = new Set(["pdf", "xlsx", "xlsm", "wav", "mp3", "flac", "m4a", "ogg", "aac", "webm"]);
 
 function uploadResearchFiles(
   datasetId: string,
@@ -729,6 +730,12 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
       setResearchStage("uploading");
       setResearchMessage(t("files.researchUploading"));
       try {
+        if (files.some((file) => isPeAudioSuffix(file.name.split(".").pop() ?? ""))) {
+          const asrResponse = await fetch("/api/pe/asr-config", { cache: "no-store" });
+          const asrBody = await asrResponse.json().catch(() => ({})) as { configured?: boolean; error?: string };
+          if (!asrResponse.ok) throw new Error(asrBody.error ?? `ASR config failed (HTTP ${asrResponse.status})`);
+          if (!asrBody.configured) throw new Error(t("files.researchAsrRequired"));
+        }
         let job = await uploadResearchFiles(datasetId, files, setUploadProgress);
         setUploadProgress(100);
         while (["queued", "running"].includes(job.status)) {
@@ -837,7 +844,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
         type="file"
         multiple
         hidden
-        accept="application/pdf,.pdf,.xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroenabled.12"
+        accept={PE_RESEARCH_UPLOAD_ACCEPT}
         onChange={handleResearchUploadInput}
       />
       {researchStage !== "idle" && (

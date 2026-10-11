@@ -2,7 +2,9 @@ import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
 import { parseFormDataWithinLimit, RequestBodyTooLargeError } from "@/lib/bounded-form-data";
 import { validateUploadFileNames } from "@/lib/file-upload";
+import { readPeAsrConfig, requireConfiguredPeAsr } from "@/lib/pe-asr/config";
 import {
+  isPeAudioFilename,
   PE_SUPPORTED_EXTENSIONS,
   queuePeIngest,
   type PeResearchUpload,
@@ -26,7 +28,7 @@ function requestErrorStatus(message: string): number {
   if (/already running|已有.+任务正在运行/iu.test(message)) return 409;
   if (/already exists|selected twice|duplicate document filename/iu.test(message)) return 409;
   if (/Legacy .*Pipeline|Legacy documents table|schema version/iu.test(message)) return 409;
-  if (/required|not found|unsupported|invalid pdf|invalid portable document filename|MIME|file name/iu.test(message)) return 400;
+  if (/required|not found|unsupported|invalid pdf|invalid portable document filename|MIME|file name|ASR|其他设置/iu.test(message)) return 400;
   return 500;
 }
 
@@ -55,8 +57,11 @@ export async function POST(request: NextRequest) {
       !PE_SUPPORTED_EXTENSIONS.has(path.extname(file.name).toLocaleLowerCase())
     ));
     if (unsupported) {
-      return NextResponse.json({ error: `Only PDF, XLSX, and XLSM files are supported: ${unsupported.name}` }, { status: 400 });
+      return NextResponse.json({ error: `Only PDF, XLSX, XLSM, and audio files are supported: ${unsupported.name}` }, { status: 400 });
     }
+    const asr = files.some((file) => isPeAudioFilename(file.name))
+      ? requireConfiguredPeAsr(readPeAsrConfig())
+      : undefined;
 
     const uploads: PeResearchUpload[] = [];
     for (const file of files) {
@@ -71,6 +76,7 @@ export async function POST(request: NextRequest) {
       project,
       registryPath: peProjectStorePaths().registryPath,
       uploads,
+      asr,
     });
     return NextResponse.json({ job, project }, { status: job.status === "completed" ? 200 : 202 });
   } catch (error) {

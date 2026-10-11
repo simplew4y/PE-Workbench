@@ -133,6 +133,37 @@ test("rejects unsupported and malformed Excel uploads", async () => {
   }), /valid OOXML|Invalid OOXML/u);
 });
 
+test("accepts wav uploads and rejects audio ingest without ASR", async (t) => {
+  const { PE_ASR_NOT_CONFIGURED_MESSAGE } = await jiti.import("./pe-asr/config.ts");
+  const ingest = await jiti.import("./pe-ingest/index.ts");
+  const jobs = await jiti.import("./pe-ingest/jobs.ts");
+  const wav = Buffer.from("RIFF....WAVEfmt ");
+  wav.write("WAVE", 8);
+  assert.equal(ingest.validatePeResearchUpload({
+    filename: "interview.wav",
+    mimeType: "audio/wav",
+    content: wav,
+  }), null);
+  const { project, registryPath, paths } = await fixture(t, "asr-gate");
+  assert.throws(
+    () => ingest.queuePeIngest({
+      project,
+      registryPath,
+      uploads: [{ filename: "interview.wav", mimeType: "audio/wav", content: wav }],
+    }),
+    new RegExp(PE_ASR_NOT_CONFIGURED_MESSAGE),
+  );
+  const audioJob = ingest.queuePeIngest({
+    project,
+    registryPath,
+    uploads: [{ filename: "interview.wav", mimeType: "audio/wav", content: wav }],
+    asr: { serverUrl: "https://asr.example.test", maxChunkSeconds: 600, language: "" },
+  });
+  assert.equal(audioJob.files[0].fileType, "wav");
+  assert.equal(audioJob.asr.serverUrl, "https://asr.example.test");
+  jobs.failPeIngestJob(paths, jobs.readPeIngestJob(paths, audioJob.jobId), "stop worker for test");
+});
+
 test("rejects project-relative traversal and symlinks that escape the workspace", async (t) => {
   const { ensureDirectoryWithin, resolveProjectFile } = await jiti.import("./pe-ingest/paths.ts");
   const { paths } = await fixture(t, "dataset_paths");

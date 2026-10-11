@@ -136,3 +136,87 @@ test("processes a mixed PDF and Excel job independently", async (t) => {
   }
   assert.equal(fs.existsSync(path.join(project.root, "meta", ".ingest-staging", job.jobId)), false);
 });
+
+test("transcribes audio with a mocked ASR stream and skips claim analysis", async (t) => {
+  const [{ createPeProject, peProjectStorePaths }, ingest, jobs, pathsModule, worker] = await Promise.all([
+    jiti.import("../pe-project-store.ts"),
+    jiti.import("./index.ts"),
+    jiti.import("./jobs.ts"),
+    jiti.import("./paths.ts"),
+    jiti.import("./worker.mts"),
+  ]);
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = async () => new Response([
+    'data: {"type": "result", "segment": 0, "total": 1, "start_time": "00:00:00", "end_time": "00:00:01", "text": "上海收入增长", "language": "Chinese"}',
+    'data: {"type": "done", "total_segments": 1, "total_text": "上海收入增长"}',
+    "",
+  ].join("\n"), { headers: { "content-type": "text/event-stream" } });
+
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "pe-ingest-asr-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const options = { agentDir: path.join(root, "agent") };
+  const project = createPeProject({ name: "ASR worker" }, options);
+  const projectPaths = ingest.resolvePeProjectPaths(project, peProjectStorePaths(options).registryPath);
+  const wav = Buffer.alloc(64, 0);
+  wav.write("RIFF", 0);
+  wav.write("WAVE", 8);
+  const stored = pathsModule.writePeRawFile(projectPaths, "call.wav", wav);
+  const job = jobs.newPeIngestJob(project.datasetId);
+  job.parseOnly = true;
+  job.asr = { serverUrl: "https://asr.example.test", maxChunkSeconds: 600, language: "" };
+  job.files.push({
+    originalFilename: "call.wav",
+    rawPath: stored.rawPath,
+    sha256: stored.sha256,
+    fileType: "wav",
+  });
+  const result = await worker.runPeIngestJob(jobs.createPeIngestJob(projectPaths, job));
+  assert.equal(result.status, "completed");
+  assert.equal(result.result.createdCount, 1);
+  assert.equal(result.result.analysis, undefined);
+  const markdown = fs.readFileSync(path.join(project.root, "meta/text", `${result.result.files[0].docId}.md`), "utf8");
+  assert.match(markdown, /上海收入增长/u);
+  const collection = new DatabaseSync(projectPaths.collectionPath, { readOnly: true });
+  try {
+    const row = collection.prepare("SELECT file_type, parser_name, status FROM documents WHERE original_filename = 'call.wav'").get();
+    assert.equal(row?.file_type, "wav");
+    assert.equal(row?.parser_name, "qwen3-asr");
+    assert.equal(row?.status, "completed");
+  } finally {
+    collection.close();
+  }
+});
+
+for (const [name, events] of [
+  ["connection closes before done", [{type:"result",segment:0,total:2,text:"第一段"}]],
+  ["completion omits a segment", [{type:"result",segment:0,total:2,text:"第一段"},{type:"done",total_segments:2,total_text:"第一段"}]],
+]) {
+  test(`does not publish audio when ${name}`, async (t) => {
+    const [{createPeProject,peProjectStorePaths},ingest,jobs,pathsModule,worker] = await Promise.all([
+      jiti.import("../pe-project-store.ts"),jiti.import("./index.ts"),jiti.import("./jobs.ts"),
+      jiti.import("./paths.ts"),jiti.import("./worker.mts"),
+    ]);
+    const originalFetch=globalThis.fetch;
+    t.after(()=>{globalThis.fetch=originalFetch;});
+    globalThis.fetch=async()=>new Response(events.map(event=>`data: ${JSON.stringify(event)}`).join("\n")+"\n");
+    const root=fs.mkdtempSync(path.join(os.tmpdir(),"pe-audio-incomplete-"));
+    t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+    const options={agentDir:path.join(root,"agent")};
+    const project=createPeProject({name:"Incomplete audio"},options);
+    const paths=ingest.resolvePeProjectPaths(project,peProjectStorePaths(options).registryPath);
+    const stored=pathsModule.writePeRawFile(paths,"call.wav",Buffer.from("RIFF....WAVE"));
+    const job=jobs.newPeIngestJob(project.datasetId);
+    job.asr={serverUrl:"https://fixture.invalid",maxChunkSeconds:600,language:""};
+    job.files.push({originalFilename:"call.wav",rawPath:stored.rawPath,sha256:stored.sha256,fileType:"wav"});
+    const result=await worker.runPeIngestJob(jobs.createPeIngestJob(paths,job));
+    assert.equal(result.status,"failed");
+    assert.match(result.result.files[0].error,/转写不完整/u);
+    const db=new DatabaseSync(paths.collectionPath,{readOnly:true});
+    try {assert.equal(db.prepare("SELECT COUNT(*) AS count FROM documents").get().count,0);}
+    finally {db.close();}
+    assert.deepEqual(fs.readdirSync(path.join(project.root,"meta/text")),[]);
+  });
+}

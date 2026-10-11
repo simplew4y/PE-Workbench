@@ -12,7 +12,7 @@ For valuation outputs, preserve ambiguous candidates instead of choosing the fir
 Unless explicitly asked to save research, answer in the conversation without creating a Memo or Research Note.`;
 
 const PE_SKILL_ROUTING = `Call pe_load_capability for the workflows below. It loads required instructions and permitted lazy tools; include all still-needed workflows when changing selection. Read extra references only as needed:
-- Project document retrieval (PDF, Excel, Office or text): pe-document-retrieval.
+- Project document retrieval (PDF, Excel, Office, text or audio transcripts): pe-document-retrieval.
 - Read workbook evidence only: pe-financial-model-reader; explain how forecasts are built: pe-financial-model-understanding. Model mechanics alone do not require a valuation report.
 - Generate/revise an investment framework (生成投资框架, including drafts): investment-framework-builder. Propose all seven sections. The saved document displays directly; briefly request button confirmation without repeating it. Focused questions only: pe-investment-research.
 - Model/screenshot/formula explanation: pe-valuation-model-explainer; audit: valuation-model-review.

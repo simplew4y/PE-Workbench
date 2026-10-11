@@ -14,7 +14,9 @@ test("requires a registered project and never accepts a browser-supplied workspa
 
 test("accepts only supported document extensions and delegates content validation", () => {
   assert.match(source, /PE_SUPPORTED_EXTENSIONS/);
-  assert.match(source, /Only PDF, XLSX, and XLSM files are supported/);
+  assert.match(source, /Only PDF, XLSX, XLSM, and audio files are supported/);
+  assert.match(source, /isPeAudioFilename/);
+  assert.match(source, /requireConfiguredPeAsr/);
   assert.match(source, /queuePeIngest/);
   assert.match(source, /Each document must be 100MB or smaller/);
   assert.match(source, /Document uploads must total 300MB or less/);
