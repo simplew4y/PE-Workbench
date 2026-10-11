@@ -11,7 +11,8 @@ import {
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { preparePeDocument } from "@earendil-works/pe-boot";
-import type { PeIngestFileResult, PeIngestJob } from "./contracts.ts";
+import { renderPeAudioTranscriptMarkdown, transcribePeAudio } from "./asr.ts";
+import { isPeAudioFileType, type PeAudioFileType, type PeIngestFileResult, type PeIngestJob } from "./contracts.ts";
 import { runPeClaimAnalysis } from "./analysis.ts";
 import { failPeIngestJob, readPeIngestJobFile, updatePeIngestJob } from "./jobs.ts";
 import {
@@ -26,6 +27,7 @@ import {
 import { processPePdf } from "./pdf/parser.ts";
 import {
   commitParsedPeDocument,
+  commitTranscribedAudio,
   findPeDocumentByFilename,
   findPeDocumentByHash,
   registeredPePdfInput,
@@ -124,6 +126,52 @@ export async function runPeIngestJob(jobFile: string): Promise<PeIngestJob> {
           continue;
         }
 
+        if (isPeAudioFileType(input.fileType)) {
+          if (!job.asr?.serverUrl) throw new Error("ASR is not configured for this ingest job");
+          const existingByName = findPeDocumentByFilename(paths.collectionPath, paths.datasetId, input.originalFilename);
+          if (existingByName) throw new Error(`Document filename already exists: ${input.originalFilename}`);
+          const existingByHash = findPeDocumentByHash(paths.collectionPath, paths.datasetId, input.sha256);
+          if (existingByHash) throw new Error(`The same document content already exists as ${existingByHash.originalFilename}`);
+          const rawAbsolutePath = resolveProjectFile(paths, input.rawPath);
+          const rawBytes = readFileSync(rawAbsolutePath);
+          if (sha256(rawBytes) !== input.sha256) throw new Error("Raw audio content changed after upload");
+          job.message = `正在转写 ${input.originalFilename}`;
+          updatePeIngestJob(paths, job);
+          const transcript = await transcribePeAudio({
+            config: job.asr,
+            filename: input.originalFilename,
+            content: rawBytes,
+            signal: controller.signal,
+          });
+          controller.signal.throwIfAborted();
+          if (sha256(readFileSync(rawAbsolutePath)) !== input.sha256) {
+            throw new Error("Raw audio content changed while it was being transcribed");
+          }
+          const docId = stablePeId("doc", paths.datasetId, input.sha256);
+          const warnings = [...transcript.warnings];
+          if (!transcript.totalText.trim()) warnings.push("ASR returned an empty transcript");
+          commitTranscribedAudio(paths, {
+            docId,
+            originalFilename: input.originalFilename,
+            rawPath: input.rawPath,
+            sha256: input.sha256,
+            fileType: input.fileType as PeAudioFileType,
+            markdown: renderPeAudioTranscriptMarkdown(input.originalFilename, transcript),
+            pageCount: Math.max(1, transcript.segments.length),
+            warnings,
+          });
+          appendResult(job, {
+            originalFilename: input.originalFilename,
+            status: "created",
+            docId,
+            warningCount: warnings.length,
+            warnings,
+          });
+          job.warnings.push(...warnings.map((warning) => `${input.originalFilename}: ${warning}`));
+          updatePeIngestJob(paths, job);
+          continue;
+        }
+
         if (input.registrationKind === "catalog") {
           if (!input.docId) throw new Error("Registered PDF ingest input has no document ID");
           const registered = registeredPePdfInput(paths, input.docId);
@@ -182,7 +230,12 @@ export async function runPeIngestJob(jobFile: string): Promise<PeIngestJob> {
       updatePeIngestJob(paths, job);
     }
 
-    if (job.result.createdCount > 0 && !job.parseOnly) {
+    const analysisDocIds = job.result.files.filter((file) => {
+      if (file.status !== "created" || !file.docId) return false;
+      const input = job.files.find((entry) => entry.originalFilename === file.originalFilename);
+      return input?.fileType === "pdf" || input?.fileType === "xlsx" || input?.fileType === "xlsm";
+    }).flatMap((file) => file.docId ? [file.docId] : []);
+    if (analysisDocIds.length > 0 && !job.parseOnly) {
       job.stage = "analysis";
       job.message = "文档解析完成，正在分析机构观点与共识分歧。";
       updatePeIngestJob(paths, job);
@@ -190,7 +243,7 @@ export async function runPeIngestJob(jobFile: string): Promise<PeIngestJob> {
         job.result.analysis = await runPeClaimAnalysis({
           collectionPath: paths.collectionPath,
           datasetId: paths.datasetId,
-          docIds: job.result.files.filter((file) => file.status === "created").flatMap((file) => file.docId ? [file.docId] : []),
+          docIds: analysisDocIds,
           companyName: path.basename(paths.projectPath),
           ingestedAt: job.startedAt,
           signal: controller.signal,

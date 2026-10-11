@@ -1,8 +1,9 @@
 import path from "node:path";
 import { registerPeDocuments, validatePeExcelUpload } from "@earendil-works/pe-boot";
 import { lockSync } from "proper-lockfile";
+import { PE_ASR_NOT_CONFIGURED_MESSAGE, type PeAsrConfig } from "../pe-asr/config.ts";
 import type { PeProjectSummary } from "../pe-project-types.ts";
-import type { PeIngestJob } from "./contracts.ts";
+import { PE_AUDIO_EXTENSIONS, type PeIngestFileType, type PeIngestJob } from "./contracts.ts";
 import {
   createPeIngestJob,
   failPeIngestJob,
@@ -22,7 +23,8 @@ import {
 import { findPeDocumentByFilename, findPeDocumentByHash, registeredPePdfInput } from "./repository.ts";
 import { assertPeCollectionDataset, openPeCollectionDatabase } from "./schema.ts";
 
-export const PE_SUPPORTED_EXTENSIONS = new Set([".pdf", ".xlsx", ".xlsm"]);
+export { PE_AUDIO_EXTENSIONS } from "./contracts.ts";
+export const PE_SUPPORTED_EXTENSIONS = new Set([".pdf", ".xlsx", ".xlsm", ...PE_AUDIO_EXTENSIONS]);
 export const PE_PDF_MIME_TYPE = "application/pdf";
 const PE_EXCEL_MIME_TYPES = new Set([
   "",
@@ -30,6 +32,20 @@ const PE_EXCEL_MIME_TYPES = new Set([
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   "application/vnd.ms-excel.sheet.macroenabled.12",
 ]);
+const PE_AUDIO_MIME_TYPES = new Set(["", "application/octet-stream", "video/webm"]);
+
+export function peIngestFileType(filename: string): PeIngestFileType {
+  return path.extname(filename).toLocaleLowerCase().slice(1) as PeIngestFileType;
+}
+
+export function isPeAudioFilename(filename: string): boolean {
+  return PE_AUDIO_EXTENSIONS.has(path.extname(filename).toLocaleLowerCase());
+}
+
+function isPipelineFilename(filename: string): boolean {
+  const extension = path.extname(filename).toLocaleLowerCase();
+  return extension === ".pdf" || PE_AUDIO_EXTENSIONS.has(extension);
+}
 
 export interface PeResearchUpload {
   filename: string;
@@ -44,6 +60,7 @@ export interface QueuePeIngestOptions {
   project: PeProjectSummary;
   registryPath: string;
   uploads: PeResearchUpload[];
+  asr?: PeAsrConfig;
 }
 
 export type QueuePePdfIngestOptions = QueuePeIngestOptions;
@@ -65,6 +82,23 @@ export function validatePePdfUpload(upload: PeResearchUpload): string | null {
   return null;
 }
 
+export function validatePeAudioUpload(upload: PeResearchUpload): string | null {
+  let filename: string;
+  try {
+    filename = normalizePeDocumentFilename(upload.filename);
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+  const extension = path.extname(filename).toLocaleLowerCase();
+  if (!PE_AUDIO_EXTENSIONS.has(extension)) return `Unsupported audio file: ${filename}`;
+  const mime = upload.mimeType.toLocaleLowerCase();
+  if (mime && !PE_AUDIO_MIME_TYPES.has(mime) && !mime.startsWith("audio/")) {
+    return `Invalid audio MIME type for ${filename}`;
+  }
+  if (upload.content.length === 0) return `Audio file is empty: ${filename}`;
+  return null;
+}
+
 export function validatePeResearchUpload(upload: PeResearchUpload): string | null {
   let filename: string;
   try {
@@ -75,6 +109,7 @@ export function validatePeResearchUpload(upload: PeResearchUpload): string | nul
   const extension = path.extname(filename).toLocaleLowerCase();
   if (!PE_SUPPORTED_EXTENSIONS.has(extension)) return `Unsupported document file: ${filename}`;
   if (extension === ".pdf") return validatePePdfUpload(upload);
+  if (PE_AUDIO_EXTENSIONS.has(extension)) return validatePeAudioUpload(upload);
   if (!PE_EXCEL_MIME_TYPES.has(upload.mimeType.toLocaleLowerCase())) {
     return `Invalid Excel MIME type for ${filename}`;
   }
@@ -145,6 +180,14 @@ export function queuePeIngest(options: QueuePeIngestOptions): PeIngestJob {
       ...upload,
       filename: normalizePeDocumentFilename(upload.filename),
     }));
+    if (uploads.some((upload) => isPeAudioFilename(upload.filename))) {
+      if (!options.asr || !options.asr.serverUrl) throw new Error(PE_ASR_NOT_CONFIGURED_MESSAGE);
+      job.asr = {
+        serverUrl: options.asr.serverUrl,
+        maxChunkSeconds: options.asr.maxChunkSeconds,
+        language: options.asr.language,
+      };
+    }
     const names = new Set<string>();
     const digests = new Map<string, string>();
     for (const upload of uploads) {
@@ -154,8 +197,8 @@ export function queuePeIngest(options: QueuePeIngestOptions): PeIngestJob {
       if (names.has(filenameKey)) throw new Error(`Duplicate document filename in upload: ${upload.filename}`);
       names.add(filenameKey);
       // Excel registration owns immutable versions and same-content reuse.
-      // PDF pipeline uploads retain their existing duplicate checks.
-      if (path.extname(upload.filename).toLocaleLowerCase() !== ".pdf") continue;
+      // PDF and audio pipeline uploads retain duplicate filename/hash checks.
+      if (!isPipelineFilename(upload.filename)) continue;
       const digest = sha256(upload.content);
       const duplicateUpload = digests.get(digest);
       if (duplicateUpload) {
@@ -172,7 +215,10 @@ export function queuePeIngest(options: QueuePeIngestOptions): PeIngestJob {
       }
     }
 
-    const excelUploads = uploads.filter((upload) => path.extname(upload.filename).toLocaleLowerCase() !== ".pdf");
+    const excelUploads = uploads.filter((upload) => {
+      const extension = path.extname(upload.filename).toLocaleLowerCase();
+      return extension === ".xlsx" || extension === ".xlsm";
+    });
     if (excelUploads.length > 0) {
       const registered = registerPeDocuments(
         paths.projectPath,
@@ -189,13 +235,13 @@ export function queuePeIngest(options: QueuePeIngestOptions): PeIngestJob {
         });
       }
     }
-    for (const upload of uploads.filter((entry) => path.extname(entry.filename).toLocaleLowerCase() === ".pdf")) {
+    for (const upload of uploads.filter((entry) => isPipelineFilename(entry.filename))) {
       const raw = writePeRawFile(paths, upload.filename, upload.content);
       job.files.push({
         originalFilename: upload.filename,
         rawPath: raw.rawPath,
         sha256: raw.sha256,
-        fileType: "pdf",
+        fileType: peIngestFileType(upload.filename),
       });
     }
     return launchJob(paths, job);

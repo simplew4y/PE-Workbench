@@ -8,7 +8,7 @@ export const peDocumentOpenTool = defineTool({
 	name: "pe_document_open",
 	label: "PE Document Open",
 	description:
-		"Open one uploaded Excel, text, CSV, DOCX, or PPTX file by filename or immutable doc_id. Returns Excel navigation or a disposable text view for other formats with versioned source citations. Rebuilds missing caches. For Excel use pe_workbook_search and pe_excel_range; readable_path contains navigation only. For other formats use read/grep. Use pe_pdf_search and pe_pdf_read for PDFs.",
+		"Open one uploaded Excel, text, CSV, DOCX, PPTX, or audio transcript by filename or immutable doc_id. Returns Excel navigation or a disposable text view for other formats with versioned source citations. Rebuilds missing caches. For Excel use pe_workbook_search and pe_excel_range; readable_path contains navigation only. For other formats and audio transcripts use read/grep. Use pe_pdf_search and pe_pdf_read for PDFs.",
 	promptSnippet:
 		"Prepare one selected workbook or text/Office document for native read/grep, with citations pinned to its original version and location",
 	parameters: Type.Object({

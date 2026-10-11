@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
+import { isPeAudioSuffix, PE_RESEARCH_UPLOAD_ACCEPT } from "@/lib/pe-asr/constants";
 import type { PeProjectSummary } from "@/lib/pe-project-types";
 
 type UploadStage = "idle" | "uploading" | "queued" | "running" | "completed" | "warning" | "failed";
@@ -80,7 +81,7 @@ export function PeResearchUpload({ project, onComplete, onBusyChange, onDocument
     const selected = Array.from(event.target.files ?? []);
     event.target.value = "";
     if (selected.length === 0 || busy || !project) return;
-    const unsupported = selected.find((file) => !/\.(?:pdf|xlsx|xlsm)$/iu.test(file.name));
+    const unsupported = selected.find((file) => !/\.(?:pdf|xlsx|xlsm|wav|mp3|flac|m4a|ogg|aac|webm)$/iu.test(file.name));
     if (unsupported) {
       setStage("failed");
       setMessage(t("files.researchUnsupported"));
@@ -93,6 +94,12 @@ export function PeResearchUpload({ project, onComplete, onBusyChange, onDocument
       setStage("uploading");
       setMessage(t("researchUpload.uploading"));
       try {
+        if (selected.some((file) => isPeAudioSuffix(file.name.split(".").pop() ?? ""))) {
+          const response = await fetch("/api/pe/asr-config", { cache: "no-store" });
+          const body = await response.json().catch(() => ({})) as { configured?: boolean; error?: string };
+          if (!response.ok) throw new Error(body.error ?? `ASR config failed (HTTP ${response.status})`);
+          if (!body.configured) throw new Error(t("files.researchAsrRequired"));
+        }
         let job = await upload(datasetId, selected, setProgress);
         if (!mountedRef.current) return;
         onDocumentsChanged?.();
@@ -135,7 +142,7 @@ export function PeResearchUpload({ project, onComplete, onBusyChange, onDocument
         type="file"
         multiple
         hidden
-        accept="application/pdf,.pdf,.xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroenabled.12"
+        accept={PE_RESEARCH_UPLOAD_ACCEPT}
         onChange={handleFiles}
       />
       <button

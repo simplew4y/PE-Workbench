@@ -1,4 +1,6 @@
 /** File locations are independent of parser caches and search results. */
+export const AUDIO_EXTENSIONS = new Set([".wav", ".mp3", ".flac", ".m4a", ".ogg", ".aac", ".webm"]);
+
 export const DOCUMENT_EXTENSIONS = new Set([
 	".pdf",
 	".xlsx",
@@ -9,7 +11,16 @@ export const DOCUMENT_EXTENSIONS = new Set([
 	".md",
 	".markdown",
 	".txt",
+	...AUDIO_EXTENSIONS,
 ]);
+
+export function isPeAudioExtension(extension: string): boolean {
+	return AUDIO_EXTENSIONS.has(extension.toLocaleLowerCase());
+}
+
+export function isPeAudioFileType(fileType: string): boolean {
+	return AUDIO_EXTENSIONS.has(`.${fileType.toLocaleLowerCase()}`);
+}
 
 export type PeSourceLocation =
 	| { kind: "pdf"; pageStart: number; pageEnd: number }

@@ -18,7 +18,7 @@ import {
 } from "./collection-schema.ts";
 import { portablePeFilename } from "./document-filenames.ts";
 import { type PreparedWorkbook, prepareWorkbook, validatePeExcelUpload, verifyPeOriginal } from "./excel-processing.ts";
-import { DOCUMENT_EXTENSIONS } from "./source.ts";
+import { DOCUMENT_EXTENSIONS, isPeAudioFileType } from "./source.ts";
 import {
 	documentFilePath,
 	openPeDataset,
@@ -260,6 +260,15 @@ export async function preparePeDocument(
 		throw new PeSourceError(missing ? 404 : 409, message);
 	}
 	let prepared: PreparedWorkbook;
+	if (isPeAudioFileType(String(document.file_type))) {
+		return {
+			document,
+			datasetId: connection.datasetId,
+			workspaceRoot: root,
+			filePath,
+			...prepareAudioTranscript(root, document),
+		};
+	}
 	if (document.parser_name === "wind_snapshot") {
 		const connection = openPeDataset(root, String(document.dataset_id));
 		try {
@@ -323,6 +332,52 @@ export async function preparePeDocument(
 		refreshed.database.close();
 	}
 	return { document, datasetId: connection.datasetId, workspaceRoot: root, filePath, ...prepared };
+}
+
+function prepareAudioTranscript(root: string, document: SqlRow): PreparedWorkbook {
+	if (!["completed", "completed_with_warnings"].includes(String(document.status))) {
+		throw new PeSourceError(409, "Audio transcript is not prepared; wait for ingestion to finish");
+	}
+	const transcriptRelative =
+		textValue(document, "readable_text_path") ?? textValue(document, "document_markdown_path");
+	if (!transcriptRelative) throw new PeSourceError(409, "Audio transcript is missing");
+	const markdownPath = realpathSync(resolve(root, transcriptRelative));
+	const textRoot = realpathSync(join(root, "meta", "text"));
+	const rel = relative(textRoot, markdownPath);
+	if (!rel || rel.startsWith("..") || isAbsolute(rel) || !existsSync(markdownPath)) {
+		throw new PeSourceError(409, "Audio transcript must resolve inside meta/text");
+	}
+	const markdown = readFileSync(markdownPath, "utf8");
+	const warnings = JSON.parse(String(document.warnings_json || "[]")) as string[];
+	const revision = createHash("sha256").update(markdown).digest("hex");
+	const directory = join(root, "meta", "read-cache", String(document.doc_id), revision);
+	mkdirSync(directory, { recursive: true });
+	if (realpathSync(directory) !== directory) throw new PeSourceError(400, "Document cache must not be a symlink");
+	const cachePath = join(directory, "manifest.json");
+	const readablePath = join(directory, "readable.txt");
+	const lines = [
+		`# ${document.original_filename} (version ${document.version_no})`,
+		...warnings.map((warning) => `Warning: ${warning}`),
+	];
+	for (const [index, line] of markdown.split("\n").entries()) {
+		// Metadata and empty lines are navigation, not transcript evidence.
+		if (!line.trim() || /^#{1,2} /u.test(line) || /^- (parser|segments|language|warning):/u.test(line)) {
+			lines.push(line);
+			continue;
+		}
+		const row = { ...document, line_start: index + 1, line_end: index + 1 };
+		lines.push(`${line} ${sourceMarkdownCitation(row, sourceEvidenceId(row))}`);
+	}
+	for (const [path, content] of [
+		[cachePath, JSON.stringify({ doc_id: document.doc_id, revision, warnings, text: markdown })],
+		[readablePath, `${lines.join("\n")}\n`],
+	]) {
+		if (existsSync(path) && realpathSync(path) !== path) {
+			throw new PeSourceError(400, "Document cache must not be a symlink");
+		}
+		writeFileSync(path, content, { mode: 0o600 });
+	}
+	return { cachePath, readablePath, warnings };
 }
 
 /** PDF parsing remains owned by the upload pipeline; this view consumes its published pages. */

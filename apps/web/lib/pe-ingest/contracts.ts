@@ -26,11 +26,26 @@ export type PePdfPageRole =
   | "disclosure_boilerplate";
 export type PePdfBlockType = "body" | "heading" | "speaker" | "table_row";
 
+export const PE_AUDIO_FILE_TYPES = ["wav", "mp3", "flac", "m4a", "ogg", "aac", "webm"] as const;
+export type PeAudioFileType = (typeof PE_AUDIO_FILE_TYPES)[number];
+export type PeIngestFileType = "pdf" | "xlsx" | "xlsm" | PeAudioFileType;
+export const PE_AUDIO_EXTENSIONS = new Set(PE_AUDIO_FILE_TYPES.map((type) => `.${type}`));
+
+export function isPeAudioFileType(fileType: string): fileType is PeAudioFileType {
+  return (PE_AUDIO_FILE_TYPES as readonly string[]).includes(fileType);
+}
+
+export interface PeIngestAsrConfig {
+  serverUrl: string;
+  maxChunkSeconds: number;
+  language: string;
+}
+
 export interface PeIngestInputFile {
   originalFilename: string;
   rawPath: string;
   sha256: string;
-  fileType: "pdf" | "xlsx" | "xlsm";
+  fileType: PeIngestFileType;
   docId?: string;
   registrationKind?: "pipeline" | "catalog";
 }
@@ -67,6 +82,7 @@ export interface PeIngestJob {
   analysisProgress?: PeAnalysisProgress;
   result: PeIngestJobResult;
   warnings: string[];
+  asr?: PeIngestAsrConfig;
 }
 
 export interface PePdfTextToken {

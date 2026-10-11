@@ -3,7 +3,7 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Dialog } from "@base-ui/react/dialog";
-import { Bot, ChevronUp, KeyRound, LogOut, Plug, Settings, Sparkles, UserRound, X } from "lucide-react";
+import { Bot, ChevronUp, KeyRound, LogOut, Plug, Settings, SlidersHorizontal, Sparkles, UserRound, X } from "lucide-react";
 import {
   changePeAccountPassword,
   logoutPeAccount,
@@ -30,6 +30,152 @@ function displayName(user: PeAccountUser): string {
 
 function initials(user: PeAccountUser): string {
   return Array.from(displayName(user).trim()).slice(0, 2).join("").toUpperCase();
+}
+
+function OtherSettingsDialog({ onClose }: { onClose: () => void }) {
+  const [serverUrl, setServerUrl] = useState("");
+  const [maxChunkSeconds, setMaxChunkSeconds] = useState("600");
+  const [language, setLanguage] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch("/api/pe/asr-config", { cache: "no-store" });
+        const body = await response.json().catch(() => ({})) as {
+          serverUrl?: string;
+          maxChunkSeconds?: number;
+          language?: string;
+          error?: string;
+        };
+        if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
+        if (cancelled) return;
+        setServerUrl(body.serverUrl ?? "");
+        setMaxChunkSeconds(String(body.maxChunkSeconds ?? 600));
+        setLanguage(body.language ?? "");
+      } catch (cause) {
+        if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function save(event: FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const response = await fetch("/api/pe/asr-config", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          serverUrl,
+          maxChunkSeconds: Number(maxChunkSeconds),
+          language,
+        }),
+      });
+      const body = await response.json().catch(() => ({})) as {
+        serverUrl?: string;
+        maxChunkSeconds?: number;
+        language?: string;
+        error?: string;
+      };
+      if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
+      setServerUrl(body.serverUrl ?? "");
+      setMaxChunkSeconds(String(body.maxChunkSeconds ?? 600));
+      setLanguage(body.language ?? "");
+      setNotice(body.serverUrl ? "ASR 设置已保存" : "已清除 ASR 服务地址");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog.Root open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <Dialog.Portal>
+      <Dialog.Backdrop className="fixed inset-0 z-[600] bg-black/45" />
+      <Dialog.Popup
+        finalFocus={() => document.querySelector<HTMLButtonElement>('[aria-label="打开个人中心"]')}
+        className="fixed left-1/2 top-1/2 z-[601] max-h-[calc(100dvh-4rem)] w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl border border-border bg-bg-panel p-5 text-text shadow-2xl outline-none sm:p-6"
+      >
+        <header className="mb-5 flex items-start justify-between gap-4">
+          <div>
+            <Dialog.Title className="text-lg font-semibold">其他设置</Dialog.Title>
+            <Dialog.Description className="mt-1 text-sm text-text-muted">
+              配置语音转写（ASR）。上传录音前必须保存有效的服务地址。
+            </Dialog.Description>
+          </div>
+          <button
+            type="button"
+            aria-label="关闭其他设置"
+            className="rounded-lg p-2 text-text-muted hover:bg-bg-hover hover:text-text"
+            onClick={onClose}
+          >
+            <X className="size-4" aria-hidden="true" />
+          </button>
+        </header>
+
+        <form className="space-y-4 rounded-xl border border-border p-4" onSubmit={(event) => void save(event)}>
+          <div className="flex items-center gap-2 font-medium">
+            <SlidersHorizontal className="size-4 text-text-muted" aria-hidden="true" />
+            语音转写 ASR
+          </div>
+          <label className="block text-sm">
+            <span className="mb-1.5 block text-text-muted">服务地址</span>
+            <input
+              value={serverUrl}
+              onChange={(event) => setServerUrl(event.target.value)}
+              disabled={loading || busy}
+              className="w-full rounded-lg border border-border bg-bg px-3 py-2.5 outline-none focus:border-accent"
+            />
+          </label>
+          <label className="block text-sm">
+            <span className="mb-1.5 block text-text-muted">最大片段时长（秒）</span>
+            <input
+              type="number"
+              min={10}
+              max={600}
+              value={maxChunkSeconds}
+              onChange={(event) => setMaxChunkSeconds(event.target.value)}
+              disabled={loading || busy}
+              className="w-full rounded-lg border border-border bg-bg px-3 py-2.5 outline-none focus:border-accent"
+            />
+          </label>
+          <label className="block text-sm">
+            <span className="mb-1.5 block text-text-muted">语言（留空则自动检测）</span>
+            <input
+              value={language}
+              onChange={(event) => setLanguage(event.target.value)}
+              disabled={loading || busy}
+              placeholder="如 Chinese / English / Japanese"
+              className="w-full rounded-lg border border-border bg-bg px-3 py-2.5 outline-none focus:border-accent"
+            />
+          </label>
+          {notice && <p className="text-sm text-emerald-600">{notice}</p>}
+          {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
+          <button
+            type="submit"
+            disabled={loading || busy}
+            className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-50"
+          >
+            {busy ? "保存中…" : "保存"}
+          </button>
+        </form>
+      </Dialog.Popup>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
 }
 
 function AccountSettingsDialog({
@@ -249,6 +395,7 @@ export function PeAccountMenu({
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [otherSettingsOpen, setOtherSettingsOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [menuError, setMenuError] = useState("");
   const [menuTarget, setMenuTarget] = useState<HTMLElement | null>(null);
@@ -347,6 +494,18 @@ export function PeAccountMenu({
                 <Plug className="size-4 text-text-muted" aria-hidden="true" />
                 插件设置
               </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-bg-hover"
+                onClick={() => {
+                  setMenuOpen(false);
+                  setOtherSettingsOpen(true);
+                }}
+              >
+                <SlidersHorizontal className="size-4 text-text-muted" aria-hidden="true" />
+                其他设置
+              </button>
               {menuError && <p className="px-2.5 py-1.5 text-xs text-red-600">{menuError}</p>}
               {user?.offline && onReconnect && <button type="button" role="menuitem" onClick={onReconnect} className="w-full rounded-lg px-2.5 py-2 text-left hover:bg-bg-hover">重新连接用户服务</button>}
               <div className="my-1 border-t border-border" />
@@ -394,6 +553,9 @@ export function PeAccountMenu({
           onPasswordChanged={onLoggedOut}
           onUserUpdate={onUserUpdate}
         />
+      )}
+      {otherSettingsOpen && (
+        <OtherSettingsDialog onClose={() => setOtherSettingsOpen(false)} />
       )}
     </>
   );

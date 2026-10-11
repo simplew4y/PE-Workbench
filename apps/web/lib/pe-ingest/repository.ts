@@ -1,7 +1,8 @@
-import { existsSync, lstatSync, realpathSync, renameSync, rmSync, statSync } from "node:fs";
+import { existsSync, lstatSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type {
+  PeAudioFileType,
   PeIngestJob,
   PeIngestInputFile,
   PeParsedPdfDocument,
@@ -9,6 +10,7 @@ import type {
 import {
   ensureDirectoryWithin,
   isPathInside,
+  peDocumentFilenameKey,
   pePdfDocumentName,
   pePdfFilenameKey,
   registeredPePdfArtifactPaths,
@@ -44,7 +46,8 @@ export function findPeDocumentByHash(
     const row = database.prepare(`
       SELECT doc_id, original_filename, raw_path
       FROM documents
-      WHERE dataset_id = ? AND file_type = 'pdf' AND registration_kind = 'pipeline' AND sha256 = ?
+      WHERE dataset_id = ? AND registration_kind = 'pipeline'
+        AND (file_type = 'pdf' OR file_type IN ('wav','mp3','flac','m4a','ogg','aac','webm')) AND sha256 = ?
       LIMIT 1
     `).get(datasetId, digest) as unknown as ExistingDocumentRow | undefined;
     return row ? {
@@ -68,9 +71,10 @@ export function findPeDocumentByFilename(
     const row = database.prepare(`
       SELECT doc_id, original_filename, raw_path
       FROM documents
-      WHERE dataset_id = ? AND file_type = 'pdf' AND registration_kind = 'pipeline' AND filename_key = ?
+      WHERE dataset_id = ? AND registration_kind = 'pipeline'
+        AND (file_type = 'pdf' OR file_type IN ('wav','mp3','flac','m4a','ogg','aac','webm')) AND filename_key = ?
       LIMIT 1
-    `).get(datasetId, pePdfFilenameKey(filename)) as unknown as ExistingDocumentRow | undefined;
+    `).get(datasetId, peDocumentFilenameKey(filename)) as unknown as ExistingDocumentRow | undefined;
     return row ? {
       docId: row.doc_id,
       originalFilename: row.original_filename,
@@ -368,6 +372,85 @@ export function commitParsedPeDocument(
       if (isPathInside(textRoot, resolved)) rmSync(resolved, { force: true });
     }
     throw error;
+  }
+}
+
+export interface PeTranscribedAudioDocument {
+  docId: string;
+  originalFilename: string;
+  rawPath: string;
+  sha256: string;
+  fileType: PeAudioFileType;
+  markdown: string;
+  pageCount: number;
+  warnings: string[];
+}
+
+export function commitTranscribedAudio(paths: PeProjectPaths, document: PeTranscribedAudioDocument): void {
+  assertPeCollectionDataset(paths.collectionPath, paths.datasetId);
+  const textRoot = realpathSync(paths.textPath);
+  const markdownRelativePath = `meta/text/${document.docId}.md`;
+  const markdownPath = path.join(paths.projectPath, markdownRelativePath);
+  if (!isPathInside(textRoot, markdownPath)) throw new Error("Transcript path escapes the PE workspace");
+  if (existsSync(markdownPath)) throw new Error("Transcript markdown already exists");
+  const now = new Date().toISOString();
+  const rawAbsolute = resolveProjectFile(paths, document.rawPath);
+  writeFileSync(markdownPath, document.markdown, { flag: "wx" });
+  const database = openPeCollectionDatabase(paths.collectionPath);
+  try {
+    database.exec("BEGIN IMMEDIATE");
+    try {
+      const existing = database.prepare(
+        `SELECT doc_id FROM documents WHERE dataset_id = ? AND registration_kind = 'pipeline'
+          AND (file_type = 'pdf' OR file_type IN ('wav','mp3','flac','m4a','ogg','aac','webm'))
+          AND (sha256 = ? OR filename_key = ?)`,
+      ).get(paths.datasetId, document.sha256, peDocumentFilenameKey(document.originalFilename)) as { doc_id: string } | undefined;
+      if (existing) throw new Error(`Document name or content already indexed as ${existing.doc_id}`);
+      database.prepare(`
+        INSERT INTO documents (
+          doc_id, dataset_id, original_filename, filename_key, raw_path, sha256,
+          status, page_count, parser_name, parser_version, title,
+          warnings_json, created_at, updated_at, file_type, source_relpath,
+          stored_path, file_size, readable_text_path, document_markdown_path, checksum
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        document.docId,
+        paths.datasetId,
+        document.originalFilename,
+        peDocumentFilenameKey(document.originalFilename),
+        document.rawPath,
+        document.sha256,
+        document.warnings.length > 0 ? "completed_with_warnings" : "completed",
+        document.pageCount,
+        "qwen3-asr",
+        "1",
+        document.originalFilename,
+        JSON.stringify(document.warnings),
+        now,
+        now,
+        document.fileType,
+        document.originalFilename,
+        document.rawPath,
+        statSync(rawAbsolute).size,
+        markdownRelativePath,
+        markdownRelativePath,
+        document.sha256,
+      );
+      database.exec("COMMIT");
+    } catch (error) {
+      try {
+        database.exec("ROLLBACK");
+      } catch {
+        // The transaction may not have started.
+      }
+      if (existsSync(markdownPath)) {
+        const resolved = realpathSync(markdownPath);
+        if (isPathInside(textRoot, resolved)) rmSync(resolved, { force: true });
+      }
+      throw error;
+    }
+  } finally {
+    database.close();
   }
 }
 
