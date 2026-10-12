@@ -174,12 +174,13 @@ export function registerPeCapabilities(pi: ExtensionAPI, options: PeCapabilityOp
 	pi.on("tool_call", (event) => {
 		if (lazyTools.includes(event.toolName) && options.canActivateTool?.(event.toolName) === false)
 			return { block: true, reason: "This tool is disabled by the session tool selection." };
-		if (lazyTools.includes(event.toolName) && !loaded?.tools.includes(event.toolName))
+		if (lazyTools.includes(event.toolName) && !loaded?.tools.includes(event.toolName)) {
+			const requiredCapability = event.toolName === "pe_render_ui" ? "pe-generative-ui" : "valuation-model-update";
 			return {
 				block: true,
-				reason:
-					'First call pe_load_capability with capabilities including "pe-generative-ui", then retry using its native schema.',
+				reason: `First call pe_load_capability with capabilities including "${requiredCapability}", then retry using its native schema.`,
 			};
+		}
 	});
 	pi.on("context", (event) => {
 		const messages = event.messages.filter(

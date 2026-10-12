@@ -3,6 +3,14 @@ import { isPeConsensusEnabled } from "./tools/feature-flags.ts";
 
 // 常驻能力索引保持简短；参数契约留在工具定义，操作流程留在 Skill。
 export const PE_TOOL_PROMPT_SNIPPETS = [
+	{
+		name: "pe_assumption_review",
+		description: "Classify assumption conflicts and decide whether a model version may advance",
+	},
+	{
+		name: "pe_model_update",
+		description: "Write approved model inputs to a copy, recalculate, validate and manage version history",
+	},
 	{ name: "pe_trusted_source", description: "Retrieve trusted external financial and market evidence" },
 	{
 		name: "pe_stock_tracking",

@@ -245,6 +245,59 @@ describe("PE capability runtime", () => {
 		expect(h.getPendingResponseCount()).toBe(0);
 	});
 
+	it("loads model update rules and activates assumption review only for that workflow", async () => {
+		const allowed = [
+			"pe_load_capability",
+			"pe_assumption_review",
+			"pe_model_update",
+			"pe_excel_range",
+			"pe_formula_trace",
+		];
+		const h = await setup({}, { allowedToolNames: allowed });
+		expect(h.session.getActiveToolNames()).not.toContain("pe_assumption_review");
+		h.setResponses([
+			load(["valuation-model-update"]),
+			fauxAssistantMessage(
+				fauxToolCall("pe_assumption_review", {
+					items: [
+						{
+							metric_id: "china-growth",
+							period: "2026Q3",
+							original_forecast: 12,
+							actual: -4,
+							direction: { forecast: "positive", actual: "negative", industry: "negative" },
+							tolerance: {
+								max_relative_variance_percent: 30,
+								material_valuation_impact_percent: 5,
+							},
+							valuation_impact_percent: -8,
+							evidence_ids: ["filing", "industry"],
+						},
+					],
+				}),
+				{ stopReason: "toolUse" },
+			),
+			(context) => {
+				const result = context.messages.find(
+					(message) => message.role === "toolResult" && message.toolName === "pe_assumption_review",
+				);
+				expect(JSON.parse(getMessageText(result))).toMatchObject({
+					version_state: "candidate",
+					can_advance_baseline: false,
+					assessments: [{ action: "require_scenarios" }],
+				});
+				return fauxAssistantMessage("done");
+			},
+		]);
+		await h.session.prompt("Update the existing valuation model with new actuals");
+		const instructions = getMessageText(pinned(await h.session.extensionRunner.emitContext(h.session.messages))[0]);
+		expect(instructions).toContain("valuation-model-update/SKILL.md");
+		expect(instructions).toContain("原始工作簿始终只读");
+		expect(h.session.getActiveToolNames()).toContain("pe_assumption_review");
+		expect(h.session.getActiveToolNames()).toContain("pe_model_update");
+		expect(h.session.getActiveToolNames()).not.toContain("pe_render_ui");
+	});
+
 	it("refuses lazy tools outside the hard allow-list and preserves disabled regular tools", async () => {
 		const h = await setup({}, { allowedToolNames: ["pe_load_capability"] });
 		h.setResponses([load(["pe-generative-ui"]), fauxAssistantMessage("done")]);

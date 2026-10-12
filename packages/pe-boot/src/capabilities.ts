@@ -76,6 +76,13 @@ export const PE_CAPABILITIES: readonly PeCapability[] = [
 		tools: ["read", "write", "bash"],
 	},
 	{
+		id: "valuation-model-update",
+		description: "基于原模型补入实际值、判断假设冲突、形成局部修订与可追溯候选Excel",
+		dependencies: ["valuation-model-review"],
+		files: ["valuation-model-update/SKILL.md"],
+		tools: ["pe_assumption_review", "pe_model_update", "pe_trusted_source"],
+	},
+	{
 		id: "business-driver-model",
 		description: "还原模型输入与预测依赖，再核验商业模式、经营驱动和假设成立条件",
 		dependencies: ["valuation-model-review"],
@@ -180,13 +187,13 @@ export const PE_CAPABILITIES: readonly PeCapability[] = [
 	},
 ];
 
-export const PE_LAZY_TOOL_NAMES: readonly string[] = ["pe_render_ui"];
+export const PE_LAZY_TOOL_NAMES: readonly string[] = ["pe_render_ui", "pe_assumption_review", "pe_model_update"];
 export const PE_SKILLS_DIRECTORY = join(dirname(fileURLToPath(import.meta.url)), "../skills");
 
 export interface PeCapabilityOptions {
 	/** Known entrypoints preload workflows before the first model request. */
 	initialCapabilities?: readonly string[];
-	/** Rollback/comparison switch; only UI schema activation is delayed. */
+	/** Rollback/comparison switch; large native tool schemas are normally activated with their workflow. */
 	lazyUi?: boolean;
 	/** Host policy can change when a user changes the session tool selection. */
 	canActivateTool?: (name: string) => boolean;

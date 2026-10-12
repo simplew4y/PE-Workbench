@@ -3,6 +3,7 @@ import { getPeSkillPaths, type PeCapabilityOptions } from "../capabilities.ts";
 import { registerPeCapabilities } from "../capability-runtime.ts";
 import { registerCitationGuard } from "../citation-guard.ts";
 import { registerValuationReportGuard } from "../valuation-report-guard.ts";
+import { peAssumptionReviewTool } from "./assumption-review.ts";
 import { peConsensusCardsTool } from "./consensus-cards.ts";
 import { peDatasetMemoTool } from "./dataset-memo.ts";
 import { peDatasetSearchTool } from "./dataset-search.ts";
@@ -16,6 +17,7 @@ import { isPeConsensusEnabled } from "./feature-flags.ts";
 import { peFormulaTraceTool } from "./formula-trace.ts";
 import { peFrameworkTool } from "./framework.ts";
 import { peHistoryCompareTool } from "./history-compare.ts";
+import { peModelUpdateTool } from "./model-update.ts";
 import { peModelValidateTool } from "./model-validate.ts";
 import { pePdfListTool } from "./pdf-list.ts";
 import { pePdfReadTool } from "./pdf-read.ts";
@@ -33,6 +35,8 @@ import { peWorkbookSearchTool } from "./workbook-search.ts";
 
 //注册所有pe工具
 export function registerPeTools(pi: ExtensionAPI, options: PeCapabilityOptions = {}): void {
+	pi.registerTool(peAssumptionReviewTool);
+	pi.registerTool(peModelUpdateTool);
 	pi.registerTool(peTrustedSourceTool);
 	pi.registerTool(peStockTrackingTool);
 	pi.registerTool(peFrameworkTool);
@@ -67,6 +71,7 @@ export function registerPeTools(pi: ExtensionAPI, options: PeCapabilityOptions =
 }
 
 export {
+	peAssumptionReviewTool,
 	peDatasetMemoTool,
 	peConsensusCardsTool,
 	peDatasetSearchTool,
@@ -77,6 +82,7 @@ export {
 	peExcelRangeTool,
 	peFormulaTraceTool,
 	peHistoryCompareTool,
+	peModelUpdateTool,
 	pePdfReadTool,
 	pePdfListTool,
 	pePdfSearchTool,
