@@ -61,7 +61,9 @@ export function captureResearchInputs(database: DatabaseSync, datasetId: string,
 			(!["pdf", "xlsx", "xlsm"].includes(String(row.file_type)) &&
 				!(
 					row.file_type === "txt" &&
-					["wind_snapshot", "official_filing_snapshot"].includes(String(row.parser_name))
+					["wind_snapshot", "official_filing_snapshot", "information_source_view"].includes(
+						String(row.parser_name),
+					)
 				)) ||
 			(!workbook && !["completed", "completed_with_warnings"].includes(String(row.status)))
 		)
@@ -287,7 +289,14 @@ export interface PublishResearchDraft {
 	selectedItemIds?: string[];
 	continuation?: { sessionId: string; toolCallId: string };
 	monitorRunId?: string;
-	iteration?: { runId: string; leaseToken?: string; automatic: boolean };
+	iteration?: {
+		runId: string;
+		leaseToken?: string;
+		automatic: boolean;
+		reviewPlanId?: string;
+		reviewRevision?: number;
+		reviewActorId?: string;
+	};
 }
 export function publishResearchDraft(cwd: string, datasetId: string, input: PublishResearchDraft): FrameworkVersion {
 	return publishResearchDraftWithEvidence(cwd, datasetId, input);
@@ -414,6 +423,17 @@ function publishResearchDraftWithEvidence(
 					.get(datasetId, input.monitorRunId, Date.now())
 			)
 				throw new ResearchError(409, "Monitor paused, changed, or lease expired; draft preserved");
+			if (
+				!input.iteration &&
+				database.prepare("SELECT 1 FROM sqlite_master WHERE name='framework_iterations' AND type='table'").get()
+			) {
+				const reviewed = database
+					.prepare(
+						"SELECT 1 FROM framework_iterations WHERE dataset_id=? AND json_extract(record_json,'$.draftId')=? AND json_extract(record_json,'$.changeReview')=1",
+					)
+					.get(datasetId, input.draftId);
+				if (reviewed) throw new ResearchError(409, "本轮需要逐项审查，请通过迭代审查页面发布。");
+			}
 			if (input.iteration) {
 				const guard = input.iteration;
 				const run = database
@@ -424,6 +444,7 @@ function publishResearchDraftWithEvidence(
 							draftId: string | null;
 							automatic: boolean;
 							basisVersionId: string;
+							changeReview?: boolean;
 						})
 					: null;
 				const allowed = guard.automatic
@@ -434,6 +455,37 @@ function publishResearchDraftWithEvidence(
 							.prepare("SELECT test_project FROM framework_iteration_settings WHERE dataset_id=?")
 							.get(datasetId)?.test_project === 1
 					: run?.status === "review_required";
+				if (record?.changeReview && !guard.reviewPlanId)
+					throw new ResearchError(409, "本轮需要逐项审查，请发布已接受的修改。");
+				if (guard.reviewPlanId) {
+					const plan = database
+						.prepare("SELECT run_id,dataset_id FROM framework_iteration_review_plans WHERE plan_id=?")
+						.get(guard.reviewPlanId);
+					const revision = database
+						.prepare(
+							"SELECT COALESCE(MAX(revision),0) AS revision FROM framework_iteration_review_events WHERE plan_id=?",
+						)
+						.get(guard.reviewPlanId)?.revision;
+					if (plan?.run_id !== guard.runId || plan?.dataset_id !== datasetId || revision !== guard.reviewRevision)
+						throw new ResearchError(409, "审查决定已变化，不能发布旧的组装结果。");
+					const prepared = database
+						.prepare("SELECT * FROM framework_iteration_review_drafts WHERE plan_id=? AND revision=?")
+						.get(guard.reviewPlanId, guard.reviewRevision!);
+					const candidate = database
+						.prepare(
+							"SELECT content_json,inputs_json,revision FROM research_drafts WHERE dataset_id=? AND draft_id=?",
+						)
+						.get(datasetId, input.draftId);
+					if (
+						guard.automatic ||
+						!record?.changeReview ||
+						prepared?.draft_id !== input.draftId ||
+						prepared?.content_json !== candidate?.content_json ||
+						prepared?.inputs_json !== candidate?.inputs_json ||
+						candidate?.revision !== 1
+					)
+						throw new ResearchError(409, "组装草稿已变化，不能绕过逐项审查发布。");
+				}
 				if (
 					!allowed ||
 					!record ||
@@ -514,7 +566,7 @@ function publishResearchDraftWithEvidence(
 			if (input.iteration) {
 				database
 					.prepare(`UPDATE framework_iterations SET status='published',lease_token=NULL,lease_until=0,
-				 record_json=json_set(record_json,'$.status','published','$.versionId',?,'$.error',NULL,'$.updatedAt',?)
+				 record_json=json_set(record_json,'$.status','published','$.stage','publish','$.versionId',?,'$.error',NULL,'$.updatedAt',?)
 				 WHERE id=? AND dataset_id=?`)
 					.run(result.id, result.createdAt, input.iteration.runId, datasetId);
 				database
@@ -522,6 +574,18 @@ function publishResearchDraftWithEvidence(
 						"UPDATE framework_iteration_attempts SET finished_at=?,status='published' WHERE run_id=? AND finished_at IS NULL",
 					)
 					.run(result.createdAt, input.iteration.runId);
+			}
+			if (input.iteration?.reviewPlanId) {
+				const planId = input.iteration.reviewPlanId;
+				const receipt = {
+					versionId: result.id,
+					revision: input.iteration.reviewRevision,
+					at: result.createdAt,
+					actorId: input.iteration.reviewActorId || null,
+				};
+				database
+					.prepare("INSERT INTO framework_iteration_review_publications VALUES(?,?,?,?)")
+					.run(planId, input.iteration.reviewRevision!, result.id, JSON.stringify(receipt));
 			}
 			if (input.continuation)
 				database

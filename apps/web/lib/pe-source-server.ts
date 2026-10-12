@@ -1,5 +1,6 @@
 import {
   PeSourceError,
+  ResearchError,
   resolvePeEvidenceSource as resolveCoreEvidenceSource,
 } from "@earendil-works/pe-boot";
 import type { PeSourcePayload } from "./pe-source";
@@ -16,6 +17,11 @@ export async function resolvePeEvidenceSource(
   evidenceId: string,
   signal?: AbortSignal,
 ): Promise<ResolvedPeSource> {
-  const result = await resolveCoreEvidenceSource(cwd, evidenceId, signal);
-  return { payload: result.payload, filePath: result.filePath };
+  try {
+    const result = await resolveCoreEvidenceSource(cwd, evidenceId, signal);
+    return { payload: result.payload, filePath: result.filePath };
+  } catch (error) {
+    if (error instanceof ResearchError) throw new PeSourceError(error.status, error.message);
+    throw error;
+  }
 }

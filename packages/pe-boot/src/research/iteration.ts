@@ -3,7 +3,17 @@ import type { DatabaseSync } from "node:sqlite";
 import { setTimeout as delay } from "node:timers/promises";
 import { isDeepStrictEqual } from "node:util";
 import { resolvePeEvidenceRecord } from "../evidence.ts";
+import {
+	assertInformationSourceConfig,
+	type InformationCollection,
+	type InformationFact,
+	type InformationSourceConfig,
+	informationCurrencyCode,
+	informationDisplayText,
+} from "../information-source-model.ts";
+import { readInformationView } from "../information-source-store.ts";
 import { parseSourceId } from "../source.ts";
+import { readWindSnapshot } from "../trusted-sources.ts";
 import {
 	captureResearchInputs,
 	currentResearchVersion,
@@ -102,6 +112,25 @@ function load(db: DatabaseSync, datasetId: string, id: string): FrameworkIterati
 		.prepare("SELECT diagnostic_json FROM framework_iteration_diagnostics WHERE run_id=? ORDER BY rowid")
 		.all(id)
 		.map((r) => JSON.parse(String(r.diagnostic_json)));
+	run.executionAttempts = db
+		.prepare("SELECT started_at,finished_at,status FROM framework_iteration_attempts WHERE run_id=? ORDER BY rowid")
+		.all(id)
+		.map((row) => ({
+			startedAt: String(row.started_at),
+			finishedAt: row.finished_at as string | null,
+			status: row.status as string | null,
+		}));
+	run.stageAttempts = db
+		.prepare(
+			"SELECT stage,started_at,finished_at,status FROM framework_iteration_stage_attempts WHERE run_id=? ORDER BY rowid",
+		)
+		.all(id)
+		.map((row) => ({
+			stage: String(row.stage),
+			startedAt: String(row.started_at),
+			finishedAt: row.finished_at as string | null,
+			status: String(row.status),
+		}));
 	return run;
 }
 function save(db: DatabaseSync, run: FrameworkIteration): void {
@@ -183,10 +212,23 @@ export function setIterationTestProject(cwd: string, datasetId: string, enabled:
 export function createFrameworkIteration(
 	cwd: string,
 	datasetId: string,
-	input: { requestId: string; basisVersionId: string; modelId: string; uploadIdentity: string },
+	input: {
+		requestId: string;
+		basisVersionId: string;
+		modelId: string;
+		uploadIdentity: string;
+		changeReview?: boolean;
+		sourceMode?: "documents" | "sources";
+		sourceConfig?: InformationSourceConfig;
+	},
 ): FrameworkIteration {
 	if (!/^[A-Za-z0-9_-]{1,128}$/.test(input.requestId) || !input.modelId || !input.basisVersionId)
 		throw new ResearchError(400, "Invalid iteration request");
+	if (input.sourceMode === "sources") {
+		if (!input.sourceConfig) throw new ResearchError(400, "缺少信息源配置。");
+		assertInformationSourceConfig(input.sourceConfig);
+		input = { ...input, changeReview: true };
+	}
 	return database(cwd, datasetId, (db) =>
 		researchTransaction(db, () => {
 			reconcile(db, datasetId);
@@ -205,6 +247,18 @@ export function createFrameworkIteration(
 				.get(datasetId, input.basisVersionId);
 			if (!basis || !isFrameworkDocument(JSON.parse(String(basis.content_json))))
 				throw new ResearchError(409, "请先在聊天中确认完整七节框架。");
+			if (input.sourceConfig) {
+				const content = JSON.parse(String(basis.content_json)) as FrameworkContent;
+				const codes = [
+					...new Set(
+						`${content.title}\n${content.sections.researchSetup.objective}`.match(
+							/\b[A-Z0-9-]+\.(?:HK|SH|SZ|BJ|O|N)\b/gu,
+						) ?? [],
+					),
+				];
+				if (codes.length === 1 && codes[0] !== input.sourceConfig.companyTicker)
+					throw new ResearchError(409, "公司证券代码与框架基线冲突，请核实身份后新建运行。");
+			}
 			if (
 				db
 					.prepare("SELECT 1 FROM framework_iterations WHERE dataset_id=? AND status IN ('queued','running')")
@@ -219,12 +273,16 @@ export function createFrameworkIteration(
 				basisVersionId: input.basisVersionId,
 				modelId: input.modelId,
 				processorVersion: ITERATION_PROCESSOR_VERSION,
-				automatic:
-					db.prepare("SELECT test_project FROM framework_iteration_settings WHERE dataset_id=?").get(datasetId)
-						?.test_project === 1,
+				sourceMode: input.sourceMode ?? "documents",
+				...(input.sourceConfig ? { sourceConfig: input.sourceConfig } : {}),
+				changeReview: input.changeReview === true,
+				automatic: input.changeReview
+					? false
+					: db.prepare("SELECT test_project FROM framework_iteration_settings WHERE dataset_id=?").get(datasetId)
+							?.test_project === 1,
 				status: "queued",
 				reviewReasons: [],
-				stage: "ingest",
+				stage: input.sourceMode === "sources" ? "collect" : "ingest",
 				ingestJobId: null,
 				inputs: JSON.parse(String(basis.inputs_json)),
 				newDocIds: [],
@@ -344,6 +402,10 @@ function owns(db: DatabaseSync, run: FrameworkIteration): void {
 		throw new ResearchError(409, "Iteration cancelled or lease expired");
 }
 function fresh(db: DatabaseSync, run: FrameworkIteration): void {
+	if (run.sourceMode === "sources") {
+		if (!run.sourceConfig) throw new ResearchError(409, "信息源配置缺失，请新建运行。");
+		assertInformationSourceConfig(run.sourceConfig);
+	}
 	if (run.processorVersion !== ITERATION_PROCESSOR_VERSION)
 		throw new ResearchError(409, "处理器版本已变化，请新建运行；旧产物保留。");
 	if (currentResearchVersion(db, run.datasetId) !== run.basisVersionId)
@@ -388,11 +450,16 @@ export function validateIterationAnalysis(
 		throw new ResearchError(400, "新资料读取覆盖记录不完整。");
 	const quoteErrors: string[] = [];
 	const errors: string[] = [];
+	const boundSourceFacts = new Map<string, InformationFact>();
 	for (const observation of observations.observations) {
 		if (!newIds.has(observation.docId)) throw new ResearchError(400, "Observation is outside new documents");
 		if (typeof observation.value === "number" && !quoteContainsNumber(observation.quote, observation.value))
 			errors.push(`提取数值不在原文引述中：${observation.id}`);
 		const quotes: string[] = [];
+		const sourceFacts: InformationFact[] = [];
+		const sourceLines = new Map<number, string>();
+		const sourceRows = new Map<number, string>();
+		let sourceView = false;
 		for (const id of observation.evidenceIds) {
 			const reference = parseSourceId(id);
 			if (!reference || reference.docId !== observation.docId || !resolvePeEvidenceRecord(db, run.datasetId, id)) {
@@ -404,6 +471,84 @@ export function validateIterationAnalysis(
 					.prepare("SELECT page_text FROM pdf_pages WHERE doc_id=? AND page_number BETWEEN ? AND ?")
 					.all(observation.docId, reference.location.pageStart, reference.location.pageEnd);
 				quotes.push(pages.map((p) => String(p.page_text)).join("\n"));
+			}
+			if (reference.location.kind === "text") {
+				const { lineStart, lineEnd } = reference.location;
+				const view = readInformationView(db, run.datasetId, observation.docId);
+				const snapshot = view ?? readWindSnapshot(db, run.datasetId, observation.docId);
+				if (snapshot)
+					quotes.push(
+						snapshot.text
+							.split("\n")
+							.slice(lineStart - 1, lineEnd)
+							.join("\n"),
+					);
+				if (view) {
+					sourceView = true;
+					const lines = view.text.split("\n");
+					for (const fact of view.manifest.view.facts.filter(
+						(fact) => fact.line >= lineStart && fact.line <= lineEnd,
+					)) {
+						sourceFacts.push(fact);
+						sourceLines.set(fact.line, lines[fact.line - 1]);
+						let start = fact.line - 2;
+						while (start >= 0 && !lines[start].startsWith("数据表 ")) start--;
+						let end = fact.line;
+						while (end < lines.length && lines[end] !== "") end++;
+						sourceRows.set(fact.line, lines.slice(start + 1, end).join("\n"));
+					}
+				}
+			}
+		}
+		if (sourceView) {
+			const fact = sourceFacts.find(
+				(value) =>
+					value.metric === observation.sourceField &&
+					value.value === observation.value &&
+					observation.quote.includes(informationDisplayText(value.metric)) &&
+					(sourceLines.get(value.line) ?? "")
+						.replace(/\s/g, "")
+						.toLowerCase()
+						.includes(observation.quote.replace(/\s/g, "").toLowerCase()),
+			);
+			if (!fact)
+				errors.push(
+					`来源字段与数值配对不匹配：${observation.id}，sourceField必须复制locations.metric的原列名，并引用含有该列名和对应数值的完整证据行。`,
+				);
+			else {
+				boundSourceFacts.set(observation.id, fact);
+				if (
+					!(sourceRows.get(fact.line) ?? "")
+						.replace(/\s/g, "")
+						.toLowerCase()
+						.includes(observation.context.basisQuote.replace(/\s/g, "").toLowerCase())
+				)
+					errors.push(
+						`来源口径引述不在对应数据行：${observation.id}，basisQuote须引用当前字段的完整证据行或同一供应商数据行的上下文，不能借用其他业务行的标签。`,
+					);
+				if (observation.context.periodKind !== fact.periodKind)
+					errors.push(
+						`来源期间分类不匹配：${observation.id}，context.periodKind使用locations.periodKind，不从年份或季度标签推定单期或累计。`,
+					);
+				if (fact.role && observation.role !== fact.role)
+					errors.push(`来源角色不匹配：${observation.id}，role必须保留原始角色${fact.role}，不得混淆实际与预测。`);
+				if (!fact.role && observation.role !== "unknown")
+					errors.push(`来源实际或预测角色未明确：${observation.id}，role使用unknown并保留缺口，不能猜成fact。`);
+				if (observation.context.scope !== fact.scope)
+					errors.push(
+						`来源业务口径不匹配：${observation.id}，context.scope使用locations.scope；缺失时填null，不从查询或指标常识补写。`,
+					);
+				if (observation.unit !== fact.unit)
+					errors.push(`来源单位不匹配：${observation.id}，原单位为${fact.unit ?? "未提供"}，不得推算或换写。`);
+				if (
+					!fact.period &&
+					(observation.period || observation.context.periodKind !== "unknown" || observation.context.asOf)
+				)
+					errors.push(
+						`来源未明确该字段报告期：${observation.id}，period与asOf填null、periodKind用unknown，并记录缺口；不能套用最新报告期。`,
+					);
+				if (fact.period && !equivalentComparisonPeriod(observation.period, fact.period))
+					errors.push(`来源报告期不匹配：${observation.id}，原字段期间为${fact.period}。`);
 			}
 		}
 		if (
@@ -441,6 +586,14 @@ export function validateIterationAnalysis(
 	const impactErrors: string[] = [];
 	for (const [index, impact] of impacts.impacts.entries()) {
 		const label = `impacts[${index}]`;
+		if (
+			run.sourceMode === "sources" &&
+			!impact.comparable &&
+			["supports", "weakens", "overturns"].includes(impact.relation)
+		)
+			impactErrors.push(
+				`${label}：信息源财务口径未确认可比，不能据数值差异支持、削弱或推翻判断；改为unresolved或supplements，保留原判断置信度，补充待核实项，不计算半年与全年完成率或年化偏差。`,
+			);
 		if (impact.judgmentIds.some((id) => !judgments.has(id)) || impact.sections.some((s) => !sections.has(s)))
 			impactErrors.push(
 				`${label}：未知判断或章节；judgmentIds仅可用${[...judgments].join("、")}，sections仅可用${[...sections].join("、")}。`,
@@ -457,6 +610,30 @@ export function validateIterationAnalysis(
 			impactErrors.push(`${label}：修改判断的建议必须包含investmentJudgments章节。`);
 		if (impact.proposedChange && !impact.sections.length) impactErrors.push(`${label}：修改建议缺少目标章节。`);
 		for (const observation of linked) {
+			const sourceFact = boundSourceFacts.get(observation.id);
+			if (
+				impact.comparable &&
+				sourceFact &&
+				/收入|利润|费用|现金|资产|负债|毛利|EBIT|revenue|profit|cost/iu.test(sourceFact.metric) &&
+				!/%|百分|率/u.test(sourceFact.unit ?? sourceFact.metric)
+			) {
+				const comparison = informationCurrencyCode(impact.comparisonBasis?.currency);
+				if (!comparison || informationCurrencyCode(sourceFact.currency) !== comparison)
+					impactErrors.push(
+						`${label}：基线币种未确认或与来源币种${sourceFact.currency ?? "未知"}不同；comparisonBasis.currency必须来自原框架，币种未核实时comparable=false，不推算汇率或偏差。`,
+					);
+			}
+			if (
+				impact.comparable &&
+				sourceFact &&
+				(!sourceFact.role ||
+					(!sourceFact.currency &&
+						/收入|利润|费用|现金|资产|负债|毛利|EBIT|revenue|profit|cost/iu.test(sourceFact.metric) &&
+						!/%|百分|率/u.test(sourceFact.unit ?? sourceFact.metric)))
+			)
+				impactErrors.push(
+					`${label}：${observation.id} 的原始币种或实际/预测角色未确认，不得声明可比或计算确定偏差。`,
+				);
 			try {
 				validateLinkedObservationText(observation, `${impact.reason}\n${impact.proposedChange || ""}`);
 			} catch (error) {
@@ -491,6 +668,18 @@ export function validateIterationRevision(
 	impacts: IterationImpacts,
 	observations?: IterationObservations,
 ): void {
+	if (
+		observations?.observations.some((observation) => observation.sourceField) &&
+		!impacts.impacts.some((impact) => impact.comparable && impact.proposedChange)
+	) {
+		for (const scenario of basis.sections.valuation.scenarios) {
+			const updated = candidate.sections.valuation.scenarios.find((value) => value.id === scenario.id);
+			if (!updated) throw new ResearchError(400, `信息源口径待核实，不能删除原估值情景${scenario.id}。`);
+			for (const key of ["value", "unit", "expectedReturn"] as const)
+				if (!isDeepStrictEqual(scenario[key], updated[key]))
+					throw new ResearchError(400, `信息源口径待核实且未重算，不能改变估值情景${scenario.id}的${key}。`);
+		}
+	}
 	if (observations) {
 		for (const observation of observations.observations) {
 			function visit(value: unknown): void {
@@ -560,6 +749,29 @@ export function validateIterationRevision(
 	for (const item of basis.sections.investmentJudgments.items) {
 		const updated = candidate.sections.investmentJudgments.items.find((i) => i.id === item.id);
 		if (!updated) throw new ResearchError(400, `Stable judgment ID removed: ${item.id}`);
+		const related = impacts.impacts.filter((impact) => impact.proposedChange && impact.judgmentIds.includes(item.id));
+		if (
+			related.length &&
+			related.every(
+				(impact) =>
+					!impact.comparable &&
+					impact.observationIds.some((id) =>
+						observations?.observations.some((observation) => observation.id === id && observation.sourceField),
+					),
+			)
+		) {
+			for (const key of ["claim", "invalidation", "counterEvidenceIds"] as const)
+				if (!isDeepStrictEqual(item[key], updated[key]))
+					throw new ResearchError(
+						400,
+						`信息源口径待核实，不能改变判断${item.id}的${key}；保留原经济判断，仅补充问题、取证动作和来源。`,
+					);
+			if (item.confidence.level !== updated.confidence.level)
+				throw new ResearchError(
+					400,
+					`信息源口径待核实，不能改变判断${item.id}的confidence.level；保留原值${item.confidence.level}。`,
+				);
+		}
 		if (!changedIds.has(item.id) && !isDeepStrictEqual(item, updated))
 			throw new ResearchError(400, `Unrelated judgment changed: ${item.id}`);
 		if (
@@ -753,7 +965,40 @@ export async function runFrameworkIteration(
 	try {
 		const basis = getResearchFramework(cwd, datasetId).versions.find((v) => v.id === run.basisVersionId)!.content;
 		if (!isFrameworkDocument(basis)) throw new ResearchError(409, "Complete framework required");
-		if (!run.artifacts.some((a) => a.stage === "ingest")) {
+		let collection: InformationCollection | undefined;
+		if (run.sourceMode === "sources") {
+			collection = await stage("collect", async (stageSignal) => {
+				if (!engine.collect) throw new ResearchError(409, "信息源采集器不可用。");
+				const collected = await engine.collect(run, basis, stageSignal);
+				if (!collected.docIds.length)
+					throw new ResearchError(
+						409,
+						"没有可读取的相关财务数据；空结果和调用失败不代表无需调整。修复来源问题后可手动恢复，采集预算不重置。",
+					);
+				return collected;
+			});
+			if (!collection.docIds.length)
+				throw new ResearchError(409, "没有可读取的相关财务数据；空结果和调用失败不代表无需调整。");
+			const baseline = getResearchFramework(cwd, datasetId).versions.find(
+				(value) => value.id === run.basisVersionId,
+			)!;
+			run.newDocIds = collection.docIds.filter((docId) => !baseline.inputs.some((input) => input.docId === docId));
+			database(cwd, datasetId, (db) =>
+				researchTransaction(db, () => {
+					owns(db, run);
+					fresh(db, run);
+					run.inputs = captureResearchInputs(db, datasetId, [
+						...new Set([...baseline.inputs.map((input) => input.docId), ...collection!.docIds]),
+					]);
+					run.reviewReasons = [...collection!.warnings];
+					save(db, run);
+				}),
+			);
+			if (!run.newDocIds.length) {
+				run.status = "no_change";
+				return run;
+			}
+		} else if (!run.artifacts.some((a) => a.stage === "ingest")) {
 			const result = await ingest(run, signal);
 			database(cwd, datasetId, (db) => {
 				owns(db, run);
@@ -777,7 +1022,7 @@ export async function runFrameworkIteration(
 		database(cwd, datasetId, (db) =>
 			validateIterationAnalysis(db, run, basis, validateIterationObservations(observations)),
 		);
-		run.reviewReasons = observationReviewReasons(observations);
+		run.reviewReasons = [...(collection?.warnings ?? []), ...observationReviewReasons(observations)];
 		for (const input of run.inputs.filter((i) => run.newDocIds.includes(i.docId))) {
 			const fileType = database(
 				cwd,
@@ -786,7 +1031,10 @@ export async function runFrameworkIteration(
 					db.prepare("SELECT file_type FROM documents WHERE dataset_id=? AND doc_id=?").get(datasetId, input.docId)
 						?.file_type,
 			);
-			if (fileType !== "pdf") run.reviewReasons.push(`${input.docId}：表格原文、表头和脚注需人工核查`);
+			if (fileType !== "pdf")
+				run.reviewReasons.push(
+					`${input.docId}：${run.sourceMode === "sources" ? "来源字段、报告期和单位" : "表格原文、表头和脚注"}需人工核查`,
+				);
 		}
 		const impacts = await stage("impact", async (stageSignal) => {
 			const result = validateIterationImpacts(await engine.impact(run, basis, observations, stageSignal));
@@ -862,6 +1110,12 @@ export async function runFrameworkIteration(
 	} catch (error) {
 		run.status = error instanceof ResearchError && [401, 402, 403, 409].includes(error.status) ? "blocked" : "failed";
 		run.error = error instanceof Error ? error.message : "迭代失败。";
+		recordIterationDiagnostic(cwd, datasetId, id, {
+			stage: run.stage,
+			tool: "pe_iteration_execution_error",
+			error: run.error,
+			at: new Date().toISOString(),
+		});
 	} finally {
 		clearInterval(heartbeat);
 		database(cwd, datasetId, (db) =>
@@ -901,6 +1155,7 @@ export async function decideFrameworkIteration(
 	if (run.status === "published" && accept) return run;
 	if (run.status !== "review_required" || !run.draftId) throw new ResearchError(409, "没有待确认草稿。");
 	if (accept) {
+		if (run.changeReview) throw new ResearchError(409, "本轮需要逐项审查，请发布已接受的修改。");
 		const draft = getResearchFramework(cwd, datasetId).drafts.find((entry) => entry.id === run.draftId);
 		if (!draft || draft.status !== "open") throw new ResearchError(409, "待确认草稿已变化。");
 		const version = await publishResearchDraftAsync(

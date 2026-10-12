@@ -1,5 +1,6 @@
 import { type Static, Type } from "typebox";
 import { Compile } from "typebox/compile";
+import type { InformationCollection, InformationSourceConfig } from "../information-source-model.ts";
 import type { FrameworkContent, ResearchInput } from "./model.ts";
 import { ResearchError } from "./model.ts";
 
@@ -39,6 +40,7 @@ export const IterationObservationsSchema = Type.Object(
 					docId: text,
 					subject: text,
 					metric: text,
+					sourceField: Type.Optional(text),
 					value: Type.Union([Type.Number(), Type.String(), Type.Null()]),
 					period: Type.Union([text, Type.Null()]),
 					unit: Type.Union([text, Type.Null()]),
@@ -47,6 +49,7 @@ export const IterationObservationsSchema = Type.Object(
 						Type.Literal("guidance"),
 						Type.Literal("forecast"),
 						Type.Literal("opinion"),
+						Type.Literal("unknown"),
 					]),
 					quote: text,
 					evidenceIds: Type.Array(text, { minItems: 1, maxItems: 20 }),
@@ -84,7 +87,10 @@ export const IterationImpactsSchema = Type.Object(
 					]),
 					comparable: Type.Boolean(),
 					comparisonBasis: Type.Union([
-						Type.Object({ period: text, periodKind, scope: text }, { additionalProperties: false }),
+						Type.Object(
+							{ period: text, periodKind, scope: text, currency: Type.Optional(nullableText) },
+							{ additionalProperties: false },
+						),
 						Type.Null(),
 					]),
 					reason: text,
@@ -101,7 +107,7 @@ export const IterationImpactsSchema = Type.Object(
 );
 export type IterationObservations = Static<typeof IterationObservationsSchema>;
 export type IterationImpacts = Static<typeof IterationImpactsSchema>;
-export type IterationStage = "ingest" | "extract" | "impact" | "revise" | "validate" | "publish";
+export type IterationStage = "ingest" | "collect" | "extract" | "impact" | "revise" | "validate" | "publish";
 export type IterationStatus =
 	| "queued"
 	| "running"
@@ -124,7 +130,10 @@ export interface FrameworkIteration {
 	basisVersionId: string;
 	modelId: string;
 	processorVersion: string;
+	sourceMode?: "documents" | "sources";
+	sourceConfig?: InformationSourceConfig;
 	automatic: boolean;
+	changeReview?: boolean;
 	reviewReasons: string[];
 	status: IterationStatus;
 	stage: IterationStage;
@@ -150,10 +159,13 @@ export interface FrameworkIteration {
 		cost: number;
 	}>;
 	diagnostics: Array<{ stage: string; tool: string; args?: unknown; error?: string; at: string }>;
+	executionAttempts?: Array<{ startedAt: string; finishedAt: string | null; status: string | null }>;
+	stageAttempts?: Array<{ stage: string; startedAt: string; finishedAt: string | null; status: string }>;
 	leaseToken: string | null;
 	leaseUntil: number;
 }
 export interface IterationEngine {
+	collect?(run: FrameworkIteration, basis: FrameworkContent, signal: AbortSignal): Promise<InformationCollection>;
 	extract(run: FrameworkIteration, basis: FrameworkContent, signal: AbortSignal): Promise<IterationObservations>;
 	impact(
 		run: FrameworkIteration,

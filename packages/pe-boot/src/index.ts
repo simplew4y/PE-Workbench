@@ -24,6 +24,8 @@ export {
 	sourceLocationRow,
 } from "./evidence.ts";
 export { excelParserRevision, excelPython, validatePeExcelUpload } from "./excel-processing.ts";
+export * from "./information-source-model.ts";
+export * from "./information-source-store.ts";
 export {
 	fetchOfficialFilings,
 	ingestOfficialFilingCandidate,
@@ -36,6 +38,7 @@ export * from "./research/cards.ts";
 export * from "./research/framework.ts";
 export * from "./research/iteration.ts";
 export { createIterationEngine } from "./research/iteration-engine.ts";
+export * from "./research/iteration-review.ts";
 export * from "./research/model.ts";
 export * from "./research/monitor.ts";
 export { createPiResearchEngine } from "./research/pi-engine.ts";

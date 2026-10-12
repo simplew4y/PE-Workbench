@@ -63,6 +63,7 @@ export interface PeExcelSource extends PeSourceBase {
 export interface PeTextSource extends PeSourceBase {
   kind: "text";
   content: string;
+  provenance?: { sourceId: string; companyTicker: string; rawChecksum: string; viewVersion: string; locations: Array<{line:number;paths:string[]}> };
 }
 
 export type PeSourcePayload = PePdfSource | PeExcelSource | PeTextSource;
