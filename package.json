@@ -61,6 +61,7 @@
 		"start:lan": "npm run start:lan --workspace=@agegr/pi-web --",
 		"research:doctor": "npm run research:doctor --workspace=@agegr/pi-web --",
 		"research:worker": "npm run research:worker --workspace=@agegr/pi-web --",
+		"information:service": "npm run dev --workspace=@earendil-works/financial-information-service --",
 		"setup:python": "npm run setup:python --workspace=@earendil-works/pe-boot",
 		"pi:native": "node scripts/pi-native.mjs"
 	},

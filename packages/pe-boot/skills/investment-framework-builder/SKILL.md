@@ -25,7 +25,7 @@ description: 生成、修订或保存投资框架，包括聊天草稿：交付�
 
 ## 更新
 
-新资料先评估重要性，再按 evidence → assumption → thesis → valuation → monitoring 引用找受影响字段。保留未受影响内容，不因措辞变化重写投资判断。记录旧判断、新证据、新判断及原因；首次不制造版本变化。
+新资料先评估重要性，再按 evidence → assumption → thesis → valuation → monitoring 引用找受影响字段。用户要求核对最新财报或监管披露时，优先用 `pe_trusted_source(operation=fetch_official)` 从巨潮、港交所或 SEC 获取原文版本，再读取返回的 `docId`；Wind 财务与行情用于补充结构化数据，不能替代官方原文。保留未受影响内容，不因措辞变化重写投资判断。记录旧判断、新证据、新判断及原因；首次不制造版本变化。检索有数量和日期边界，空结果不等于无披露。
 
 ## 边界
 

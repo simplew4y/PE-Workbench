@@ -28,7 +28,6 @@ import {
 	sourceMarkdownCitation,
 	textValue,
 } from "./tools/database.ts";
-import { readWindSnapshot } from "./trusted-sources.ts";
 
 export { resolvePeEvidenceSource, resolvePeEvidenceSources, sourceLocationRow } from "./evidence.ts";
 export { DOCUMENT_EXTENSIONS } from "./source.ts";
@@ -269,35 +268,28 @@ export async function preparePeDocument(
 			...prepareAudioTranscript(root, document),
 		};
 	}
-	if (document.parser_name === "wind_snapshot") {
-		const connection = openPeDataset(root, String(document.dataset_id));
-		try {
-			const snapshot = readWindSnapshot(connection.database, connection.datasetId, String(document.doc_id));
-			if (!snapshot) throw new PeSourceError(404, "Wind snapshot not found");
-			const directory = join(root, "meta", "read-cache", String(document.doc_id), "wind-v1");
-			mkdirSync(directory, { recursive: true });
-			if (realpathSync(directory) !== directory)
-				throw new PeSourceError(400, "Document cache must not be a symlink");
-			const readablePath = join(directory, "readable.txt");
-			if (existsSync(readablePath) && realpathSync(readablePath) !== readablePath)
-				throw new PeSourceError(400, "Document cache must not be a symlink");
-			const lines = snapshot.text.split("\n").map((line, index) => {
-				const row = { ...document, line_start: index + 1, line_end: index + 1 };
-				return `${line} ${sourceMarkdownCitation(row, sourceEvidenceId(row))}`;
-			});
-			writeFileSync(readablePath, lines.join("\n"), { mode: 0o600 });
-			return {
-				document,
-				datasetId: connection.datasetId,
-				workspaceRoot: root,
-				filePath,
-				readablePath,
-				cachePath: filePath,
-				warnings: [],
-			};
-		} finally {
-			connection.database.close();
-		}
+	if (["wind_snapshot", "official_filing_snapshot"].includes(String(document.parser_name))) {
+		const text = readFileSync(filePath, "utf8");
+		const directory = join(root, "meta", "read-cache", String(document.doc_id), `${document.parser_name}-v1`);
+		mkdirSync(directory, { recursive: true });
+		if (realpathSync(directory) !== directory) throw new PeSourceError(400, "Document cache must not be a symlink");
+		const readablePath = join(directory, "readable.txt");
+		if (existsSync(readablePath) && realpathSync(readablePath) !== readablePath)
+			throw new PeSourceError(400, "Document cache must not be a symlink");
+		const lines = text.split("\n").map((line, index) => {
+			const row = { ...document, line_start: index + 1, line_end: index + 1 };
+			return `${line} ${sourceMarkdownCitation(row, sourceEvidenceId(row))}`;
+		});
+		writeFileSync(readablePath, lines.join("\n"), { mode: 0o600 });
+		return {
+			document,
+			datasetId: connection.datasetId,
+			workspaceRoot: root,
+			filePath,
+			readablePath,
+			cachePath: filePath,
+			warnings: [],
+		};
 	}
 	try {
 		prepared =

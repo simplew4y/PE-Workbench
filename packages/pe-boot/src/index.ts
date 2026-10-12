@@ -24,6 +24,14 @@ export {
 	sourceLocationRow,
 } from "./evidence.ts";
 export { excelParserRevision, excelPython, validatePeExcelUpload } from "./excel-processing.ts";
+export {
+	fetchOfficialFilings,
+	ingestOfficialFilingCandidate,
+	OFFICIAL_FILING_PROVIDERS,
+	type OfficialFilingCandidate,
+	type OfficialFilingProvider,
+	type OfficialFilingQuery,
+} from "./official-filings.ts";
 export * from "./research/cards.ts";
 export * from "./research/framework.ts";
 export * from "./research/iteration.ts";

@@ -59,7 +59,10 @@ export function captureResearchInputs(database: DatabaseSync, datasetId: string,
 		if (
 			!row ||
 			(!["pdf", "xlsx", "xlsm"].includes(String(row.file_type)) &&
-				!(row.file_type === "txt" && row.parser_name === "wind_snapshot")) ||
+				!(
+					row.file_type === "txt" &&
+					["wind_snapshot", "official_filing_snapshot"].includes(String(row.parser_name))
+				)) ||
 			(!workbook && !["completed", "completed_with_warnings"].includes(String(row.status)))
 		)
 			throw new ResearchError(409, `Document version is not ready for research: ${docId}`);

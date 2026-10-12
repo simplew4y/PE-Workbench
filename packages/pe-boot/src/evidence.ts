@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { dirname } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { initializePeCollectionDatabase, PE_PIPELINE_SCHEMA_VERSION } from "./collection-schema.ts";
 import { PeSourceError, preparePeDocument } from "./documents.ts";
@@ -17,7 +18,30 @@ import {
 	textValue,
 } from "./tools/database.ts";
 import { readExcelCellsByBounds } from "./tools/excel-cells.ts";
-import { readWindSnapshot } from "./trusted-sources.ts";
+
+const SNAPSHOT_PARSERS = new Set(["wind_snapshot", "official_filing_snapshot"]);
+
+function readTextSnapshot(
+	database: DatabaseSync,
+	datasetId: string,
+	docId: string,
+): { document: SqlRow; text: string; filePath: string } | undefined {
+	const document = database
+		.prepare("SELECT * FROM documents WHERE dataset_id=? AND doc_id=? AND deleted_at IS NULL")
+		.get(datasetId, docId) as SqlRow | undefined;
+	if (!document || !SNAPSHOT_PARSERS.has(String(document.parser_name))) return undefined;
+	const main = database
+		.prepare("PRAGMA database_list")
+		.all()
+		.find((row) => row.name === "main");
+	if (!main?.file) throw new PeSourceError(409, "Snapshot requires a file-backed collection");
+	const filePath = documentFilePath(dirname(dirname(String(main.file))), document);
+	const bytes = readFileSync(filePath);
+	const checksum = textValue(document, "checksum") ?? textValue(document, "sha256");
+	if (checksum && createHash("sha256").update(bytes).digest("hex") !== checksum)
+		throw new PeSourceError(409, "Snapshot original was modified");
+	return { document, text: bytes.toString("utf8"), filePath };
+}
 
 /** A citation can be the first entry into a project after an upgrade. */
 function migrateEvidenceCollection(cwd: string): void {
@@ -121,8 +145,8 @@ export function resolvePeEvidenceRecord(
 			.prepare("SELECT COUNT(*) AS count FROM pdf_pages WHERE doc_id=? AND page_number BETWEEN ? AND ?")
 			.get(reference.docId, location.pageStart, location.pageEnd);
 		if (Number(count?.count) !== location.pageEnd - location.pageStart + 1) return undefined;
-	} else if (location.kind === "text" && document.parser_name === "wind_snapshot") {
-		const snapshot = readWindSnapshot(database, datasetId, reference.docId);
+	} else if (location.kind === "text" && SNAPSHOT_PARSERS.has(String(document.parser_name))) {
+		const snapshot = readTextSnapshot(database, datasetId, reference.docId);
 		if (
 			!snapshot ||
 			location.lineEnd > snapshot.text.split("\n").length ||
@@ -259,7 +283,7 @@ export async function resolvePeEvidenceSource(
 		if (location.kind === "text") {
 			const connection = openPeDataset(cwd);
 			try {
-				const snapshot = readWindSnapshot(connection.database, connection.datasetId, reference.docId);
+				const snapshot = readTextSnapshot(connection.database, connection.datasetId, reference.docId);
 				if (snapshot) {
 					const lines = snapshot.text.split("\n");
 					if (location.lineEnd > lines.length || location.lineEnd - location.lineStart >= 2000)
