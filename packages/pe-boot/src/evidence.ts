@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
 import { initializePeCollectionDatabase, PE_PIPELINE_SCHEMA_VERSION } from "./collection-schema.ts";
 import { PeSourceError, preparePeDocument } from "./documents.ts";
+import { readInformationView } from "./information-source-store.ts";
 import { type PeSourcePayload, type PeSourceReference, parseExcelCellRange, parseSourceId } from "./source.ts";
 import {
 	documentFilePath,
@@ -121,6 +122,14 @@ export function resolvePeEvidenceRecord(
 			.prepare("SELECT COUNT(*) AS count FROM pdf_pages WHERE doc_id=? AND page_number BETWEEN ? AND ?")
 			.get(reference.docId, location.pageStart, location.pageEnd);
 		if (Number(count?.count) !== location.pageEnd - location.pageStart + 1) return undefined;
+	} else if (location.kind === "text" && document.parser_name === "information_source_view") {
+		const view = readInformationView(database, datasetId, reference.docId);
+		if (
+			!view ||
+			location.lineEnd > view.text.trimEnd().split("\n").length ||
+			location.lineEnd - location.lineStart >= 2000
+		)
+			return undefined;
 	} else if (location.kind === "text" && document.parser_name === "wind_snapshot") {
 		const snapshot = readWindSnapshot(database, datasetId, reference.docId);
 		if (
@@ -259,6 +268,39 @@ export async function resolvePeEvidenceSource(
 		if (location.kind === "text") {
 			const connection = openPeDataset(cwd);
 			try {
+				const view = readInformationView(connection.database, connection.datasetId, reference.docId);
+				if (view) {
+					const lines = view.text.trimEnd().split("\n");
+					if (location.lineEnd > lines.length || location.lineEnd - location.lineStart >= 2000)
+						throw new PeSourceError(404, "Source lines do not exist in this view");
+					const content = lines.slice(location.lineStart - 1, location.lineEnd).join("\n");
+					const row = { ...view.document, ...sourceLocationRow(reference) };
+					return {
+						filePath: view.filePath,
+						payload: {
+							kind: "text",
+							dataset_id: connection.datasetId,
+							doc_id: reference.docId,
+							version_no: Number(row.version_no),
+							evidence_id: evidenceId,
+							citation: sourceCitation(row),
+							markdown_citation: sourceMarkdownCitation(row, evidenceId),
+							filename: sourceFilename(row),
+							warnings: view.manifest.view.gaps,
+							content: content.slice(0, 12000),
+							truncated: content.length > 12000,
+							provenance: {
+								sourceId: view.manifest.sourceId,
+								companyTicker: view.manifest.companyTicker,
+								rawChecksum: view.manifest.rawChecksum,
+								viewVersion: view.manifest.view.version,
+								locations: view.manifest.view.facts
+									.filter((fact) => fact.line >= location.lineStart && fact.line <= location.lineEnd)
+									.map((fact) => ({ line: fact.line, paths: fact.paths })),
+							},
+						},
+					};
+				}
 				const snapshot = readWindSnapshot(connection.database, connection.datasetId, reference.docId);
 				if (snapshot) {
 					const lines = snapshot.text.split("\n");

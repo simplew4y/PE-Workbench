@@ -18,6 +18,7 @@ import {
 } from "./collection-schema.ts";
 import { portablePeFilename } from "./document-filenames.ts";
 import { type PreparedWorkbook, prepareWorkbook, validatePeExcelUpload, verifyPeOriginal } from "./excel-processing.ts";
+import { readInformationView } from "./information-source-store.ts";
 import { DOCUMENT_EXTENSIONS, isPeAudioFileType } from "./source.ts";
 import {
 	documentFilePath,
@@ -268,6 +269,24 @@ export async function preparePeDocument(
 			filePath,
 			...prepareAudioTranscript(root, document),
 		};
+	}
+	if (document.parser_name === "information_source_view") {
+		const viewConnection = openPeDataset(root, String(document.dataset_id));
+		try {
+			const view = readInformationView(viewConnection.database, viewConnection.datasetId, String(document.doc_id));
+			if (!view) throw new PeSourceError(404, "Information source view not found");
+			return {
+				document,
+				datasetId: viewConnection.datasetId,
+				workspaceRoot: root,
+				filePath,
+				readablePath: filePath,
+				cachePath: join(root, view.manifest.rawPath),
+				warnings: view.manifest.view.gaps,
+			};
+		} finally {
+			viewConnection.database.close();
+		}
 	}
 	if (document.parser_name === "wind_snapshot") {
 		const connection = openPeDataset(root, String(document.dataset_id));

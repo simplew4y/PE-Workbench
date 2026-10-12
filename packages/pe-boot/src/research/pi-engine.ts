@@ -11,6 +11,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { PE_SKILLS_DIRECTORY, resolvePeCapabilities } from "../capabilities.ts";
+import { readInformationView, readInformationViewRange } from "../information-source-store.ts";
 import { sourceId } from "../source.ts";
 import { openPeDataset } from "../tools/database.ts";
 import { readWindSnapshot } from "../trusted-sources.ts";
@@ -56,6 +57,8 @@ export function readResearchInput(
 		const document = database
 			.prepare("SELECT original_filename,file_type,page_count FROM documents WHERE dataset_id=? AND doc_id=?")
 			.get(datasetId, request.docId)!;
+		if (readInformationView(database, datasetId, request.docId))
+			return readInformationViewRange(database, datasetId, request.docId, request.lineStart, request.lineEnd);
 		const snapshot = readWindSnapshot(database, datasetId, request.docId);
 		if (snapshot) {
 			const lines = snapshot.text.split("\n");

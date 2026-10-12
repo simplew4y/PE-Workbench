@@ -278,7 +278,15 @@ export function PeSourceCitation({ cwd, evidenceId, children, className, portalC
                 <ExcelSourcePreview source={state.source} />
               )}
               {state.status === "ready" && state.source.kind === "text" && (
-                <pre className="m-0 whitespace-pre-wrap p-5 text-sm leading-7">{state.source.content}</pre>
+                <div>
+                  <pre className="m-0 whitespace-pre-wrap break-words p-5 text-sm leading-7">{state.source.content}</pre>
+                  {state.source.provenance && <div className="border-t border-[var(--border)] p-5 text-xs text-[var(--text-muted)]">
+                    <strong>供应商响应溯源 · {state.source.provenance.companyTicker}</strong>
+                    <p>证据视图 v{state.source.provenance.viewVersion}；对应原始响应的表头与数据字段如下。</p>
+                    <ul className="space-y-3 pl-4">{state.source.provenance.locations.map(location=><li key={location.line}>证据行 {location.line}<pre className="whitespace-pre-wrap break-all">{location.paths.join("\n")}</pre></li>)}</ul>
+                    {!!state.source.warnings?.length && <ul className="pl-4">{state.source.warnings.map(warning=><li key={warning}>{warning}</li>)}</ul>}
+                  </div>}
+                </div>
               )}
             </div>
           </section>
