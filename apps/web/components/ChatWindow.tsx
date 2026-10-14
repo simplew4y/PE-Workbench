@@ -11,6 +11,7 @@ import { extractTurnWrittenFiles, type WrittenFile } from "@/lib/turn-written-fi
 import { hasGenerativeUiToolCall, isGenerativeUiToolCall } from "@/lib/generative-ui/tool";
 import { MessageView } from "./MessageView";
 import { ProcessDetailsGroup } from "./ProcessDetailsGroup";
+import { ExecutionFlowLink } from "./ExecutionFlowLink";
 import { getChatActivity } from "@/lib/chat-activity";
 import { PeFrameworkConfirmation, PeResearchRail, usePeResearch } from "./PeFrameworkPanel";
 import { PeResearchNotebook, ResearchCardCapture } from "./PeResearchNotebook";
@@ -701,6 +702,10 @@ export function ChatWindow({ session, sessionRunning, newSessionCwd, newSessionD
                 // subsequent response is empty, interrupted, or fails.
                 const finalAssistantIdx = isLiveTail || frameworkReport ? -1 : findFinalAssistantIndex(messages, userIdx, endIdx);
                 if (messages[userIdx].role === "user") rendered.push(renderMessage(userIdx));
+                const flowSessionId = session?.id ?? sessionIdRef.current;
+                if (messages[userIdx].role === "user" && flowSessionId && entryIds[userIdx]) {
+                  rendered.push(<ExecutionFlowLink key={`flow-${entryIds[userIdx]}`} sessionId={flowSessionId} turnId={entryIds[userIdx]} leafId={isLiveTail ? undefined : entryIds[endIdx - 1]} />);
+                }
 
                 const processIndices: number[] = [];
                 const processEndIdx = finalAssistantIdx === -1 ? endIdx : finalAssistantIdx;
