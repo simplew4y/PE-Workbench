@@ -34,6 +34,7 @@ import {
 	type ModelVersionState,
 	reviewAssumptionUpdates,
 } from "./assumption-review.ts";
+import { resolvePeDatasetLocation } from "./database.ts";
 
 type CellValue = string | number | boolean | null;
 
@@ -60,6 +61,8 @@ export interface PeModelUpdateCheck extends PeModelUpdateObservation {
 }
 
 export interface ApplyPeModelUpdateOptions {
+	requestId?: string;
+	expectedSourceSha256?: string;
 	docId: string;
 	datasetId?: string;
 	baseVersionId?: string;
@@ -111,6 +114,7 @@ interface WorkbookInspectionResult {
 }
 
 export interface PeModelUpdateManifest {
+	request?: { id: string; sha256: string };
 	schema_version: "1.0";
 	version_id: string;
 	dataset_id: string;
@@ -356,6 +360,60 @@ export async function applyPeModelUpdate(
 	options: ApplyPeModelUpdateOptions,
 	signal?: AbortSignal,
 ): Promise<PeModelUpdateManifest> {
+	if (options.requestId === undefined) return applyModelUpdate(cwd, options, signal);
+	if (typeof options.requestId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/u.test(options.requestId))
+		throw new Error("Invalid model update request ID");
+	const { workspaceRoot } = resolvePeDatasetLocation(cwd);
+	const lockDirectory = join(
+		workspaceRoot,
+		"meta",
+		`model-update-${createHash("sha256").update(`${options.docId}\0${options.requestId}`).digest("hex")}.lock`,
+	);
+	if (realpathSync(dirname(lockDirectory)) !== dirname(lockDirectory))
+		throw new Error("Model request lock must remain inside the project");
+	signal?.throwIfAborted();
+	try {
+		mkdirSync(lockDirectory);
+	} catch (error) {
+		if (error instanceof Error && "code" in error && error.code === "EEXIST")
+			throw new Error("Model update request is in progress or interrupted; do not repeat an uncertain write");
+		throw error;
+	}
+	try {
+		return await applyModelUpdate(cwd, options, signal);
+	} finally {
+		rmSync(lockDirectory, { recursive: true, force: true });
+	}
+}
+
+async function applyModelUpdate(
+	cwd: string,
+	options: ApplyPeModelUpdateOptions,
+	signal?: AbortSignal,
+): Promise<PeModelUpdateManifest> {
+	if (options.requestId !== undefined && !/^[A-Za-z0-9_-]{1,128}$/u.test(options.requestId))
+		throw new Error("Invalid model update request ID");
+	if (options.expectedSourceSha256 !== undefined && !/^[a-f0-9]{64}$/u.test(options.expectedSourceSha256))
+		throw new Error("Invalid model update source SHA256");
+	const requestHash = createHash("sha256").update(JSON.stringify(options)).digest("hex");
+	const requestedVersionId = options.requestId
+		? `request-${createHash("sha256").update(`${options.docId}\0${options.requestId}`).digest("hex")}`
+		: undefined;
+	if (requestedVersionId) {
+		const prior = withModelUpdateDatabase(cwd, options.datasetId, (database, datasetId) => {
+			const row = modelVersionRow(database, datasetId, options.docId, requestedVersionId);
+			return row
+				? { row, manifest: manifestFromRow(row, currentModelVersionId(database, datasetId, options.docId)) }
+				: undefined;
+		});
+		if (prior) {
+			const manifest = prior.manifest;
+			if (manifest.request?.sha256 !== requestHash)
+				throw new Error("Model update request belongs to different input");
+			safeStoredFile(realpathSync(cwd), prior.row);
+			return manifest;
+		}
+	}
 	const prepared = await preparePeDocument(cwd, { docId: options.docId, datasetId: options.datasetId }, signal);
 	if (prepared.document.file_type !== "xlsx")
 		throw new Error("Controlled model updates currently support .xlsx workbooks only");
@@ -373,11 +431,15 @@ export async function applyPeModelUpdate(
 		? safeStoredFile(prepared.workspaceRoot, versionContext.baseRow)
 		: prepared.filePath;
 	const sourceHash = sha256(sourcePath);
+	if (options.expectedSourceSha256 !== undefined && sourceHash !== options.expectedSourceSha256)
+		throw new Error("Model baseline changed before workbook update");
 	const uploadHashBefore = sha256(prepared.filePath);
-	const versionId = `${new Date()
-		.toISOString()
-		.replace(/[-:.TZ]/gu, "")
-		.slice(0, 14)}-${randomUUID().slice(0, 8)}`;
+	const versionId =
+		requestedVersionId ??
+		`${new Date()
+			.toISOString()
+			.replace(/[-:.TZ]/gu, "")
+			.slice(0, 14)}-${randomUUID().slice(0, 8)}`;
 	const temporaryRoot = mkdtempSync(join(tmpdir(), "pe-model-update-"));
 	const preparedDirectory = join(temporaryRoot, "prepared");
 	const baselineDirectory = join(temporaryRoot, "baseline-recalculated");
@@ -501,6 +563,7 @@ export async function applyPeModelUpdate(
 			hardErrors.length === 0 &&
 			initialReview.assessments.every((assessment) => assessment.action === "propose_local_revision") &&
 			reviewItems.every((item) => !item.revision || item.revision.evidenceIds.length > 0);
+		signal?.throwIfAborted();
 		const finalDirectory = join(prepared.workspaceRoot, "generated", "model-updates", options.docId, versionId);
 		mkdirSync(finalDirectory, { recursive: true });
 		const finalFile = join(finalDirectory, workingFilename);
@@ -508,6 +571,7 @@ export async function applyPeModelUpdate(
 		const fileRelpath = relative(prepared.workspaceRoot, finalFile).replaceAll("\\", "/");
 		const promoted = options.promoteIfEligible === true && canAdvance;
 		const manifest: PeModelUpdateManifest = {
+			...(options.requestId ? { request: { id: options.requestId, sha256: requestHash } } : {}),
 			schema_version: "1.0",
 			version_id: versionId,
 			dataset_id: prepared.datasetId,

@@ -12,6 +12,11 @@ import {
 	restoreResearchVersion,
 	updateResearchDraft,
 } from "../src/research/framework.ts";
+import {
+	createFrameworkIteration,
+	decideFrameworkIteration,
+	getFrameworkIteration,
+} from "../src/research/iteration.ts";
 import { collectFrameworkEvidenceIds, type FrameworkContent } from "../src/research/model.ts";
 import { readResearchInput } from "../src/research/pi-engine.ts";
 import { renderInvestmentFrameworkMarkdown } from "../src/research/report.ts";
@@ -73,6 +78,48 @@ afterEach(() => {
 });
 
 describe("investment framework persistence", () => {
+	it.each([true, false])("keeps iteration-linked drafts atomic when changeReview=%s", async (changeReview) => {
+		const cwd = project();
+		const basis = publish(cwd);
+		const linked = createResearchDraft(cwd, datasetId, content, [], basis.id);
+		const run = createFrameworkIteration(cwd, datasetId, {
+			requestId: "linked",
+			basisVersionId: basis.id,
+			modelId: "test",
+			uploadIdentity: "test",
+			changeReview,
+		});
+		withResearchDatabase(cwd, datasetId, (db) =>
+			db
+				.prepare(
+					"UPDATE framework_iterations SET status='review_required',record_json=json_set(record_json,'$.status','review_required','$.draftId',?) WHERE id=? AND dataset_id=?",
+				)
+				.run(linked.id, run.id, datasetId),
+		);
+		expect(() => updateResearchDraft(cwd, datasetId, linked.id, 1, content, true)).toThrow("统一迭代审阅入口");
+		expect(() =>
+			publishResearchDraft(cwd, datasetId, {
+				draftId: linked.id,
+				revision: 1,
+				expectedVersionId: basis.id,
+				requestId: "old-publish",
+			}),
+		).toThrow("统一迭代审阅入口");
+		expect(getResearchFramework(cwd, datasetId).drafts.find((entry) => entry.id === linked.id)).toMatchObject({
+			status: "open",
+			revision: 1,
+		});
+		expect(getFrameworkIteration(cwd, datasetId, run.id).status).toBe("review_required");
+		const independent = createResearchDraft(cwd, datasetId, content, [], basis.id);
+		expect(updateResearchDraft(cwd, datasetId, independent.id, 1, content, true).status).toBe("rejected");
+		const rejected = await decideFrameworkIteration(cwd, datasetId, run.id, false, AbortSignal.timeout(5000));
+		expect(rejected.status).toBe("rejected");
+		expect(getResearchFramework(cwd, datasetId).drafts.find((entry) => entry.id === linked.id)).toMatchObject({
+			status: "rejected",
+			revision: 2,
+		});
+		expect(getResearchFramework(cwd, datasetId).versions).toHaveLength(1);
+	});
 	it("retains change records for retired judgments while rejecting invented and cross-project history", () => {
 		const cwd = project();
 		const first = publish(cwd);

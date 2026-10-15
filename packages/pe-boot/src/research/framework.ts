@@ -243,6 +243,16 @@ export async function createResearchDraftAsync(
 	);
 }
 
+function assertStandaloneDraft(database: DatabaseSync, datasetId: string, draftId: string): void {
+	if (
+		database.prepare("SELECT 1 FROM sqlite_master WHERE name='framework_iterations' AND type='table'").get() &&
+		database
+			.prepare("SELECT 1 FROM framework_iterations WHERE dataset_id=? AND json_extract(record_json,'$.draftId')=?")
+			.get(datasetId, draftId)
+	)
+		throw new ResearchError(409, "此草稿关联追踪迭代，请通过统一迭代审阅入口（逐项审查）处理整轮接受或拒绝。");
+}
+
 export function updateResearchDraft(
 	cwd: string,
 	datasetId: string,
@@ -265,6 +275,7 @@ export function updateResearchDraft(
 				);
 			if (previous.status !== "open" || previous.revision !== revision)
 				throw new ResearchError(409, "Draft changed; reload before saving");
+			if (reject) assertStandaloneDraft(database, datasetId, draftId);
 			const checked = reject ? previous.content : validateFrameworkContent(content);
 			if (!reject && isFrameworkDocument(checked))
 				validateResearchEvidence(database, datasetId, checked, previous.inputs);
@@ -423,17 +434,7 @@ function publishResearchDraftWithEvidence(
 					.get(datasetId, input.monitorRunId, Date.now())
 			)
 				throw new ResearchError(409, "Monitor paused, changed, or lease expired; draft preserved");
-			if (
-				!input.iteration &&
-				database.prepare("SELECT 1 FROM sqlite_master WHERE name='framework_iterations' AND type='table'").get()
-			) {
-				const reviewed = database
-					.prepare(
-						"SELECT 1 FROM framework_iterations WHERE dataset_id=? AND json_extract(record_json,'$.draftId')=? AND json_extract(record_json,'$.changeReview')=1",
-					)
-					.get(datasetId, input.draftId);
-				if (reviewed) throw new ResearchError(409, "本轮需要逐项审查，请通过迭代审查页面发布。");
-			}
+			if (!input.iteration) assertStandaloneDraft(database, datasetId, input.draftId);
 			if (input.iteration) {
 				const guard = input.iteration;
 				const run = database
@@ -445,15 +446,22 @@ function publishResearchDraftWithEvidence(
 							automatic: boolean;
 							basisVersionId: string;
 							changeReview?: boolean;
+							monitorRunId?: string;
 						})
 					: null;
 				const allowed = guard.automatic
 					? run?.status === "running" &&
 						run.lease_token === guard.leaseToken &&
 						Number(run.lease_until) > Date.now() &&
-						database
-							.prepare("SELECT test_project FROM framework_iteration_settings WHERE dataset_id=?")
-							.get(datasetId)?.test_project === 1
+						(record?.monitorRunId
+							? !!database
+									.prepare(`SELECT 1 FROM research_monitor_runs r JOIN research_monitor_plans p ON p.dataset_id=r.dataset_id
+						 WHERE r.dataset_id=? AND r.run_id=? AND r.status='running' AND r.lease_until>? AND r.plan_revision=p.revision
+						 AND json_extract(p.config_json,'$.updatePolicy')='direct' AND json_extract(p.config_json,'$.mode')='auto'`)
+									.get(datasetId, record.monitorRunId, Date.now())
+							: database
+									.prepare("SELECT test_project FROM framework_iteration_settings WHERE dataset_id=?")
+									.get(datasetId)?.test_project === 1)
 					: run?.status === "review_required";
 				if (record?.changeReview && !guard.reviewPlanId)
 					throw new ResearchError(409, "本轮需要逐项审查，请发布已接受的修改。");

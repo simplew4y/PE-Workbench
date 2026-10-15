@@ -1,16 +1,17 @@
 import { createHash } from "node:crypto";
 import { after, type NextRequest } from "next/server";
 import { getIterationChangeReview, listIterationChangeReviewHistory, saveIterationChangeDecisions, publishIterationChangeReview, attachIterationIngest, cancelFrameworkIteration, createFrameworkIteration, decideFrameworkIteration, failIterationSubmission, getFrameworkIteration, getResearchFramework, iterationProjectSettings, listFrameworkIterations, ResearchError, setIterationTestProject, type FrameworkIteration } from "@earendil-works/pe-boot";
-import { getPeGatewayRuntime } from "@/lib/pe-gateway/runtime";
-import { noStoreJson, sessionIdFromRequest } from "@/lib/pe-gateway/route-helpers";
-import { executeFrameworkIteration, iterationPlatform } from "@/lib/framework-iteration-runtime";
-import { getPeProject, peProjectStorePaths } from "@/lib/pe-project-store";
-import { assertPeUserPathAllowed } from "@/lib/pe-multi-user-paths";
+import { noStoreJson } from "@/lib/pe-gateway/route-helpers";
+import { executeFrameworkIteration, iterationPlatform, resumeServerFrameworkIteration } from "@/lib/framework-iteration-runtime";
+import { iterationRequestContext } from "@/lib/framework-iteration-access";
+import { peProjectStorePaths } from "@/lib/pe-project-store";
 import { isApiRequestAllowed } from "@/lib/request-security";
 import { parseFormDataWithinLimit, RequestBodyTooLargeError } from "@/lib/bounded-form-data";
 import { queuePeIngest, readPeIngestJob, resolvePeProjectPaths, validatePeResearchUpload } from "@/lib/pe-ingest";
 import { validateUploadFileNames } from "@/lib/file-upload";
 import { availableInformationSources, informationSourceConfig, listInformationSourceQueries, listIterationSourceData, readIterationSourceArchive } from "@earendil-works/pe-boot";
+import { getIterationModelUpdateResult, getResearchMonitor } from "@earendil-works/pe-boot";
+import { serverIterationRuntimeStatus } from "@/services/pe-research/iteration-runtime.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,21 +26,22 @@ function publicRun(run: FrameworkIteration) {
   delete value.leaseUntil;
   return value;
 }
-function failure(error: unknown) {
-  const status = error instanceof ResearchError ? error.status : error instanceof RequestBodyTooLargeError ? 413 : 500;
-  return noStoreJson({ error: status === 500 ? "迭代服务暂不可用，请检查运行环境。" : error instanceof Error ? error.message : "请求失败。" }, { status });
+function iterationRunRuntime(cwd: string, datasetId: string, run: FrameworkIteration): "server" | "platform" {
+  return run.diagnostics.some((entry) => entry.tool === "pe_server_runtime")
+    || getResearchMonitor(cwd, datasetId).runs.some((entry) => entry.pipeline === "iteration" && entry.iterationId === run.id)
+    ? "server" : "platform";
 }
-async function context(request: NextRequest, datasetId: string, metadataOnly = false) {
-  if (!isApiRequestAllowed(request)) throw new ResearchError(403, "Untrusted API request");
-  const sessionId = sessionIdFromRequest(request, getPeGatewayRuntime().config);
-  const authorized = await iterationPlatform(sessionId, undefined, metadataOnly);
-  const project = getPeProject(datasetId);
-  assertPeUserPathAllowed(project.root);
-  return { project, sessionId, ...authorized };
+function failure(error: unknown) {
+  const status = error instanceof ResearchError ? error.status : error instanceof RequestBodyTooLargeError ? 413 : error instanceof SyntaxError ? 400 : 500;
+  return noStoreJson({ error: status === 500 ? "迭代服务暂不可用，请检查运行环境。" : error instanceof Error ? error.message : "请求失败。" }, { status });
 }
 export async function GET(request: NextRequest) {
   try {
-    const { project, platform } = await context(request, text(request.nextUrl.searchParams.get("datasetId")), true);
+    const { project, sessionId } = await iterationRequestContext(request, text(request.nextUrl.searchParams.get("datasetId")));
+    const historyBefore = request.nextUrl.searchParams.get("historyBefore");
+    const runs = listFrameworkIterations(project.root, project.datasetId, historyBefore === null ? undefined : text(historyBefore)).map(publicRun);
+    const nextCursor = runs.length === 100 ? runs.at(-1)!.id : null;
+    if (request.nextUrl.searchParams.get("historyOnly") === "1") return noStoreJson({ runs, nextCursor });
     const id = request.nextUrl.searchParams.get("runId");
     const run = id ? getFrameworkIteration(project.root, project.datasetId, text(id)) : null;
     const files = run?.ingestJobId ? readPeIngestJob(resolvePeProjectPaths(project, peProjectStorePaths().registryPath), run.ingestJobId).result.files : [];
@@ -50,13 +52,20 @@ export async function GET(request: NextRequest) {
       const content = readIterationSourceArchive(project.root, project.datasetId, run.id, queryId, download === "source-raw" ? "raw" : "text");
       return new Response(content, { headers: { "Content-Type": download === "source-raw" ? "application/json; charset=utf-8" : "text/plain; charset=utf-8", "Content-Disposition": `attachment; filename="source-${queryId}.${download === "source-raw" ? "json" : "txt"}"`, "Cache-Control": "private, no-store" } });
     }
+    const runRuntime = run ? iterationRunRuntime(project.root, project.datasetId, run) : null;
     if (run && request.nextUrl.searchParams.get("download") === "report") {
       const framework = getResearchFramework(project.root, project.datasetId);
+      const serverBilling = runRuntime === "server";
       const report = { project: project.name, files, sourceQueries, windCost: null, windCostNote: "供应商未返回计费金额，不估造费用。", run: publicRun(run), baseline: framework.versions.find((v) => v.id === run.basisVersionId), draft: framework.drafts.find((d) => d.id === run.draftId), publication: framework.versions.find((v) => v.id === run.versionId), changeReview: getIterationChangeReview(project.root, project.datasetId, run), reviewHistory: listIterationChangeReviewHistory(project.root, project.datasetId, run.id), costCurrency: "CNY", costNote: "目录估算，实际费用以平台结算为准", manualVerification: "本报告记录系统产物；原文数值、期间、单位及研究结论仍需人工核查。" };
-      return new Response(`# 投资框架迭代运行报告\n\n项目：${project.name}\n\n模型：${run.modelId}\n\n状态：${run.status}\n\n\`\`\`json\n${JSON.stringify(report, null, 2)}\n\`\`\`\n`, { headers: { "Content-Type": "text/markdown; charset=utf-8", "Content-Disposition": `attachment; filename="iteration-${run.id}.md"`, "Cache-Control": "private, no-store" } });
+      const delivery = { ...report, runRuntime, modelDelivery: getIterationModelUpdateResult(project.root, project.datasetId, run.id), ...(serverBilling ? { costCurrency: null, costNote: "服务端模型按供应商账单计费；未估算金额，usage.cost=0不代表免费。" } : {}) };
+      return new Response(`# 投资框架迭代运行报告\n\n项目：${project.name}\n\n模型：${run.modelId}\n\n状态：${run.status}\n\n\`\`\`json\n${JSON.stringify(delivery, null, 2)}\n\`\`\`\n`, { headers: { "Content-Type": "text/markdown; charset=utf-8", "Content-Disposition": `attachment; filename="iteration-${run.id}.md"`, "Cache-Control": "private, no-store" } });
     }
     const sourceData = run?.sourceMode === "sources" ? listIterationSourceData(project.root, project.datasetId, run.id) : [];
-    return noStoreJson({ run: run ? publicRun(run) : null, files, sourceQueries, sourceData, availableSources: availableInformationSources(), runs: listFrameworkIterations(project.root, project.datasetId).map(publicRun), settings: iterationProjectSettings(project.root, project.datasetId), framework: getResearchFramework(project.root, project.datasetId), modelId: platform.selectedModel, changeReview: run ? getIterationChangeReview(project.root, project.datasetId, run) : null });
+    let modelId = "";
+    let modelError: string | null = null;
+    try { modelId = (await iterationPlatform(sessionId, undefined, true)).platform.selectedModel; }
+    catch (error) { modelError = error instanceof ResearchError ? error.message : "模型服务暂不可用，仍可查看历史和审阅已有结果。"; }
+    return noStoreJson({ run: run ? publicRun(run) : null, runRuntime, files, sourceQueries, sourceData, availableSources: availableInformationSources(), runs, nextCursor, settings: iterationProjectSettings(project.root, project.datasetId), framework: getResearchFramework(project.root, project.datasetId), modelId, modelError, changeReview: run ? getIterationChangeReview(project.root, project.datasetId, run) : null });
   } catch (error) { return failure(error); }
 }
 export async function POST(request: NextRequest) {
@@ -64,7 +73,8 @@ export async function POST(request: NextRequest) {
     if (request.headers.get("content-type")?.startsWith("multipart/form-data")) {
       if (!isApiRequestAllowed(request)) throw new ResearchError(403, "Untrusted API request");
       const form = await parseFormDataWithinLimit(request, 302 * 1024 * 1024);
-      const { project, sessionId, userId, platform } = await context(request, text(form.get("datasetId")));
+      const { project, sessionId, userId } = await iterationRequestContext(request, text(form.get("datasetId")));
+      const { platform } = await iterationPlatform(sessionId);
       const files = form.getAll("files").filter((file): file is File => typeof file !== "string");
       if (!files.length || files.length > 100 || files.some((f) => !f.size || f.size > 100 * 1024 * 1024) || files.reduce((size, f) => size + f.size, 0) > 300 * 1024 * 1024) throw new ResearchError(413, "上传文件为空或超过数量、大小限制。");
       const nameError = validateUploadFileNames(files.map((f) => f.name));
@@ -94,7 +104,7 @@ export async function POST(request: NextRequest) {
     const body: unknown = await request.json();
     if (!body || typeof body !== "object" || Array.isArray(body)) throw new ResearchError(400, "Invalid request");
     const input = body as Record<string, unknown>;
-    const { project, sessionId, userId } = await context(request, text(input.datasetId), true);
+    const { project, sessionId, userId } = await iterationRequestContext(request, text(input.datasetId));
     switch (input.action) {
       case "create-sources": {
         const prior = listFrameworkIterations(project.root, project.datasetId).find(run => run.requestId === text(input.requestId));
@@ -120,8 +130,14 @@ export async function POST(request: NextRequest) {
         return noStoreJson({ settings: iterationProjectSettings(project.root, project.datasetId) });
       case "resume": {
         const run = getFrameworkIteration(project.root, project.datasetId, text(input.runId));
-        await iterationPlatform(sessionId, run.modelId);
         if (!["queued", "blocked", "failed"].includes(run.status)) throw new ResearchError(409, "任务不能恢复。");
+        if (iterationRunRuntime(project.root, project.datasetId, run) === "server") {
+          const server = serverIterationRuntimeStatus();
+          if (!server.available || server.modelId !== run.modelId) throw new ResearchError(409, "本轮后台模型不可用或已变更，请修复服务端配置后重试，不能切换到聊天账户继续计费。");
+          after(async () => { await resumeServerFrameworkIteration(project, run); });
+          return noStoreJson({ run: publicRun(run) }, { status: 202 });
+        }
+        await iterationPlatform(sessionId, run.modelId);
         after(async () => { await executeFrameworkIteration(project, run, sessionId, userId); });
         return noStoreJson({ run: publicRun(run) }, { status: 202 });
       }

@@ -6,7 +6,7 @@ import test from "node:test";
 import { createJiti } from "jiti";
 import { SessionManager, ModelRuntime, createAgentSessionServices, createAgentSessionFromServices } from "@earendil-works/pi-coding-agent";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
-import { createResearchDraft, getResearchFramework, listResearchContinuations } from "@earendil-works/pe-boot";
+import { createResearchDraft, getResearchFramework, listResearchContinuations, getResearchMonitor, saveResearchMonitor, publishResearchDraft, createFrameworkIteration, getFrameworkIteration, decideFrameworkIteration } from "@earendil-works/pe-boot";
 
 const jiti = createJiti(import.meta.url, { tsconfigPaths: true });
 const { createPeProject } = await jiti.import("../../../../lib/pe-project-store.ts");
@@ -16,6 +16,72 @@ const { AgentSessionWrapper } = await jiti.import("../../../../lib/rpc-manager.t
 const { AuthStorage } = await jiti.import("../../../../../../packages/coding-agent/src/core/auth-storage.ts");
 const { frameworkFixture } = await jiti.import("../../../../../../packages/pe-boot/test/fixtures/framework.ts");
 const { renderInvestmentFrameworkMarkdown } = await jiti.import("../../../../../../packages/pe-boot/src/research/report.ts");
+const { withResearchDatabase } = await jiti.import("../../../../../../packages/pe-boot/src/research/storage.ts");
+
+test("legacy monitoring API cannot configure or dispatch an iteration plan", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "pe-legacy-monitor-route-"));
+  const previous = { PI_CODING_AGENT_DIR: process.env.PI_CODING_AGENT_DIR, PE_MULTI_USER_MODE: process.env.PE_MULTI_USER_MODE };
+  process.env.PI_CODING_AGENT_DIR = root;
+  process.env.PE_MULTI_USER_MODE = "0";
+  t.after(() => {
+    for (const [key, value] of Object.entries(previous)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+    rmSync(root, { recursive: true, force: true });
+  });
+  const project = createPeProject({ name: "Legacy monitor guard" });
+  const request = (body) => POST(new Request("http://localhost/api/pe/frameworks", {
+    method: "POST", body: JSON.stringify({ datasetId: project.datasetId, ...body }),
+  }));
+  const config = { enabled: false, pipeline: "iteration", runtime: "server", modelId: "test", mode: "review", intervalHours: 24, objective: "核查", queries: [], includeMemos: false };
+  const rejectedCreate = await request({ action: "monitor-save", revision: 0, config });
+  assert.equal(rejectedCreate.status, 409);
+  assert.match((await rejectedCreate.json()).error, /research-workflow/);
+  assert.equal(getResearchMonitor(project.root, project.datasetId).config, null);
+  const draft = createResearchDraft(project.root, project.datasetId, frameworkFixture(), [], null);
+  publishResearchDraft(project.root, project.datasetId, { draftId: draft.id, revision: 1, expectedVersionId: null, requestId: "baseline" });
+  saveResearchMonitor(project.root, project.datasetId, config, 0);
+  const paused = getResearchMonitor(project.root, project.datasetId);
+  const legacy = { enabled: true, mode: "review", intervalHours: 24, objective: "核查", queries: [], includeMemos: false };
+  for (const value of [{ ...config, enabled: true }, config, legacy]) {
+    const result = await request({ action: "monitor-save", revision: 1, config: value, acknowledgeServerCosts: true });
+    assert.equal(result.status, 409);
+    assert.match((await result.json()).error, /research-workflow/);
+    assert.deepEqual(getResearchMonitor(project.root, project.datasetId), paused);
+  }
+  assert.equal((await request({ action: "monitor-run" })).status, 409);
+  saveResearchMonitor(project.root, project.datasetId, { ...config, enabled: true }, 1);
+  const enabled = getResearchMonitor(project.root, project.datasetId);
+  const result = await request({ action: "monitor-run" });
+  assert.equal(result.status, 409);
+  assert.match((await result.json()).error, /research-workflow/);
+  assert.deepEqual(getResearchMonitor(project.root, project.datasetId), enabled);
+});
+
+test("legacy rejection preserves the linked iteration until its own decision endpoint is used", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "pe-linked-draft-route-"));
+  const previous = { PI_CODING_AGENT_DIR: process.env.PI_CODING_AGENT_DIR, PE_MULTI_USER_MODE: process.env.PE_MULTI_USER_MODE };
+  process.env.PI_CODING_AGENT_DIR = root;
+  process.env.PE_MULTI_USER_MODE = "0";
+  t.after(() => {
+    for (const [key, value] of Object.entries(previous)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+    rmSync(root, { recursive: true, force: true });
+  });
+  const project = createPeProject({ name: "Linked iteration guard" });
+  const content = frameworkFixture();
+  const original = createResearchDraft(project.root, project.datasetId, content, [], null);
+  const basis = publishResearchDraft(project.root, project.datasetId, { draftId: original.id, revision: 1, expectedVersionId: null, requestId: "baseline" });
+  const draft = createResearchDraft(project.root, project.datasetId, content, [], basis.id);
+  const run = createFrameworkIteration(project.root, project.datasetId, { requestId: "linked", basisVersionId: basis.id, modelId: "test", uploadIdentity: "test", changeReview: true });
+  withResearchDatabase(project.root, project.datasetId, (db) => db.prepare("UPDATE framework_iterations SET status='review_required',record_json=json_set(record_json,'$.status','review_required','$.draftId',?) WHERE id=?").run(draft.id, run.id));
+  for (const action of ["reject", "publish"]) {
+    const response = await POST(new Request("http://localhost/api/pe/frameworks", { method: "POST", body: JSON.stringify({ datasetId: project.datasetId, action, draftId: draft.id, revision: 1, content, expectedVersionId: basis.id, requestId: "legacy" }) }));
+    assert.equal(response.status, 409);
+    assert.match((await response.json()).error, /统一迭代审阅入口/);
+  }
+  assert.equal(getResearchFramework(project.root, project.datasetId).drafts.find((entry) => entry.id === draft.id).status, "open");
+  assert.equal(getFrameworkIteration(project.root, project.datasetId, run.id).status, "review_required");
+  assert.equal((await decideFrameworkIteration(project.root, project.datasetId, run.id, false, AbortSignal.timeout(5000))).status, "rejected");
+  assert.equal(getResearchFramework(project.root, project.datasetId).drafts.find((entry) => entry.id === draft.id).status, "rejected");
+});
 
 test("project API creates, saves and publishes a draft; rejects stale, invalid and cross-project actions", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "pe-framework-route-"));

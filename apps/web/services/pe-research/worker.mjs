@@ -6,6 +6,7 @@ import { createPiResearchEngine, getResearchMonitor, getStockTracking, runDueSto
 import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import lockfile from "proper-lockfile";
 import { join } from "node:path";
+import { createServerIterationRuntime } from "./iteration-runtime.mjs";
 
 const { values } = parseArgs({ options: {
   registry: { type: "string" }, dataset: { type: "string" }, once: { type: "boolean", default: false },
@@ -42,11 +43,20 @@ try {
     } };
     let processed = false;
     if (values.monitor) {
-      const researchEnabled = !!getResearchMonitor(cwd, values.dataset).config?.enabled;
+      const monitor = getResearchMonitor(cwd, values.dataset);
+      const researchEnabled = !!monitor.config?.enabled || monitor.manualRequested;
       const trackingEnabled = getStockTracking(cwd, values.dataset).trackers.some((tracker) => tracker.config.enabled);
       if (!researchEnabled && !trackingEnabled) break;
       if (trackingEnabled) processed = (await runDueStockTrackers(cwd, values.dataset, controller.signal)) > 0;
-      if (researchEnabled) processed = (await runResearchMonitor(cwd, values.dataset, engine, controller.signal)) || processed;
+      if (researchEnabled) {
+        let serverRuntime;
+        try {
+          processed = (await runResearchMonitor(cwd, values.dataset, engine, controller.signal, undefined, async (run) => {
+            serverRuntime = await createServerIterationRuntime(cwd, values.dataset, run, controller.signal);
+            return serverRuntime.engine;
+          })) || processed;
+        } finally { serverRuntime?.dispose(); }
+      }
     } else {
       processed = await runNextResearchJob(cwd, values.dataset, engine, controller.signal);
     }

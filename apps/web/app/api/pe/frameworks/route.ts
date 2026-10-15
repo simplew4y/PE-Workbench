@@ -76,11 +76,15 @@ export async function POST(request: Request) {
     switch (input.action) {
       case "monitor-save": {
         if (!Number.isSafeInteger(input.revision) || Number(input.revision) < 0) throw new ResearchError(400, "Invalid monitor revision");
+        if (getResearchMonitor(root, datasetId).config?.pipeline === "iteration" || (input.config && typeof input.config === "object" && "pipeline" in input.config && input.config.pipeline === "iteration")) {
+          throw new ResearchError(409, "统一迭代追踪请前往研究工作台设置，通过 /api/pe/research-workflow 确认后台费用后启用或修改。");
+        }
         saveResearchMonitor(root, datasetId, input.config, Number(input.revision));
         await ensureResearchMonitorWorker(root, datasetId);
         return NextResponse.json({ monitor: getResearchMonitor(root, datasetId) });
       }
       case "monitor-run":
+        if (getResearchMonitor(root, datasetId).config?.pipeline === "iteration") throw new ResearchError(409, "请通过研究工作台统一追踪入口启动检查（/api/pe/research-workflow）。");
         requestResearchMonitorRun(root, datasetId);
         await ensureResearchMonitorWorker(root, datasetId);
         return NextResponse.json({ monitor: getResearchMonitor(root, datasetId) }, { status: 202 });

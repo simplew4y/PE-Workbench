@@ -29,7 +29,7 @@ runInNewContext(outputText, { exports, URLSearchParams, require: (id) => {
     FrameworkConfirmation: ({ preview, status }) => React.createElement("div", { "data-confirmation-status": status }, preview),
     ResearchRail: ({ artifacts }) => React.createElement("div", null, artifacts.find((item) => item.id === "framework").content),
   };
-  if (["./PeMonitorPanel", "./PeStockTracking"].includes(id)) return {};
+  if (["./PeMonitorPanel", "./PeStockTracking", "./PeFrameworkUpdates"].includes(id)) return {};
   return require(id);
 } });
 

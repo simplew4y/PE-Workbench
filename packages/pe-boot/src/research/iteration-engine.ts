@@ -17,9 +17,11 @@ import {
 	listInformationSourceQueries,
 	sourceCollectionResult,
 } from "../information-source-store.ts";
+import { sourceId } from "../source.ts";
 import type { queryWind } from "../trusted-sources.ts";
 import { WorkbookRequestProperties } from "../workbook-reader.ts";
 import { formatWorkbookResultText } from "../workbook-text.ts";
+import { AutomaticSetupSchema, validateAutomaticSetup } from "./automatic-setup.ts";
 import { captureResearchInputs, validateResearchEvidence } from "./framework.ts";
 import { validateIterationAnalysis, validateIterationRevision } from "./iteration.ts";
 import { IterationExtractionSubmissionSchema, mergeExtractionSubmission } from "./iteration-extraction.ts";
@@ -32,6 +34,11 @@ import {
 	type IterationObservations,
 	IterationObservationsSchema,
 } from "./iteration-model.ts";
+import {
+	freezeIterationModelBaseline,
+	getIterationModelConfig,
+	readCurrentIterationWorkbook,
+} from "./iteration-model-update.ts";
 import { synchronizeIterationScope } from "./iteration-quality.ts";
 import { type FrameworkContent, FrameworkContentSchema, ResearchError, validateFrameworkContent } from "./model.ts";
 import { readResearchInput } from "./pi-engine.ts";
@@ -77,9 +84,24 @@ export function createIterationEngine(
 			validationFeedback?: string[];
 			sourceConfig?: FrameworkIteration["sourceConfig"];
 			sourceQueries?: ReturnType<typeof listInformationSourceQueries>;
+			preparation?: {
+				existingModel: ReturnType<typeof getIterationModelConfig>;
+				files: unknown[];
+				company?: FrameworkIteration["company"];
+			};
 		},
 		signal: AbortSignal,
 	): Promise<Static<T>> {
+		if (name === "prepare")
+			prompt = `identitySources在项目或框架已有明确公司代码时可为空；否则须原样引用项目资料中公司名称与证券代码的原文，并附读取工具返回的evidenceId，不据文件名猜证券身份。\n${prompt}`;
+		if (run.monitorRunId && name !== "prepare") {
+			const frozenModel = freezeIterationModelBaseline(cwd, datasetId, run.id);
+			prompt = `用简短、自然的中文说明本轮改了什么、为什么改、还有什么不能确定。不要堆术语。按“关键假设→所需指标→模型输入→敏感性”检查已有判断；只凭收入下降不能认定某地区销量下降，需要地区、销量及价格证据。旧期间重复数据不算新证据，未来披露、未结束季度、缺失单位或不可比口径不支持确定结论。模型输入映射（配置，不是新事实）：${JSON.stringify(frozenModel.config?.mappings ?? [])}。指标展示名可沿用映射中的subject和metric，但必须与原文含义一致；period、unit、scope及原文引用不能为了匹配映射而改写。未绑定的输入不要猜测单元格。\n${prompt}`;
+			if (name === "collect" && run.sourceConfig?.trackingWindow)
+				prompt = `本轮固定查询期间为${run.sourceConfig.defaultPeriods.join("、")}；截至${run.sourceConfig.trackingWindow.asOf}。忽略后文通用年度窗口，首查严格使用这些季度。先读取本轮项目文件，特别是新上传资料，结合框架关键假设、模型映射和敏感变量确定所需指标；Wind只接收主体、字段、期间和口径，不传框架全文、版本、投资目的或失效条件。\n${prompt}`;
+			if (name === "revise")
+				prompt = `currentAssessment.changesSinceLastVersion用1至3句话说明本次修改；每条changes用“之前怎样、现在怎样、因为哪条新数据”表达，保留现有七节格式。未执行模型重算时不得把新目标价或收益率写成已核实结果；模型文件稍后由服务端重算，框架注明结果待核对。\n${prompt}`;
+		}
 		if (name === "collect")
 			prompt = `首个Wind请求的实际报告期由服务端固定为sourceConfig.defaultPeriods，防止把基线旧中报误当最新；可自主选择相关指标。其后补查按periods参数执行。最新性仍需依据供应商返回核查，不能只看请求。若基线金额明确以人民币计量，可在查询currency指定CNY；其他币种只能来自明确的基线或已返回字段。补查同币种必须实际填写currency，不仅写在purpose；返回币种仍以原始响应为准。\n${prompt}`;
 		if (name === "extract" && run.sourceMode === "sources")
@@ -150,18 +172,27 @@ export function createIterationEngine(
 										]),
 									)
 								: run.inputs;
-						const value = readResearchInput(
+						let value = readResearchInput(
 							cwd,
 							datasetId,
 							{ objective: prompt, inputs: readableInputs, asOf: run.createdAt },
 							params,
 						) as Record<string, unknown>;
+						if (name === "prepare" && value.file_type === "xlsx")
+							value = readCurrentIterationWorkbook(cwd, datasetId, params.docId, {
+								...params,
+								action: params.action ?? (params.range || params.ranges ? "read" : "inspect"),
+							});
 						const { image, ...data } = value;
 						const text =
 							data.file_type === "xlsx" || data.file_type === "xlsm"
 								? formatWorkbookResultText(data, {
 										docId: params.docId,
 										includeEvidenceIds: true,
+										extraHeadLines:
+											name === "prepare"
+												? [`model_version_id=${JSON.stringify(data.model_version_id ?? null)}`]
+												: [],
 										maxBytes: 16384,
 									}).text
 								: JSON.stringify(data);
@@ -170,7 +201,8 @@ export function createIterationEngine(
 								? [{ type: "image" as const, mimeType: "image/png", data: image.data }]
 								: [];
 						reads.set(params.docId, [...(reads.get(params.docId) || []), JSON.stringify(params)]);
-						for (const match of text.matchAll(/source:[A-Za-z0-9_-]+/g)) readEvidence.add(match[0]);
+						for (const match of text.matchAll(/source(?::|%3A)([A-Za-z0-9_-]+)/gi))
+							readEvidence.add(`source:${match[1]}`);
 						return { content: [{ type: "text", text }, ...images], details: {} };
 					},
 				}),
@@ -198,6 +230,23 @@ export function createIterationEngine(
 									? mergeImpactSubmission(pendingImpacts, params)
 									: params;
 						if (!validator.Check(submitted)) throw new ResearchError(400, "Invalid stage result");
+						if (name === "prepare") {
+							const setup = validateAutomaticSetup(cwd, datasetId, run, context.basis, submitted);
+							const unread = setup.model.mappings.filter(
+								(mapping) =>
+									!readEvidence.has(
+										sourceId({
+											docId: setup.model.docId,
+											location: { kind: "excel", sheet: mapping.sheet, range: mapping.cell },
+										}),
+									),
+							);
+							if (unread.length)
+								throw new ResearchError(
+									400,
+									`请用读取工具核对每个模型输入，再提交：${unread.map((mapping) => `${mapping.sheet}!${mapping.cell}`).join("、")}`,
+								);
+						}
 						if (name === "extract") {
 							pendingExtraction = submitted as IterationObservations;
 							const extracted = pendingExtraction;
@@ -454,6 +503,29 @@ export function createIterationEngine(
 		}
 	}
 	return {
+		prepare: (run, basis, signal) =>
+			execute(
+				run,
+				"prepare",
+				AutomaticSetupSchema,
+				"自动完成本轮研究准备，不要求用户选择文件、绑定输入或填写日期。context.preparation.files是项目当前文件目录，existingModel仅为上轮记录。先根据框架中引用的模型和文件内容确定当前估值模型；如果有新上传模型，读取后判断是否替代旧模型，不能只按文件名或上传时间猜测。用pe_iteration_read实际读取XLSX工作表、标签、期间表头、单位、可写数值输入与公式依赖，必要时读取相关PDF。读取XLSX返回model_version_id；model.baseVersionId须沿用它，确保基于已采用的最新模型。模型原值必须来自当前版本，不能用原件旧值。context.preparation.existingModel.revision或0填model.expectedRevision。自动建立“关键假设→所需数据→模型输入→敏感性”的对应：每个mapping写准确的sheet/cell/expectedValue、指标、期间、单位、合并或分部范围、币种、实际或假设角色，并关联judgmentIds和原模型已有的敏感性；不要写公式、标签或输出格。读取具体输入格后再提交，不把表头当输入。outputs选择已有估值结果公式，使用简短中文key；checks仅设置真正的恒等关系或模型已有检查，不将旧估值作为重算后必须相等的值。自动找公司全名、完整Wind代码和估值日期，不向用户重新索取已有信息；优先框架和项目明确的公司身份，不能混用其他证券。valuationDate和model.valuationDate须一致；dateSource与dateLabelSource原样复制模型日期和业务标签的sheet/cell/text，日期原文可为ISO日期或年月日，禁止用文件名、上传时间、财报报告期替代。若框架估值情景asOf已有明确基准日，可将两个日期来源填null并沿用该日期。所有新写的summary和sensitivity使用简短自然的中文；summary说明系统找到了哪个模型、日期和关键输入。识别存在疑点时继续查已有文件，不编造资料。只提交识别结果，后续Wind取数和写回由系统执行。",
+				{
+					basis,
+					preparation: {
+						existingModel: getIterationModelConfig(cwd, datasetId),
+						company: run.company,
+						files: withResearchDatabase(cwd, datasetId, (db) =>
+							db
+								.prepare(
+									"SELECT doc_id,original_filename,file_type,version_no,is_current,created_at FROM documents WHERE dataset_id=? AND deleted_at IS NULL ORDER BY created_at DESC",
+								)
+								.all(datasetId)
+								.filter((file) => run.inputs.some((input) => input.docId === file.doc_id)),
+						),
+					},
+				},
+				signal,
+			),
 		collect: async (run, basis, signal) => {
 			if (run.sourceConfig?.queryPolicy !== "judgment-definitions-v1")
 				throw new ResearchError(409, "采集方法已更新，请新建运行；旧产物和审查决定保留。");

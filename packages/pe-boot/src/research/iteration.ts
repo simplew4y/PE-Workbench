@@ -10,10 +10,12 @@ import {
 	type InformationSourceConfig,
 	informationCurrencyCode,
 	informationDisplayText,
+	informationSourceConfig,
 } from "../information-source-model.ts";
 import { readInformationView } from "../information-source-store.ts";
 import { parseSourceId } from "../source.ts";
 import { readWindSnapshot } from "../trusted-sources.ts";
+import { validateAutomaticSetup } from "./automatic-setup.ts";
 import {
 	captureResearchInputs,
 	currentResearchVersion,
@@ -35,6 +37,11 @@ import {
 	validateIterationObservations,
 } from "./iteration-model.ts";
 import {
+	freezeIterationModelBaseline,
+	getIterationModelConfig,
+	saveIterationModelConfig,
+} from "./iteration-model-update.ts";
+import {
 	observationReviewReasons,
 	quoteContainsNumber,
 	synchronizeIterationScope,
@@ -43,6 +50,7 @@ import {
 } from "./iteration-quality.ts";
 import { type FrameworkContent, isFrameworkDocument, ResearchError, validateFrameworkContent } from "./model.ts";
 import { researchTransaction, withResearchDatabase } from "./storage.ts";
+import { shanghaiToday, trackingPeriods } from "./tracking-periods.ts";
 
 export * from "./iteration-model.ts";
 export const ITERATION_PROCESSOR_VERSION = "2";
@@ -217,6 +225,10 @@ export function createFrameworkIteration(
 		basisVersionId: string;
 		modelId: string;
 		uploadIdentity: string;
+		monitorRunId?: string;
+		contextDocIds?: string[];
+		automaticSetup?: boolean;
+		company?: { name: string; ticker: string };
 		changeReview?: boolean;
 		sourceMode?: "documents" | "sources";
 		sourceConfig?: InformationSourceConfig;
@@ -224,14 +236,25 @@ export function createFrameworkIteration(
 ): FrameworkIteration {
 	if (!/^[A-Za-z0-9_-]{1,128}$/.test(input.requestId) || !input.modelId || !input.basisVersionId)
 		throw new ResearchError(400, "Invalid iteration request");
+	if (input.automaticSetup && !input.monitorRunId)
+		throw new ResearchError(400, "Automatic setup requires a project update run");
 	if (input.sourceMode === "sources") {
 		if (!input.sourceConfig) throw new ResearchError(400, "缺少信息源配置。");
 		assertInformationSourceConfig(input.sourceConfig);
-		input = { ...input, changeReview: true };
+		if (!input.monitorRunId) input = { ...input, changeReview: true };
 	}
 	return database(cwd, datasetId, (db) =>
 		researchTransaction(db, () => {
 			reconcile(db, datasetId);
+			if (
+				input.monitorRunId &&
+				!db
+					.prepare(`SELECT 1 FROM research_monitor_runs r JOIN research_monitor_plans p ON p.dataset_id=r.dataset_id
+			 WHERE r.dataset_id=? AND r.run_id=? AND r.status='running' AND r.lease_until>? AND r.plan_revision=p.revision
+			 AND json_extract(p.config_json,'$.updatePolicy')='direct' AND json_extract(p.config_json,'$.mode')='auto'`)
+					.get(datasetId, input.monitorRunId, Date.now())
+			)
+				throw new ResearchError(409, "自动更新计划已改变，请重新开始。");
 			const request = JSON.stringify(input);
 			const prior = db
 				.prepare("SELECT id,request_json FROM framework_iterations WHERE dataset_id=? AND request_id=?")
@@ -273,18 +296,32 @@ export function createFrameworkIteration(
 				basisVersionId: input.basisVersionId,
 				modelId: input.modelId,
 				processorVersion: ITERATION_PROCESSOR_VERSION,
+				...(input.monitorRunId ? { monitorRunId: input.monitorRunId } : {}),
+				...(input.automaticSetup
+					? { automaticSetup: true, ...(input.company ? { company: input.company } : {}) }
+					: {}),
 				sourceMode: input.sourceMode ?? "documents",
 				...(input.sourceConfig ? { sourceConfig: input.sourceConfig } : {}),
 				changeReview: input.changeReview === true,
-				automatic: input.changeReview
-					? false
-					: db.prepare("SELECT test_project FROM framework_iteration_settings WHERE dataset_id=?").get(datasetId)
-							?.test_project === 1,
+				automatic: input.monitorRunId
+					? true
+					: input.changeReview
+						? false
+						: db
+								.prepare("SELECT test_project FROM framework_iteration_settings WHERE dataset_id=?")
+								.get(datasetId)?.test_project === 1,
 				status: "queued",
 				reviewReasons: [],
-				stage: input.sourceMode === "sources" ? "collect" : "ingest",
+				stage: input.automaticSetup ? "prepare" : input.sourceMode === "sources" ? "collect" : "ingest",
 				ingestJobId: null,
-				inputs: JSON.parse(String(basis.inputs_json)),
+				inputs: input.contextDocIds
+					? captureResearchInputs(db, datasetId, [
+							...new Set([
+								...(JSON.parse(String(basis.inputs_json)) as { docId: string }[]).map((entry) => entry.docId),
+								...input.contextDocIds,
+							]),
+						])
+					: JSON.parse(String(basis.inputs_json)),
 				newDocIds: [],
 				artifacts: [],
 				invalidArtifacts: [],
@@ -310,13 +347,20 @@ export function createFrameworkIteration(
 		}),
 	);
 }
-export function listFrameworkIterations(cwd: string, datasetId: string): FrameworkIteration[] {
+export function listFrameworkIterations(cwd: string, datasetId: string, beforeId?: string): FrameworkIteration[] {
 	return database(cwd, datasetId, (db) =>
 		researchTransaction(db, () => {
 			reconcile(db, datasetId);
+			const cursor =
+				beforeId === undefined
+					? undefined
+					: db
+							.prepare("SELECT rowid FROM framework_iterations WHERE dataset_id=? AND id=?")
+							.get(datasetId, beforeId);
+			if (beforeId !== undefined && !cursor) throw new ResearchError(404, "Iteration history cursor not found");
 			return db
-				.prepare("SELECT id FROM framework_iterations WHERE dataset_id=? ORDER BY rowid DESC LIMIT 100")
-				.all(datasetId)
+				.prepare("SELECT id FROM framework_iterations WHERE dataset_id=? AND rowid<? ORDER BY rowid DESC LIMIT 100")
+				.all(datasetId, cursor ? Number(cursor.rowid) : Number.MAX_SAFE_INTEGER)
 				.map((r) => load(db, datasetId, String(r.id)));
 		}),
 	);
@@ -965,30 +1009,75 @@ export async function runFrameworkIteration(
 	try {
 		const basis = getResearchFramework(cwd, datasetId).versions.find((v) => v.id === run.basisVersionId)!.content;
 		if (!isFrameworkDocument(basis)) throw new ResearchError(409, "Complete framework required");
+		if (run.automaticSetup) {
+			const setup = await stage("prepare", async (stageSignal) => {
+				if (!engine.prepare) throw new ResearchError(409, "自动读取模型的服务暂不可用，请稍后点击立即更新重试。");
+				return validateAutomaticSetup(cwd, datasetId, run, basis, await engine.prepare(run, basis, stageSignal));
+			});
+			if (!run.preparedModelRevision) {
+				const model = saveIterationModelConfig(cwd, datasetId, setup.model);
+				run.preparedModelRevision = model.revision;
+			} else if (getIterationModelConfig(cwd, datasetId)?.revision !== run.preparedModelRevision) {
+				throw new ResearchError(409, "本轮使用的模型已改变，请重新更新。");
+			}
+			run.sourceConfig = informationSourceConfig(setup.companyName, setup.companyTicker, ["wind-financials"]);
+			const asOf = shanghaiToday(new Date(run.createdAt));
+			run.sourceConfig.trackingWindow = { valuationDate: setup.valuationDate, asOf };
+			run.sourceConfig.defaultPeriods = trackingPeriods(setup.valuationDate, asOf);
+			run.sourceMode = "sources";
+			database(cwd, datasetId, (db) =>
+				researchTransaction(db, () => {
+					owns(db, run);
+					fresh(db, run);
+					save(db, run);
+				}),
+			);
+			const baseline = freezeIterationModelBaseline(cwd, datasetId, run.id);
+			if (baseline.error) throw new ResearchError(409, baseline.error);
+		}
 		let collection: InformationCollection | undefined;
+		if (run.monitorRunId && !run.artifacts.some((a) => a.stage === "ingest")) {
+			const result = await ingest(run, signal);
+			run.newDocIds = [...new Set(result.docIds)];
+			run.inputs = database(cwd, datasetId, (db) =>
+				captureResearchInputs(db, datasetId, [
+					...new Set([...run.inputs.map((input) => input.docId), ...run.newDocIds]),
+				]),
+			);
+			checkpoint("ingest", result);
+		}
 		if (run.sourceMode === "sources") {
 			collection = await stage("collect", async (stageSignal) => {
 				if (!engine.collect) throw new ResearchError(409, "信息源采集器不可用。");
 				const collected = await engine.collect(run, basis, stageSignal);
-				if (!collected.docIds.length)
+				if (!collected.docIds.length && !(run.monitorRunId && run.newDocIds.length))
 					throw new ResearchError(
 						409,
 						"没有可读取的相关财务数据；空结果和调用失败不代表无需调整。修复来源问题后可手动恢复，采集预算不重置。",
 					);
 				return collected;
 			});
-			if (!collection.docIds.length)
+			if (!collection.docIds.length && !(run.monitorRunId && run.newDocIds.length))
 				throw new ResearchError(409, "没有可读取的相关财务数据；空结果和调用失败不代表无需调整。");
 			const baseline = getResearchFramework(cwd, datasetId).versions.find(
 				(value) => value.id === run.basisVersionId,
 			)!;
-			run.newDocIds = collection.docIds.filter((docId) => !baseline.inputs.some((input) => input.docId === docId));
+			run.newDocIds = [
+				...new Set([
+					...run.newDocIds,
+					...collection.docIds.filter((docId) => !baseline.inputs.some((input) => input.docId === docId)),
+				]),
+			];
 			database(cwd, datasetId, (db) =>
 				researchTransaction(db, () => {
 					owns(db, run);
 					fresh(db, run);
 					run.inputs = captureResearchInputs(db, datasetId, [
-						...new Set([...baseline.inputs.map((input) => input.docId), ...collection!.docIds]),
+						...new Set([
+							...run.inputs.map((input) => input.docId),
+							...baseline.inputs.map((input) => input.docId),
+							...collection!.docIds,
+						]),
 					]);
 					run.reviewReasons = [...collection!.warnings];
 					save(db, run);
@@ -1081,7 +1170,7 @@ export async function runFrameworkIteration(
 							}),
 						);
 				run.draftId = result.draftId;
-				if (run.reviewReasons.length) run.automatic = false;
+				if (run.reviewReasons.length && !run.monitorRunId) run.automatic = false;
 				if (run.automatic) {
 					run.stage = "publish";
 					database(cwd, datasetId, (db) =>

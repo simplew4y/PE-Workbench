@@ -1,6 +1,7 @@
 import { type Static, Type } from "typebox";
 import { Compile } from "typebox/compile";
 import type { InformationCollection, InformationSourceConfig } from "../information-source-model.ts";
+import type { AutomaticSetup } from "./automatic-setup.ts";
 import type { FrameworkContent, ResearchInput } from "./model.ts";
 import { ResearchError } from "./model.ts";
 
@@ -107,7 +108,15 @@ export const IterationImpactsSchema = Type.Object(
 );
 export type IterationObservations = Static<typeof IterationObservationsSchema>;
 export type IterationImpacts = Static<typeof IterationImpactsSchema>;
-export type IterationStage = "ingest" | "collect" | "extract" | "impact" | "revise" | "validate" | "publish";
+export type IterationStage =
+	| "prepare"
+	| "ingest"
+	| "collect"
+	| "extract"
+	| "impact"
+	| "revise"
+	| "validate"
+	| "publish";
 export type IterationStatus =
 	| "queued"
 	| "running"
@@ -130,6 +139,10 @@ export interface FrameworkIteration {
 	basisVersionId: string;
 	modelId: string;
 	processorVersion: string;
+	monitorRunId?: string;
+	automaticSetup?: boolean;
+	company?: { name: string; ticker: string };
+	preparedModelRevision?: number;
 	sourceMode?: "documents" | "sources";
 	sourceConfig?: InformationSourceConfig;
 	automatic: boolean;
@@ -165,6 +178,7 @@ export interface FrameworkIteration {
 	leaseUntil: number;
 }
 export interface IterationEngine {
+	prepare?(run: FrameworkIteration, basis: FrameworkContent, signal: AbortSignal): Promise<AutomaticSetup>;
 	collect?(run: FrameworkIteration, basis: FrameworkContent, signal: AbortSignal): Promise<InformationCollection>;
 	extract(run: FrameworkIteration, basis: FrameworkContent, signal: AbortSignal): Promise<IterationObservations>;
 	impact(

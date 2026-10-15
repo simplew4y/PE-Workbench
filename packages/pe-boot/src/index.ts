@@ -38,11 +38,14 @@ export * from "./research/cards.ts";
 export * from "./research/framework.ts";
 export * from "./research/iteration.ts";
 export { createIterationEngine } from "./research/iteration-engine.ts";
+export * from "./research/iteration-model-update.ts";
 export * from "./research/iteration-review.ts";
 export * from "./research/model.ts";
 export * from "./research/monitor.ts";
+export * from "./research/monitor-iteration.ts";
 export { createPiResearchEngine } from "./research/pi-engine.ts";
 export { FRAMEWORK_SECTION_TITLES, renderInvestmentFrameworkMarkdown } from "./research/report.ts";
+export { shanghaiToday, trackingPeriods } from "./research/tracking-periods.ts";
 export {
 	cancelResearchJob,
 	enqueueResearchJob,
@@ -61,6 +64,7 @@ export { isPeConsensusEnabled } from "./tools/feature-flags.ts";
 export { peFormulaTraceTool, tracePeFormula } from "./tools/formula-trace.ts";
 export { registerPeTools } from "./tools/index.ts";
 export { getPeMemoVersion, listPeMemoHistory } from "./tools/memo-storage.ts";
+export { listPeModelVersions } from "./tools/model-update.ts";
 export { peModelValidateTool, validatePeModel } from "./tools/model-validate.ts";
 export { listPePdfDocuments, pePdfListTool } from "./tools/pdf-list.ts";
 export { pePdfReadTool, readPePdfPages } from "./tools/pdf-read.ts";

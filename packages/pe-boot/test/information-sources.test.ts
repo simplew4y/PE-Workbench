@@ -1,12 +1,22 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	realpathSync,
+	renameSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { initializePeCollectionDatabase } from "../src/collection-schema.ts";
 import { resolvePeEvidenceSource } from "../src/evidence.ts";
 import {
 	assertInformationSourceConfig,
 	type InformationQuery,
+	type InformationSourceConfig,
 	informationSourceConfig,
 	renderWindFinancials,
 } from "../src/information-source-model.ts";
@@ -35,6 +45,7 @@ import {
 import { getIterationChangeReview } from "../src/research/iteration-review.ts";
 import { readResearchInput } from "../src/research/pi-engine.ts";
 import { withResearchDatabase } from "../src/research/storage.ts";
+import { trackingPeriods } from "../src/research/tracking-periods.ts";
 import { sourceId } from "../src/source.ts";
 import { frameworkFixture } from "./fixtures/framework.ts";
 
@@ -42,6 +53,45 @@ const roots: string[] = [];
 afterEach(() => {
 	vi.unstubAllGlobals();
 	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+it("sends every tracking quarter in chronological order, with a cutoff and no internal framework purpose", async () => {
+	const config = informationSourceConfig("Company", "0700.HK", ["wind-financials"]);
+	config.trackingWindow = { valuationDate: "2025-06-30", asOf: "2026-10-16" };
+	config.defaultPeriods = trackingPeriods(config.trackingWindow.valuationDate, config.trackingWindow.asOf);
+	const { root, run } = project(config);
+	let sent = "";
+	await runFrameworkIteration(
+		root,
+		"dataset_test",
+		run.id,
+		{
+			collect: async (value, _basis, signal) => {
+				await fetchIterationInformation(
+					root,
+					"dataset_test",
+					value,
+					{ ...query, purpose: "私有投资目的及框架版本" },
+					signal,
+					async (request) => {
+						sent = request.query;
+						return response();
+					},
+				);
+				return sourceCollectionResult(root, "dataset_test", value.id, "已保存");
+			},
+			extract: async (value) => observations(root, value),
+			impact: async () => ({ substantive: false, summary: "数据口径未核实", impacts: [], gaps: [] }),
+			revise: async () => {
+				throw new Error("No revision expected");
+			},
+		},
+		async () => ({ docIds: [], warnings: [] }),
+		AbortSignal.timeout(5000),
+	);
+	expect(sent).toContain(config.defaultPeriods.join("、"));
+	expect(sent).toContain("截至2026-10-16已披露");
+	expect(sent).not.toContain("私有投资目的及框架版本");
 });
 const query: InformationQuery = {
 	sourceId: "wind-financials",
@@ -76,7 +126,9 @@ function response(code = "0700.HK", period = "2025年年报营业收入", value:
 		isError: false,
 	};
 }
-function project() {
+function project(
+	sourceConfig: InformationSourceConfig = informationSourceConfig("Company", "0700.HK", ["wind-financials"]),
+) {
 	const root = mkdtempSync(join(tmpdir(), "pe-information-source-"));
 	roots.push(root);
 	for (const path of ["raw", "meta"]) mkdirSync(join(root, path));
@@ -99,7 +151,7 @@ function project() {
 		modelId: "test",
 		uploadIdentity: "sources",
 		sourceMode: "sources",
-		sourceConfig: informationSourceConfig("Company", "0700.HK", ["wind-financials"]),
+		sourceConfig,
 		changeReview: false,
 	});
 	return { root, run, basis, version };
@@ -142,6 +194,111 @@ function observations(root: string, run: ReturnType<typeof createFrameworkIterat
 		coverage: [{ docId, readLocations: ["text"], gaps: [] }],
 	};
 }
+
+async function collectArchive(root: string, run: ReturnType<typeof createFrameworkIteration>) {
+	const fetcher = vi.fn(async () => response());
+	const completed = await runFrameworkIteration(
+		root,
+		"dataset_test",
+		run.id,
+		{
+			collect: async (value, _basis, signal) => {
+				await fetchIterationInformation(root, "dataset_test", value, query, signal, fetcher);
+				return sourceCollectionResult(root, "dataset_test", value.id, "已归档");
+			},
+			extract: async (value) => observations(root, value),
+			impact: async () => ({ substantive: false, summary: "无需修改", impacts: [], gaps: [] }),
+			revise: async () => {
+				throw new Error("No revision expected");
+			},
+		},
+		async () => ({ docIds: [], warnings: [] }),
+		AbortSignal.timeout(5000),
+	);
+	expect(completed.status, completed.error ?? "").toBe("no_change");
+	expect(fetcher).toHaveBeenCalledTimes(1);
+	return listInformationSourceQueries(root, "dataset_test", run.id)[0];
+}
+
+it.each(["default TMPDIR", "symlinked project root"])("archives and reads sources under %s", async (mode) => {
+	const projectState = project();
+	let root = projectState.root;
+	if (mode === "symlinked project root") {
+		const aliasFolder = mkdtempSync(join(tmpdir(), "pe-information-source-alias-"));
+		roots.push(aliasFolder);
+		root = join(aliasFolder, "project");
+		symlinkSync(projectState.root, root, "dir");
+	}
+	const record = await collectArchive(root, projectState.run);
+	for (const projectRoot of [root, realpathSync(root)]) {
+		expect(
+			JSON.parse(readIterationSourceArchive(projectRoot, "dataset_test", projectState.run.id, record.id, "raw"))
+				.response,
+		).toEqual(response());
+		expect(readIterationSourceArchive(projectRoot, "dataset_test", projectState.run.id, record.id, "text")).toContain(
+			"值：9",
+		);
+	}
+});
+
+it.each([
+	["directory", "inside"],
+	["directory", "outside"],
+	["file", "inside"],
+	["file", "outside"],
+] as const)("rejects an archive %s symlink pointing %s the project", async (kind, destination) => {
+	const { root, run } = project();
+	const record = await collectArchive(root, run);
+	const rawPath = join(root, record.attempts[0].rawPath!);
+	const target = kind === "directory" ? dirname(rawPath) : rawPath;
+	const outside = mkdtempSync(join(tmpdir(), "pe-information-source-outside-"));
+	roots.push(outside);
+	const relocated = join(destination === "inside" ? root : outside, "relocated");
+	renameSync(target, relocated);
+	symlinkSync(relocated, target, kind === "directory" ? "dir" : "file");
+	for (const format of ["raw", "text"] as const)
+		expect(() => readIterationSourceArchive(root, "dataset_test", run.id, record.id, format)).toThrowError(
+			expect.objectContaining({ status: 403, message: "来源归档不能使用符号链接。" }),
+		);
+});
+
+it.each(["traversal", "absolute external file", "project root"])("rejects an archived %s path", async (mode) => {
+	const { root, run } = project();
+	const record = await collectArchive(root, run);
+	const outside = mkdtempSync(join(tmpdir(), "pe-information-source-outside-"));
+	roots.push(outside);
+	const externalFile = join(realpathSync(outside), "archive.json");
+	writeFileSync(externalFile, readFileSync(join(root, record.attempts[0].rawPath!)));
+	const forged = { ...record, id: "forged-query", attempts: [] };
+	const attempt = {
+		...record.attempts[0],
+		id: "forged-attempt",
+		rawPath:
+			mode === "traversal"
+				? relative(realpathSync(root), externalFile)
+				: mode === "project root"
+					? "."
+					: externalFile,
+	};
+	withResearchDatabase(root, "dataset_test", (db) => {
+		db.prepare("INSERT INTO framework_iteration_source_queries VALUES(?,?,?)").run(
+			run.id,
+			forged.id,
+			JSON.stringify(forged),
+		);
+		db.prepare("INSERT INTO framework_iteration_source_attempts VALUES(?,?,?,?,?,?)").run(
+			attempt.id,
+			run.id,
+			forged.id,
+			attempt.number,
+			attempt.finishedAt,
+			JSON.stringify(attempt),
+		);
+	});
+	expect(() => readIterationSourceArchive(root, "dataset_test", run.id, forged.id, "raw")).toThrowError(
+		expect.objectContaining({ status: 403, message: "来源归档路径超出项目。" }),
+	);
+});
 
 it("renders full tables once and preserves field periods, nulls, original units and JSON provenance", () => {
 	const rendered = renderWindFinancials(response(), "0700.HK");

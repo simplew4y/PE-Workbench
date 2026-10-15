@@ -21,7 +21,7 @@ export function registerStockTrackingWorker(pi: ExtensionAPI) {
 
 export async function ensureResearchMonitorWorker(cwd: string, datasetId: string) {
   const state = getResearchMonitor(cwd, datasetId);
-  if (!state.config?.enabled && !getStockTracking(cwd, datasetId).trackers.some((tracker) => tracker.config.enabled)) return;
+  if (!state.config?.enabled && !state.manualRequested && !getStockTracking(cwd, datasetId).trackers.some((tracker) => tracker.config.enabled)) return;
   if (await lockfile.check(join(cwd, "meta/collection.sqlite3"), { lockfilePath: join(cwd, "meta/research-worker.lock"), stale: 30_000 })) return;
   const directory = join(cwd, "generated", "monitoring");
   mkdirSync(directory, { recursive: true });

@@ -64,6 +64,9 @@ export function PeMonitorPanel({ project, monitor, framework, refresh, mode = "a
   }
   const online = monitor.workerOnline;
   const latest = monitor.runs[0];
+  const workflowUrl = `/research-workbench?datasetId=${encodeURIComponent(project.datasetId)}`;
+  const iterationSettings = monitor.config?.pipeline === "iteration";
+  const iterationRun = latest?.pipeline === "iteration" || !!latest?.iterationId;
   const candidate = framework.drafts.find((draft) => draft.id === latest?.draftId);
   const current = framework.versions.find((version) => version.id === framework.currentVersionId);
   const changedItems = latest?.changes?.filter((change) => !["title", "objective", "horizon", "coverageGaps"].includes(change.id)) ?? [];
@@ -84,7 +87,8 @@ export function PeMonitorPanel({ project, monitor, framework, refresh, mode = "a
       {(updated || awaiting) && changedItems.length > 0 && <><small>变化摘录</small><ul className={styles.keyChanges}>{changedItems.slice(0, 2).map((change) => <li key={change.id}><p className={styles.excerpt}>{change.id in FRAMEWORK_SECTION_TITLES ? `${FRAMEWORK_SECTION_TITLES[change.id as keyof typeof FRAMEWORK_SECTION_TITLES]}已更新，请查看前后版本。` : change.after ? changeExcerpt(change.after) : "一项原有判断已移除，请查看变化依据。"}</p></li>)}</ul></>}
       {gap && <details className={styles.attention}><summary>仍需核实：{gap.includes("：") ? gap.split("：")[0] : "存在资料缺口"}</summary>{coverageGaps.map((item, index) => <p key={index}>{item}</p>)}</details>}
       {failedSources.length > 0 && <p className={styles.sourceNotice}>{[...new Set(failedSources.map((event) => names[event.stage as keyof typeof names] ?? "部分资料"))].join("、")}暂未核实，相关结论仍有信息缺口。</p>}
-      {awaiting && <div className={styles.monitorActions}>
+      {iterationRun && <p><a href={`${workflowUrl}${latest?.iterationId ? `&runId=${encodeURIComponent(latest.iterationId)}` : ""}`}>前往统一审阅处理本轮迭代</a>，接受或拒绝会同步整轮状态。</p>}
+      {awaiting && !iterationRun && <div className={styles.monitorActions}>
         <button type="button" disabled={busy || stale || legacyDraft} onClick={() => void request("publish", { draftId: candidate.id, revision: candidate.revision, expectedVersionId: candidate.baseVersionId, requestId: `review_${candidate.id}_${candidate.revision}` })}>接受调整</button>
         <button type="button" disabled={busy} onClick={() => void request("reject", { draftId: candidate.id, revision: candidate.revision, content: candidate.content })}>暂不调整</button>
       </div>}
@@ -96,6 +100,7 @@ export function PeMonitorPanel({ project, monitor, framework, refresh, mode = "a
     {error && <p role="alert">{error}</p>}
     {mode !== "activity" && <details className={styles.trackingSettings} open={mode === "settings" ? true : undefined}>
       <summary>自动跟踪设置</summary>
+    {iterationSettings ? <p>此项目已使用统一迭代追踪。请前往<a href={workflowUrl}>研究工作台追踪设置</a>，确认后台模型及信息源费用后启用、暂停或修改。</p> : <>
     <div className={styles.monitorActions}>
       <button type="button" disabled={busy || !framework.currentVersionId} onClick={() => void request("monitor-save", { config: { ...(monitor.config?.enabled ? monitor.config : config), enabled: !monitor.config?.enabled }, revision: monitor.revision })}>{monitor.config?.enabled ? "暂停跟踪" : "启用跟踪"}</button>
       <button type="button" disabled={busy || !monitor.config?.enabled || (latest?.status === "running" && online)} onClick={() => void request("monitor-run")}>{online ? "现在检查" : "恢复自动跟踪"}</button>
@@ -111,6 +116,7 @@ export function PeMonitorPanel({ project, monitor, framework, refresh, mode = "a
       {categories.map((category) => <label key={category}>{names[category]}<textarea rows={2} value={config.queries.find((q) => q.category === category)?.query ?? ""} onChange={(e) => setConfig({ ...config, queries: [...config.queries.filter((q) => q.category !== category), ...(e.target.value.trim() ? [{ category, query: e.target.value }] : [])] })} /></label>)}
       </details>
       <button type="button" disabled={busy} onClick={() => void request("monitor-save", { config: { ...config, enabled: monitor.config?.enabled ?? false }, revision: monitor.revision })}>保存设置</button>
+    </>}
     <details className={styles.monitorHistory}><summary>历史检查与运行详情</summary>{monitor.runs.length === 0 && <p>尚未执行。启用后会立即开始首轮。</p>}
       {monitor.runs.map((run) => {
         const draft = framework.drafts.find((d) => d.id === run.draftId);
@@ -126,7 +132,7 @@ export function PeMonitorPanel({ project, monitor, framework, refresh, mode = "a
           {!!run.changes?.length && <div><h3>框架为什么改变</h3>{run.changes.map((change) => <section key={change.id}>
             <small>{change.id}</small><p>之前：{change.before ?? "无此条目"}</p><p>现在：{change.after ?? "已移除"}</p><p>依据：{change.reason}</p>
           </section>)}</div>}
-          {draft?.status === "open" && <div className={styles.monitorActions}>
+          {run.iterationId || run.pipeline === "iteration" ? <p><a href={`${workflowUrl}${run.iterationId ? `&runId=${encodeURIComponent(run.iterationId)}` : ""}`}>前往统一审阅处理本轮迭代</a></p> : draft?.status === "open" && <div className={styles.monitorActions}>
             <button type="button" disabled={busy || stale || !isFrameworkDocument(draft.content)} onClick={() => void request("publish", { draftId: draft.id, revision: draft.revision, expectedVersionId: draft.baseVersionId, requestId: `review_${draft.id}_${draft.revision}` })}>{!isFrameworkDocument(draft.content) ? "旧版草稿，请重新生成" : stale ? "基准已变，请重新复盘" : "确认更新框架"}</button>
             <button type="button" disabled={busy} onClick={() => void request("reject", { draftId: draft.id, revision: draft.revision, content: draft.content })}>拒绝草稿</button>
           </div>}

@@ -2,14 +2,23 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
+import { assertInformationSourceConfig, type InformationSourceConfig } from "../information-source-model.ts";
 import { getPeMemoVersion, listPeMemoHistory } from "../tools/memo-storage.ts";
 import { fetchWindSnapshot, WIND_CATEGORIES, type WindQuery } from "../trusted-sources.ts";
 import { captureResearchInputs, createResearchDraft, getResearchFramework, publishResearchDraft } from "./framework.ts";
 import { getFrameworkItems, isFrameworkDocument, ResearchError, type StoredFrameworkContent } from "./model.ts";
+import { type MonitorIterationEngineFactory, runResearchMonitorIteration } from "./monitor-iteration.ts";
 import { researchTransaction, withResearchDatabase } from "./storage.ts";
 import type { ResearchEngine, ResearchJobInput } from "./watch.ts";
 
 export interface MonitorConfig {
+	pipeline?: "iteration";
+	updatePolicy?: "direct";
+	automaticSetup?: boolean;
+	company?: { name: string; ticker: string };
+	modelId?: string;
+	runtime?: "server";
+	sourceConfig?: InformationSourceConfig;
 	enabled: boolean;
 	mode: "auto" | "review";
 	intervalHours: number;
@@ -26,6 +35,8 @@ export interface MonitorEvent {
 	evidenceId?: string;
 }
 export interface MonitorRun {
+	pipeline?: "iteration";
+	iterationId?: string;
 	id: string;
 	startedAt: string;
 	finishedAt: string | null;
@@ -48,6 +59,12 @@ CREATE TABLE IF NOT EXISTS research_monitor_runs (
  run_id TEXT PRIMARY KEY, dataset_id TEXT NOT NULL, plan_revision INTEGER NOT NULL,
  status TEXT NOT NULL, lease_until INTEGER NOT NULL, result_json TEXT NOT NULL, started_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS research_monitor_cursor_resets (
+ dataset_id TEXT PRIMARY KEY, revision INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS research_monitor_manual_requests (
+ dataset_id TEXT PRIMARY KEY, plan_revision INTEGER NOT NULL
+);
 CREATE UNIQUE INDEX IF NOT EXISTS research_monitor_active ON research_monitor_runs(dataset_id) WHERE status='running';
 `;
 function database<T>(cwd: string, datasetId: string, action: (db: DatabaseSync) => T): T {
@@ -62,6 +79,9 @@ export function getResearchMonitor(cwd: string, datasetId: string) {
 		return {
 			config: row ? (JSON.parse(String(row.config_json)) as MonitorConfig) : null,
 			revision: row ? Number(row.revision) : 0,
+			manualRequested: !!db
+				.prepare("SELECT 1 FROM research_monitor_manual_requests WHERE dataset_id=? AND plan_revision=?")
+				.get(datasetId, Number(row?.revision ?? 0)),
 			nextRunAt: row ? Number(row.next_run_at) : null,
 			heartbeatAt: row?.heartbeat_at ? Number(row.heartbeat_at) : null,
 			workerOnline: !!row?.heartbeat_at && Date.now() - Number(row.heartbeat_at) < 30_000,
@@ -74,9 +94,59 @@ export function getResearchMonitor(cwd: string, datasetId: string) {
 		};
 	});
 }
-export function saveResearchMonitor(cwd: string, datasetId: string, value: unknown, revision: number) {
+export function saveResearchMonitor(
+	cwd: string,
+	datasetId: string,
+	value: unknown,
+	revision: number,
+	options: { reprocess?: boolean } = {},
+) {
+	if (options.reprocess !== undefined && typeof options.reprocess !== "boolean")
+		throw new ResearchError(400, "Invalid monitoring reprocess option");
 	if (!value || typeof value !== "object") throw new ResearchError(400, "Invalid monitoring plan");
 	const c = value as MonitorConfig;
+	if (c.pipeline !== undefined && c.pipeline !== "iteration")
+		throw new ResearchError(400, "Unknown monitoring pipeline");
+	if (c.pipeline === "iteration") {
+		if (
+			c.automaticSetup !== undefined &&
+			(c.automaticSetup !== true || c.updatePolicy !== "direct" || c.mode !== "auto")
+		)
+			throw new ResearchError(400, "Automatic setup requires direct updates");
+		if (
+			c.company !== undefined &&
+			(!c.automaticSetup ||
+				!c.company ||
+				typeof c.company.name !== "string" ||
+				typeof c.company.ticker !== "string" ||
+				c.company.name.length > 200 ||
+				c.company.ticker.length > 100)
+		)
+			throw new ResearchError(400, "Invalid project company context");
+		if (c.updatePolicy !== undefined && c.updatePolicy !== "direct")
+			throw new ResearchError(400, "Unknown update policy");
+		if (c.runtime !== "server" || typeof c.modelId !== "string" || !c.modelId.trim() || c.modelId.length > 200)
+			throw new ResearchError(400, "Iteration monitoring requires an explicit server runtime and modelId");
+		if (
+			(c.mode !== "review" && !(c.mode === "auto" && c.updatePolicy === "direct")) ||
+			c.includeMemos !== false ||
+			!Array.isArray(c.queries) ||
+			c.queries.length
+		)
+			throw new ResearchError(400, "Iteration monitoring requires review mode, queries: [] and includeMemos: false");
+		if (c.sourceConfig !== undefined) {
+			if (!c.sourceConfig || typeof c.sourceConfig !== "object" || Array.isArray(c.sourceConfig))
+				throw new ResearchError(400, "Invalid iteration source configuration");
+			assertInformationSourceConfig(c.sourceConfig);
+		}
+	} else if (
+		c.modelId !== undefined ||
+		c.runtime !== undefined ||
+		c.sourceConfig !== undefined ||
+		c.updatePolicy !== undefined
+	) {
+		throw new ResearchError(400, "Select the iteration pipeline before configuring its runtime or sources");
+	}
 	if (
 		typeof c.enabled !== "boolean" ||
 		!["auto", "review"].includes(c.mode) ||
@@ -101,6 +171,16 @@ export function saveResearchMonitor(cwd: string, datasetId: string, value: unkno
 	)
 		throw new ResearchError(400, "Invalid plan: interval 1–168 hours, at most one query per Wind category");
 	const config: MonitorConfig = {
+		...(c.pipeline === "iteration"
+			? {
+					pipeline: c.pipeline,
+					...(c.updatePolicy ? { updatePolicy: c.updatePolicy } : {}),
+					...(c.automaticSetup ? { automaticSetup: true, ...(c.company ? { company: c.company } : {}) } : {}),
+					modelId: c.modelId!.trim(),
+					runtime: c.runtime,
+					...(c.sourceConfig ? { sourceConfig: c.sourceConfig } : {}),
+				}
+			: {}),
 		enabled: c.enabled,
 		mode: c.mode,
 		intervalHours: c.intervalHours,
@@ -112,30 +192,80 @@ export function saveResearchMonitor(cwd: string, datasetId: string, value: unkno
 		throw new ResearchError(409, "Publish an initial framework before enabling monitoring");
 	database(cwd, datasetId, (db) =>
 		researchTransaction(db, () => {
-			const row = db.prepare("SELECT revision FROM research_monitor_plans WHERE dataset_id=?").get(datasetId);
+			const row = db
+				.prepare("SELECT revision,config_json,cursor_json FROM research_monitor_plans WHERE dataset_id=?")
+				.get(datasetId);
 			if ((row ? Number(row.revision) : 0) !== revision)
 				throw new ResearchError(409, "Monitoring settings changed; reload");
-			db.prepare(`INSERT INTO research_monitor_plans VALUES(?,?,?,?,?,'',NULL)
-			ON CONFLICT(dataset_id) DO UPDATE SET config_json=excluded.config_json,enabled=excluded.enabled,revision=excluded.revision,next_run_at=excluded.next_run_at,cursor_json='',heartbeat_at=NULL`).run(
+			const previous = row ? (JSON.parse(String(row.config_json)) as MonitorConfig) : null;
+			db.prepare("DELETE FROM research_monitor_manual_requests WHERE dataset_id=?").run(datasetId);
+			const cursor =
+				row && previous?.pipeline === config.pipeline && !options.reprocess ? String(row.cursor_json) : "";
+			if (!row || previous?.pipeline !== config.pipeline || options.reprocess)
+				db.prepare(
+					"INSERT INTO research_monitor_cursor_resets VALUES(?,?) ON CONFLICT(dataset_id) DO UPDATE SET revision=excluded.revision",
+				).run(datasetId, revision + 1);
+			db.prepare(`INSERT INTO research_monitor_plans VALUES(?,?,?,?,?,?,NULL)
+			ON CONFLICT(dataset_id) DO UPDATE SET config_json=excluded.config_json,enabled=excluded.enabled,revision=excluded.revision,next_run_at=excluded.next_run_at,cursor_json=excluded.cursor_json,heartbeat_at=NULL`).run(
 				datasetId,
 				JSON.stringify(config),
 				Number(config.enabled),
 				revision + 1,
 				Date.now(),
+				cursor,
 			);
 		}),
 	);
 	return getResearchMonitor(cwd, datasetId);
 }
 export function requestResearchMonitorRun(cwd: string, datasetId: string): void {
-	database(cwd, datasetId, (db) => {
-		if (
-			db
-				.prepare("UPDATE research_monitor_plans SET next_run_at=? WHERE dataset_id=? AND enabled=1")
-				.run(Date.now(), datasetId).changes !== 1
-		)
-			throw new ResearchError(409, "Enable monitoring first");
-	});
+	database(cwd, datasetId, (db) =>
+		researchTransaction(db, () => {
+			const row = db
+				.prepare("SELECT config_json,revision FROM research_monitor_plans WHERE dataset_id=?")
+				.get(datasetId);
+			const config = row ? (JSON.parse(String(row.config_json)) as MonitorConfig) : null;
+			if (config?.pipeline === "iteration" && config.updatePolicy === "direct") {
+				if (
+					db
+						.prepare(
+							"SELECT 1 FROM research_monitor_runs WHERE dataset_id=? AND status NOT IN ('published','no_change','rejected','cancelled')",
+						)
+						.get(datasetId)
+				)
+					throw new ResearchError(409, "上一轮尚未完成，请先处理或结束上一轮。");
+				db.prepare(
+					"INSERT INTO research_monitor_manual_requests VALUES(?,?) ON CONFLICT(dataset_id) DO NOTHING",
+				).run(datasetId, Number(row!.revision));
+				return;
+			}
+			if (
+				db
+					.prepare("UPDATE research_monitor_plans SET next_run_at=? WHERE dataset_id=? AND enabled=1")
+					.run(Date.now(), datasetId).changes !== 1
+			)
+				throw new ResearchError(409, "Enable monitoring first");
+		}),
+	);
+}
+
+export function cancelResearchMonitorRun(cwd: string, datasetId: string, runId: string): void {
+	database(cwd, datasetId, (db) =>
+		researchTransaction(db, () => {
+			const row = db
+				.prepare("SELECT result_json FROM research_monitor_runs WHERE dataset_id=? AND run_id=?")
+				.get(datasetId, runId);
+			if (!row) throw new ResearchError(404, "找不到这轮更新。");
+			const run = JSON.parse(String(row.result_json)) as MonitorRun;
+			if (["published", "no_change", "cancelled", "rejected"].includes(run.status))
+				throw new ResearchError(409, "这轮更新已结束。");
+			run.status = "cancelled";
+			run.finishedAt = new Date().toISOString();
+			db.prepare(
+				"UPDATE research_monitor_runs SET status='cancelled',lease_until=0,result_json=? WHERE dataset_id=? AND run_id=?",
+			).run(JSON.stringify(run), datasetId, runId);
+		}),
+	);
 }
 
 // One bounded run per project. The durable lease fences competing workers and late publication.
@@ -145,8 +275,11 @@ export async function runResearchMonitor(
 	engine: ResearchEngine,
 	signal: AbortSignal,
 	fetchSnapshot: typeof fetchWindSnapshot = fetchWindSnapshot,
+	iterationEngineForRun?: MonitorIterationEngineFactory,
 ): Promise<boolean> {
 	signal.throwIfAborted();
+	if (getResearchMonitor(cwd, datasetId).config?.pipeline === "iteration")
+		return runResearchMonitorIteration(cwd, datasetId, signal, iterationEngineForRun);
 	const claim = database(cwd, datasetId, (db) =>
 		researchTransaction(db, () => {
 			const now = Date.now();

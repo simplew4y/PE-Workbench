@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { setTimeout as delay } from "node:timers/promises";
@@ -103,10 +103,15 @@ function active(db: DatabaseSync, run: FrameworkIteration): void {
 	assertInformationSourceConfig(run.sourceConfig);
 }
 function archivePath(cwd: string, path: string): string {
-	const target = resolve(cwd, path);
-	const rel = relative(realpathSync(cwd), target);
+	const root = realpathSync(cwd);
+	const target = resolve(root, path);
+	const rel = relative(root, target);
 	if (!rel || rel.startsWith("..") || isAbsolute(rel)) throw new ResearchError(403, "来源归档路径超出项目。");
-	if (realpathSync(dirname(target)) !== dirname(target)) throw new ResearchError(403, "来源归档不能使用符号链接。");
+	if (
+		realpathSync(dirname(target)) !== dirname(target) ||
+		lstatSync(target, { throwIfNoEntry: false })?.isSymbolicLink()
+	)
+		throw new ResearchError(403, "来源归档不能使用符号链接。");
 	return target;
 }
 function loadQueries(db: DatabaseSync, runId: string): InformationSourceQueryRecord[] {
@@ -321,7 +326,8 @@ export async function fetchIterationInformation(
 					]) === requestIdentity,
 			);
 			if (sameRequest) return sameRequest;
-			const actualPeriods = [...(previous.length ? query.periods : config.defaultPeriods)].sort();
+			const actualPeriods = [...(previous.length ? query.periods : config.defaultPeriods)];
+			if (!config.trackingWindow) actualPeriods.sort();
 			const definitions: Record<string, string> = {
 				period: "每个指标的报告期和单季/累计统计口径",
 				currency: "每个指标的记账币种和计量单位",
@@ -334,7 +340,7 @@ export async function fetchIterationInformation(
 			const definitionRequest = checks.length
 				? `同时返回${checks.map((check) => definitions[check]).join("、")}，放在同一表格中该指标对应的独立字段（指标名.期间类型、指标名.币种、指标名.业务口径、指标名.数据角色、指标名.指标定义）；未知返回空，不凭查询要求补写定义。`
 				: "";
-			const actualQuery = `查询 ${config.companyName}（${config.companyTicker}）${actualPeriods.join("、")}的${query.metrics.join("、")}财务数据。${query.currency ? `请以${query.currency}计量并标明币种。` : ""}保留证券代码、每个指标的报告期、原始单位、币种、业务名称及实际或预测标识。没有数据返回空，不推算数值。${definitionRequest}`;
+			const actualQuery = `查询 ${config.companyName}（${config.companyTicker}）${actualPeriods.join("、")}的${query.metrics.join("、")}财务数据。${config.trackingWindow ? `仅返回截至${config.trackingWindow.asOf}已披露的数据，当前季度尚未结束或未披露时返回空；同时返回发布日期和原始来源链接。` : ""}${query.currency ? `请以${query.currency}计量并标明币种。` : ""}保留证券代码、每个指标的报告期、原始单位、币种、业务名称及实际或预测标识。没有数据返回空，不推算数值。${definitionRequest}`;
 			if (actualQuery.length > 2000)
 				throw new ResearchError(400, "查询内容超过 Wind 上限，请缩小指标和报告期范围。");
 			const id = informationHash(JSON.stringify([query.sourceId, actualQuery]));

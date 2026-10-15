@@ -65,3 +65,31 @@ test("header settings view opens controls while activity view omits settings", (
   assert.match(activity, /有一份调整建议待你确认/);
   assert.doesNotMatch(activity, /保存设置/);
 });
+
+test("iteration plans use unified settings even when disabled and retain legacy run history", () => {
+  for (const enabled of [false, true]) {
+    const html = renderToStaticMarkup(React.createElement(exports.PeMonitorPanel, {
+      project, mode: "settings", refresh() {},
+      monitor: { config: { ...config, enabled, pipeline: "iteration" }, revision: 1, workerOnline: false, runs: [run] },
+      framework: { currentVersionId: "current", drafts: [{ id: "draft", status: "open", revision: 1, baseVersionId: "current", content: frameworkFixture() }], versions: [] },
+    }));
+    assert.match(html, /href="\/research-workbench\?datasetId=p"/);
+    assert.match(html, /确认后台模型及信息源费用/);
+    for (const label of ["启用跟踪", "暂停跟踪", "保存设置", "恢复自动跟踪", "现在检查"]) assert.doesNotMatch(html, new RegExp(`>${label}<`));
+    assert.match(html, /历史检查与运行详情/);
+    assert.match(html, /确认更新框架/);
+    assert.match(html, /拒绝草稿/);
+  }
+});
+
+test("linked iteration drafts expose only unified review actions in activity and history", () => {
+  for (const trackingRun of [{ ...run, iterationId: "iteration /1" }, { ...run, pipeline: "iteration" }]) {
+    const html = renderToStaticMarkup(React.createElement(exports.PeMonitorPanel, {
+      project, refresh() {}, monitor: { config, revision: 1, workerOnline: true, runs: [trackingRun] },
+      framework: { currentVersionId: "current", drafts: [{ id: "draft", status: "open", revision: 1, baseVersionId: "current", content: frameworkFixture() }], versions: [] },
+    }));
+    assert.equal((html.match(/前往统一审阅处理本轮迭代/g) || []).length, 2);
+    if (trackingRun.iterationId) assert.match(html, /runId=iteration%20%2F1/);
+    for (const label of ["接受调整", "暂不调整", "确认更新框架", "拒绝草稿"]) assert.doesNotMatch(html, new RegExp(`>${label}<`));
+  }
+});

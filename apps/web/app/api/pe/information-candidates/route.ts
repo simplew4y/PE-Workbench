@@ -1,4 +1,3 @@
-import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import {
   getResearchMonitor,
@@ -10,18 +9,10 @@ import { parseFormDataWithinLimit, RequestBodyTooLargeError } from "@/lib/bounde
 import { ensureResearchMonitorWorker } from "@/lib/research-monitor-worker";
 import { assertPeUserPathAllowed } from "@/lib/pe-multi-user-paths";
 import { getPeProject } from "@/lib/pe-project-store";
+import { isAuthorizedInformationDelivery } from "@/lib/information-candidate-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-function authorized(request: Request): boolean {
-  const expected = process.env.PE_WORKBENCH_INGEST_TOKEN?.trim();
-  const value = request.headers.get("authorization");
-  if (!expected || !value?.startsWith("Bearer ")) return false;
-  const supplied = Buffer.from(value.slice(7));
-  const configured = Buffer.from(expected);
-  return supplied.length === configured.length && timingSafeEqual(supplied, configured);
-}
 
 function failure(error: unknown): Response {
   if (error instanceof RequestBodyTooLargeError) {
@@ -35,7 +26,7 @@ function failure(error: unknown): Response {
 
 export async function POST(request: Request) {
   try {
-    if (!authorized(request)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!isAuthorizedInformationDelivery(request)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     if (!request.headers.get("content-type")?.startsWith("multipart/form-data")) {
       return NextResponse.json({ error: "multipart/form-data required" }, { status: 415 });
     }

@@ -6,6 +6,7 @@ import type { IterationChange, IterationChangeDecision, IterationChangeReview, I
 import { parseSourceId } from "@earendil-works/pe-boot/source";
 import { PeSourceCitation } from "./PeSourceCitation";
 import { FrameworkText } from "./PeFrameworkPanel";
+import { connectedReviewChanges } from "@/lib/iteration-review-groups";
 import styles from "./FrameworkIterationTest.module.css";
 
 const sections: Record<string, string> = {
@@ -73,7 +74,7 @@ export function FrameworkChangeReview({ review, observations, cwd, editable, bus
   }
   return <section className={`${styles.panel} ${styles.changeReview}`} aria-label="逐项审查框架修改">
     <div className={styles.sectionHeading}><GitCompareArrows size={19} /><h2>审查框架修改</h2><span className={styles.count}>{changes.length} 处修改</span></div>
-    <p className={styles.reviewIntro}>每处修改可独立接受或不采用，决定保存后可撤回。关联位置供你核查，可展开后显式批量处理；发布前检查实际组装内容。</p>
+    <p className={styles.reviewIntro}>先逐项核对，决定保存后可撤回。同一判断及相依正文须一致采用或拒绝，避免新判断搭配旧摘要；可展开关联组一次处理，独立修改仍可分别决定。</p>
     <div className={styles.reviewStats}><span>待决定 <strong>{counts.pending}</strong></span><span>已接受 <strong>{counts.accepted}</strong></span><span>未采用 <strong>{counts.rejected}</strong></span><span>审查记录 <strong>r{review.revision}</strong></span></div>
     <div className={styles.reviewToolbar}>
       <label>筛选决定<select aria-label="筛选审查决定" value={filter} onChange={(event) => setFilter(event.target.value)}><option value="all">全部修改</option>{Object.entries(decisions).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
@@ -84,7 +85,7 @@ export function FrameworkChangeReview({ review, observations, cwd, editable, bus
       <div className={styles.changeList}>
         {shown.map((change) => {
           const decision = review.decisions[change.id];
-          const linked = changes.filter((entry) => entry.groupId === change.groupId);
+          const linked = connectedReviewChanges(changes, change);
           const related = changes.filter((entry) => entry.groupId !== change.groupId &&
             (change.dependencies.includes(entry.groupId) || change.judgmentIds.some((id) => entry.judgmentIds.includes(id))));
           const facts = observations?.observations.filter((entry) => change.observationIds.includes(entry.id)) || [];
@@ -102,8 +103,8 @@ export function FrameworkChangeReview({ review, observations, cwd, editable, bus
             {editable && <div className={styles.changeDecision}>
               <label>审查备注<textarea value={note} maxLength={2000} aria-label={`审查备注 ${title}`} onChange={(event) => setNotes((current) => ({ ...current, [change.id]: { value: event.target.value, at: decision.at } }))} placeholder="记录本项采纳理由、证据疑点或未采用原因" /></label>
               <div><button disabled={busy} onClick={() => void onDecide([change.id], "accepted", note)}><Check size={14} />接受本项</button><button disabled={busy} onClick={() => void onDecide([change.id], "rejected", note)}><X size={14} />不采用本项</button><button disabled={busy || decision.decision === "pending"} onClick={() => void onDecide([change.id], "pending", note)}><RotateCcw size={13} />撤回本项决定</button></div>
-              {linked.length > 1 && <details><summary>批量处理同判断或章节的修改（{linked.length}处）</summary><p>仅批量操作会同时决定以下位置，并使用本项备注。关联不表示必须一起采纳。</p><ul>{linked.map((entry) => <li key={entry.id}><a href={`#change-${entry.id}`} onClick={(event) => { event.preventDefault(); revealChange(entry.id); }}>{location(entry, review.plan.documents)}</a> · {decisions[review.decisions[entry.id].decision]}</li>)}</ul><div><button disabled={busy} onClick={() => void onDecide(linked.map((entry) => entry.id), "accepted", note)}>接受以上{linked.length}处</button><button disabled={busy} onClick={() => void onDecide(linked.map((entry) => entry.id), "rejected", note)}>不采用以上{linked.length}处</button></div></details>}
-              {!!related.length && <details><summary>其他关联位置（{related.length}处）</summary><p>这些位置可分别决定，请核查结论、依据和配套内容是否一致。</p><ul>{related.map((entry) => <li key={entry.id}><a href={`#change-${entry.id}`} onClick={(event) => { event.preventDefault(); revealChange(entry.id); }}>{location(entry, review.plan.documents)}</a> · {decisions[review.decisions[entry.id].decision]}</li>)}</ul></details>}
+              {linked.length > 1 && <details><summary>批量处理完整关联组（{linked.length}处）</summary><p>以下包含同组及相依修改。点击批量操作会统一决定列出的全部位置，并使用本项备注；请先核对。</p><ul>{linked.map((entry) => <li key={entry.id}><a href={`#change-${entry.id}`} onClick={(event) => { event.preventDefault(); revealChange(entry.id); }}>{location(entry, review.plan.documents)}</a> · {decisions[review.decisions[entry.id].decision]}</li>)}</ul><div><button disabled={busy} onClick={() => void onDecide(linked.map((entry) => entry.id), "accepted", note)}>接受以上{linked.length}处</button><button disabled={busy} onClick={() => void onDecide(linked.map((entry) => entry.id), "rejected", note)}>不采用以上{linked.length}处</button></div></details>}
+              {!!related.length && <details><summary>其他关联位置（{related.length}处）</summary><p>发布前，关联正文不能混合接受与拒绝；来源关联和展示顺序可独立决定。</p><ul>{related.map((entry) => <li key={entry.id}><a href={`#change-${entry.id}`} onClick={(event) => { event.preventDefault(); revealChange(entry.id); }}>{location(entry, review.plan.documents)}</a> · {decisions[review.decisions[entry.id].decision]}</li>)}</ul></details>}
             </div>}
             {decision.at && <small className={styles.decisionMeta}>{new Date(decision.at).toLocaleString()} · {decision.note || "已保存审查决定"}</small>}
           </article>;

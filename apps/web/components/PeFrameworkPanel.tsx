@@ -1,8 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { Popover } from "@base-ui/react/popover";
-import { BookOpen, ChartNoAxesCombined, FileText, Settings } from "lucide-react";
+import { BookOpen, ChartNoAxesCombined, FileText } from "lucide-react";
 import type { FrameworkState, ResearchContinuation, getPeMemoVersion, getResearchMonitor } from "@earendil-works/pe-boot";
 import { getFrameworkItems, isFrameworkDocument, type StoredFrameworkContent } from "@earendil-works/pe-boot/framework-report";
 import type { PeProjectCatalog, PeProjectSummary } from "@/lib/pe-project-types";
@@ -10,7 +9,7 @@ import type { FrameworkProposal } from "@/lib/framework-proposal";
 import { PeSourceCitation } from "./PeSourceCitation";
 import { MarkdownBody } from "./MarkdownBody";
 import { FrameworkTimeline } from "./FrameworkTimeline";
-import { PeMonitorPanel } from "./PeMonitorPanel";
+import { PeFrameworkUpdates } from "./PeFrameworkUpdates";
 import { PeStockTracking } from "./PeStockTracking";
 import { FrameworkConfirmation, ResearchRail } from "./research-ui/ResearchUI";
 import { frameworkReportMarkdown } from "@/lib/framework-report";
@@ -179,7 +178,6 @@ export function PeResearchRail({ research, model, agentUnavailable = false, note
   research: Research; model?: { provider: string; modelId: string }; agentUnavailable?: boolean; notebook?: ReactNode;
 }) {
   const { project, snapshot, view, setView, error } = research;
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [selectedVersion, setSelectedVersion] = useState<string | null>(null);
   const current = snapshot?.framework.versions.find((entry) => entry.id === snapshot.framework.currentVersionId);
   const displayed = snapshot?.framework.versions.find((entry) => entry.id === selectedVersion) ?? current;
@@ -188,17 +186,7 @@ export function PeResearchRail({ research, model, agentUnavailable = false, note
   return <ResearchRail selectedId={view} onSelect={(id) => setView(id === "framework" || id === "memo" || id === "tracking" || id === "notebook" ? id : null)} artifacts={[
     ...(notebook ? [{ id: "notebook", label: "研究积累", icon: <BookOpen size={18} />, subtitle: project?.name, content: notebook, footer: false as const }] : []),
     { id: "framework", label: "投资框架", icon: <BookOpen size={18} />, subtitle: `${project?.name ?? ""}${displayed ? ` · 阅读 v${displayed.version}${displayed.id === current?.id ? " · 最新版本" : " · 历史版本"}` : ""}`,
-      actions: project && <div className={styles.reportActions}><a href={`/framework-iteration-test?${new URLSearchParams({ datasetId: project.datasetId })}`}>迭代测试</a></div>,
-      headerActions: <Popover.Root open={settingsOpen} onOpenChange={setSettingsOpen}>
-        <Popover.Trigger aria-label="投资框架设置" title="投资框架设置"><Settings size={18} /></Popover.Trigger>
-        <Popover.Portal><Popover.Positioner side="bottom" align="end" sideOffset={10} className={styles.settingsPositioner}>
-          <Popover.Popup className={styles.settingsPopup} onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); setSettingsOpen(false); } }}>
-            <Popover.Title className={styles.settingsTitle}>投资框架设置</Popover.Title>
-            {project && snapshot?.monitor && <PeMonitorPanel key={`settings-${project.datasetId}-${snapshot.monitor.revision}`} project={project} monitor={snapshot.monitor} framework={snapshot.framework} refresh={research.refresh} mode="settings" />}
-          </Popover.Popup>
-        </Popover.Positioner></Popover.Portal>
-      </Popover.Root>,
-      content: <>{failure}{displayed && project ? <div className={styles.frameworkReader}><FrameworkTimeline key={project.datasetId} versions={snapshot?.framework.versions ?? []} selectedId={displayed.id} currentId={snapshot?.framework.currentVersionId ?? null} onSelect={setSelectedVersion} /><FrameworkText key={displayed.id} content={displayed.content} cwd={project.root} downloadUrl={`/api/pe/frameworks?${new URLSearchParams({ datasetId: project.datasetId, download: displayed.id })}`} /></div> : <div className={styles.empty}><h2>让判断在对话中成形</h2><p>和 Agent 讨论投资逻辑，生成后点击回复下方的「确定投资框架」。</p></div>}{project && snapshot?.monitor && <details className={styles.trackingDisclosure}><summary>最新变化与自动跟踪{snapshot.monitor.runs[0]?.status === "review_required" ? " · 有待确认的调整" : ""}</summary><PeMonitorPanel key={`${project.datasetId}-${snapshot.monitor.revision}`} project={project} monitor={snapshot.monitor} framework={snapshot.framework} refresh={research.refresh} mode="activity" /></details>}</> },
+      content: <>{failure}{project && snapshot?.monitor && view === "framework" && <PeFrameworkUpdates key={project.datasetId} project={project} monitor={snapshot.monitor} framework={snapshot.framework} refresh={research.refresh} />}{displayed && project ? <div className={styles.frameworkReader}><FrameworkTimeline key={project.datasetId} versions={snapshot?.framework.versions ?? []} selectedId={displayed.id} currentId={snapshot?.framework.currentVersionId ?? null} onSelect={setSelectedVersion} /><FrameworkText key={displayed.id} content={displayed.content} cwd={project.root} downloadUrl={`/api/pe/frameworks?${new URLSearchParams({ datasetId: project.datasetId, download: displayed.id })}`} /></div> : <div className={styles.empty}><h2>让判断在对话中成形</h2><p>和 Agent 讨论投资逻辑，生成后点击回复下方的「确定投资框架」。</p></div>}</> },
     { id: "memo", label: "Memo", icon: <FileText size={18} />, subtitle: project?.name,
       content: <>{failure}{snapshot?.memos.length && project ? snapshot.memos.map((memo) => <article className={styles.document} key={memo.memo_version_id}><small>Memo · v{memo.version_no} · {memo.as_of_date}</small><h2>{memo.series_title}</h2>{memo.sections.map((section) => <section key={section.section_id}><h3>{section.title}</h3><MarkdownBody cwd={project.root}>{section.content}</MarkdownBody>{section.needs_review && <small>待进一步验证</small>}{section.evidence_ids.map((id, i) => <PeSourceCitation key={id} cwd={project.root} evidenceId={id}>来源 {i + 1}</PeSourceCitation>)}</section>)}</article>) : <div className={styles.empty}><h2>研究沉淀成文</h2><p>在对话中让 Agent 生成 Memo，完成后会自动出现在这里。</p></div>}</> },
     { id: "tracking", label: "股票追踪", icon: <ChartNoAxesCombined size={18} />, subtitle: project?.name, wide: true, footer: false,

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { Type } from "typebox";
 import { ResearchError } from "./research/model.ts";
+import { trackingPeriods } from "./research/tracking-periods.ts";
 
 export const INFORMATION_SOURCE_VERSION = "8";
 export const INFORMATION_VIEW_VERSION = "7";
@@ -16,6 +17,7 @@ export interface InformationSourceConfig {
 	maxQueries: number;
 	maxTurns: number;
 	defaultPeriods: string[];
+	trackingWindow?: { valuationDate: string; asOf: string };
 	queryPolicy?: "judgment-definitions-v1";
 }
 export function informationSourceConfig(
@@ -42,6 +44,20 @@ export function informationSourceConfig(
 	};
 }
 export function assertInformationSourceConfig(config: InformationSourceConfig): void {
+	if (config.trackingWindow) {
+		const periods = trackingPeriods(config.trackingWindow.valuationDate, config.trackingWindow.asOf);
+		if (
+			config.version !== INFORMATION_SOURCE_VERSION ||
+			config.viewVersion !== INFORMATION_VIEW_VERSION ||
+			config.queryPolicy !== "judgment-definitions-v1" ||
+			config.maxQueries !== 4 ||
+			config.maxTurns !== 8 ||
+			JSON.stringify(config.defaultPeriods) !== JSON.stringify(periods)
+		)
+			throw new ResearchError(409, "查询期间与估值日期不一致，请重新保存更新设置。");
+		informationSourceConfig(config.companyName, config.companyTicker, config.sourceIds);
+		return;
+	}
 	if (
 		(!(
 			config.version === INFORMATION_SOURCE_VERSION &&

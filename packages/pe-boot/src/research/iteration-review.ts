@@ -26,7 +26,6 @@ export interface IterationChange {
 	after: unknown;
 	beforeExists: boolean;
 	afterExists: boolean;
-	/** Related groups are review hints, not mandatory acceptance dependencies. */
 	dependencies: string[];
 }
 export interface IterationReviewPlan {
@@ -118,7 +117,7 @@ export function buildIterationChanges(
 			object && path.includes("investmentJudgments") && typeof object.id === "string"
 				? [object.id]
 				: object && Array.isArray(object.judgmentIds)
-					? strings(object.judgmentIds)
+					? [...new Set([...strings(record(before) ? before.judgmentIds : []), ...strings(object.judgmentIds)])]
 					: ownerIds;
 		const evidence = object ? references(object) : ownerEvidence;
 		if (record(before) && record(after)) {
@@ -171,11 +170,8 @@ export function buildIterationChanges(
 						impact.sections.includes(section) &&
 						impact.evidenceIds.some((id) => evidence.includes(id)),
 				);
-		const newJudgment =
-			section === "investmentJudgments" &&
-			judgmentIds.some((id) => !basis.sections.investmentJudgments.items.some((item) => item.id === id));
 		const ids = judgmentIds.length
-			? [...new Set([...judgmentIds, ...(newJudgment ? related.flatMap((impact) => impact.judgmentIds) : [])])]
+			? judgmentIds
 			: ["currentAssessment", "researchSetup", "evidenceAndChanges"].includes(section)
 				? []
 				: [...new Set(related.flatMap((impact) => impact.judgmentIds))];
@@ -206,6 +202,7 @@ export function buildIterationChanges(
 		});
 	}
 	visit(basis, candidate, []);
+	const assessmentSections = new Set(["investmentJudgments", "businessModel", "valuation", "monitoring"]);
 	for (const change of changes) {
 		change.dependencies = [
 			...new Set(
@@ -213,15 +210,38 @@ export function buildIterationChanges(
 					.filter(
 						(other) =>
 							other.groupId !== change.groupId &&
-							(change.section === "currentAssessment"
-								? other.judgmentIds.length > 0
-								: change.judgmentIds.some((id) => other.judgmentIds.includes(id))),
+							((change.section === "currentAssessment" && assessmentSections.has(other.section)) ||
+								(other.section === "currentAssessment" && assessmentSections.has(change.section)) ||
+								change.judgmentIds.some((id) => other.judgmentIds.includes(id))),
 					)
 					.map((other) => other.groupId),
 			),
 		];
 	}
 	return changes;
+}
+function consistencyErrors(changes: IterationChange[], decisions: IterationChangeReview["decisions"]): string[] {
+	const semanticChanges = changes.filter(
+		(change) =>
+			!change.path.at(-1)?.startsWith("@order:") &&
+			!["evidenceIds", "counterEvidenceIds"].includes(change.path.at(-1) || ""),
+	);
+	const errors = new Set<string>();
+	for (const change of semanticChanges) {
+		if (decisions[change.id].decision !== "accepted") continue;
+		for (const other of semanticChanges) {
+			if (decisions[other.id].decision === "accepted") continue;
+			if (
+				change.groupId !== other.groupId &&
+				!change.dependencies.includes(other.groupId) &&
+				!other.dependencies.includes(change.groupId)
+			)
+				continue;
+			const groups = [...new Set([change.groupId, other.groupId])].sort().join("、");
+			errors.add(`语义组 ${groups} 的关联正文修改必须一致采纳或拒绝，不能通过确认警告发布混合版本。`);
+		}
+	}
+	return [...errors];
 }
 function applyChange(content: FrameworkContent, change: IterationChange): void {
 	let parent: unknown = content;
@@ -293,22 +313,12 @@ export function assembleIterationReview(
 	const errors = pending.length ? [`还有 ${pending.length} 处修改尚未决定。`] : [];
 	const warnings: string[] = [];
 	if (!accepted.length) return { preview: null, errors, warnings };
+	errors.push(...consistencyErrors(changes, decisions));
 	const partial = accepted.length !== changes.length;
 	if (partial) {
 		warnings.push(
 			"部分采纳：仅应用已接受的修改，其余字段沿用基线。未执行新的模型语义审核，请核对判断、依据、估值和监控的一致性。",
 		);
-		if (!accepted.some((change) => change.section === "currentAssessment"))
-			warnings.push("整体摘要沿用基线，尚未根据本轮实际采用内容重新综合。");
-		const related = changes.filter(
-			(change) =>
-				decisions[change.id].decision !== "accepted" &&
-				accepted.some((entry) => entry.groupId === change.groupId || entry.dependencies.includes(change.groupId)),
-		);
-		if (related.length)
-			warnings.push(
-				`有 ${related.length} 处关联建议未采用或尚未决定。关联位置可以分别决定，请核查配套内容是否仍成立。`,
-			);
 	}
 	try {
 		const assembled = structuredClone(basis);
@@ -421,7 +431,7 @@ export function assembleIterationReview(
 		};
 		const preview = validateFrameworkContent(assembled);
 		validateIterationRevision(basis, preview, filtered, observations);
-		return { preview, errors, warnings };
+		return { preview: errors.length ? null : preview, errors, warnings };
 	} catch (error) {
 		errors.push(error instanceof Error ? error.message : "组装框架校验失败");
 		return { preview: null, errors: [...new Set(errors)], warnings };
@@ -437,7 +447,7 @@ export function getIterationChangeReview(
 	const planId = createHash("sha256")
 		.update(
 			JSON.stringify({
-				reviewFormat: 3,
+				reviewFormat: 4,
 				runId: run.id,
 				basis: run.basisVersionId,
 				inputs: run.inputs,

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -92,7 +93,7 @@ const impacts: IterationImpacts = {
 		},
 	],
 };
-function setup(reviewMode = true) {
+function setup(reviewMode = true, updateAssessment = true) {
 	const cwd = mkdtempSync(join(tmpdir(), "pe-iteration-review-"));
 	roots.push(cwd);
 	mkdirSync(join(cwd, "meta"));
@@ -131,7 +132,7 @@ function setup(reviewMode = true) {
 	const run = createFrameworkIteration(cwd, dataset, request);
 	const candidate = structuredClone(original);
 	candidate.sections.researchSetup.informationCutoff = null;
-	candidate.sections.currentAssessment.summary = "需求弱于假设，盈利仍待核查";
+	if (updateAssessment) candidate.sections.currentAssessment.summary = "需求弱于假设，盈利仍待核查";
 	candidate.sections.investmentJudgments.items[0].claim = "收入弱于假设，需求仍待核查";
 	candidate.sections.investmentJudgments.items[1].claim = "无法从收入确定盈利改善";
 	for (const item of candidate.sections.investmentJudgments.items) item.evidenceIds = [evidence];
@@ -165,8 +166,8 @@ function setup(reviewMode = true) {
 	};
 	return { cwd, run, request, engine, basis, original, candidate };
 }
-async function ready(reviewMode = true) {
-	const value = setup(reviewMode);
+async function ready(reviewMode = true, updateAssessment = true) {
+	const value = setup(reviewMode, updateAssessment);
 	value.run = await runFrameworkIteration(
 		value.cwd,
 		dataset,
@@ -324,7 +325,7 @@ it("publishes all accepted patches once and retains the original candidate and i
 	).toThrow("immutable");
 });
 it("keeps rejected fields intact and records only the actual partial changes", async () => {
-	const value = await ready();
+	const value = await ready(true, false);
 	let review = decideAll(value, "accepted");
 	const ids = review.plan.changes
 		.filter((change) => change.judgmentIds.includes("margin") || change.section === "currentAssessment")
@@ -377,7 +378,7 @@ it("keeps rejected fields intact and records only the actual partial changes", a
 	});
 	expect(next.basisVersionId).not.toBe(value.run.basisVersionId);
 });
-it("warns about partial summary support and requires explicit verification before publication", async () => {
+it("blocks a candidate summary with rejected supporting judgments even when warnings are acknowledged", async () => {
 	const value = await ready();
 	let review = decideAll(value, "accepted");
 	const marginIds = review.plan.changes
@@ -390,21 +391,18 @@ it("warns about partial summary support and requires explicit verification befor
 		{ planId: review.plan.id, revision: 1, changeIds: marginIds, decision: "rejected", note: "缺少利润数据" },
 		"reviewer",
 	);
-	expect(review.errors).toEqual([]);
-	expect(review.warnings.join(" ")).toContain("关联建议");
-	expect(review.preview?.sections.investmentJudgments.items[1]).toEqual(
-		value.original.sections.investmentJudgments.items[1],
-	);
-	expect(review.preview?.sections.currentAssessment.summary).toBe(value.candidate.sections.currentAssessment.summary);
+	expect(review.errors.join(" ")).toContain("语义组");
+	expect(review.preview).toBeNull();
 	await expect(
 		publishIterationChangeReview(
 			value.cwd,
 			dataset,
 			value.run,
-			{ planId: review.plan.id, revision: 2, acknowledgeWarnings: false },
+			{ planId: review.plan.id, revision: 2, acknowledgeWarnings: true },
 			AbortSignal.timeout(5000),
 		),
-	).rejects.toThrow("确认部分采纳");
+	).rejects.toThrow("必须一致采纳或拒绝");
+	expect(getResearchFramework(value.cwd, dataset).versions).toHaveLength(1);
 });
 it("does not silently apply a rejected information-cutoff change", async () => {
 	const value = await ready();
@@ -713,8 +711,8 @@ it("reads a completed review from its immutable plan and published document", as
 	expect(listIterationChangeReviewHistory(value.cwd, dataset, value.run.id)).toHaveLength(1);
 });
 
-it("requires adopted judgment evidence without forcing its rationale and monitoring changes", async () => {
-	const value = setup();
+it("requires judgment evidence and consistent adoption of its rationale and monitoring changes", async () => {
+	const value = setup(true, false);
 	value.candidate.sections.investmentJudgments.items[0].rationale = "新收入只能支持进一步核查，不能确定需求原因";
 	value.run = await runFrameworkIteration(
 		value.cwd,
@@ -745,11 +743,14 @@ it("requires adopted judgment evidence without forcing its rationale and monitor
 		value,
 		(change) => change.path.includes("@id:demand") && change.path.at(-1) === "evidenceIds",
 	);
+	expect(review.errors.join(" ")).toContain("语义组 judgments:demand");
+	expect(review.preview).toBeNull();
+	review = acceptChanges(value, (change) => change.groupId === "judgments:demand");
 	expect(review.errors).toEqual([]);
 	expect(review.preview?.sections.investmentJudgments.items[0].rationale).toBe(
-		value.original.sections.investmentJudgments.items[0].rationale,
+		value.candidate.sections.investmentJudgments.items[0].rationale,
 	);
-	expect(review.preview?.sections.monitoring).toEqual(value.original.sections.monitoring);
+	expect(review.preview?.sections.monitoring).toEqual(value.candidate.sections.monitoring);
 	expect(review.preview?.sections.investmentJudgments.items[1]).toEqual(
 		value.original.sections.investmentJudgments.items[1],
 	);
@@ -785,7 +786,7 @@ it("keeps the original claim and truthful change history when only its citation 
 	expect(change.evidenceIds).toEqual([evidence]);
 });
 
-it("allows one judgment and a shared business field without adopting the other judgment", async () => {
+it("requires shared impact groups to agree without forcing independent source metadata", async () => {
 	const value = setup();
 	const sharedImpacts = structuredClone(impacts);
 	for (const impact of sharedImpacts.impacts) impact.sections.push("businessModel");
@@ -801,7 +802,7 @@ it("allows one judgment and a shared business field without adopting the other j
 		AbortSignal.timeout(5000),
 	);
 	decideAll(value, "rejected");
-	const review = acceptChanges(
+	let review = acceptChanges(
 		value,
 		(change) =>
 			change.path.at(-1) === "informationCutoff" ||
@@ -811,14 +812,21 @@ it("allows one judgment and a shared business field without adopting the other j
 	expect(review.plan.changes.find((change) => change.section === "businessModel")?.groupId).toBe(
 		"judgments:demand,margin",
 	);
+	expect(review.errors.join(" ")).toContain("judgments:demand,margin");
+	expect(review.preview).toBeNull();
+	review = acceptChanges(value, (change) => change.judgmentIds.length > 0 || change.section === "currentAssessment");
 	expect(review.errors).toEqual([]);
 	expect(review.preview?.sections.businessModel).toEqual(value.candidate.sections.businessModel);
 	expect(review.preview?.sections.investmentJudgments.items[1]).toEqual(
-		value.original.sections.investmentJudgments.items[1],
+		value.candidate.sections.investmentJudgments.items[1],
 	);
-	expect(review.preview?.sections.valuation).toEqual(value.original.sections.valuation);
+	expect(review.preview?.sections.valuation).toEqual(value.candidate.sections.valuation);
+	expect(review.preview?.sections.evidenceAndChanges.sources).toEqual(
+		value.original.sections.evidenceAndChanges.sources,
+	);
 	expect(review.preview?.sections.evidenceAndChanges.changes.map((change) => change.judgmentIds)).toEqual([
 		["demand"],
+		["margin"],
 	]);
 	await publishIterationChangeReview(
 		value.cwd,
@@ -831,7 +839,7 @@ it("allows one judgment and a shared business field without adopting the other j
 });
 
 it("blocks actual missing judgment references while preserving independent decisions", async () => {
-	const value = setup();
+	const value = setup(true, false);
 	value.candidate.sections.investmentJudgments.items.push({
 		...structuredClone(value.candidate.sections.investmentJudgments.items[0]),
 		id: "new-case",
@@ -951,4 +959,194 @@ it("keeps change-record citations bounded and prioritizes the adopted supporting
 	expect(result.preview?.sections.investmentJudgments.items[0].evidenceIds).toEqual(
 		basis.sections.investmentJudgments.items[0].evidenceIds,
 	);
+});
+
+it("blocks retained baseline assessment with adopted judgments and replays the conflict unchanged", async () => {
+	const value = await ready();
+	const all = decideAll(value, "accepted");
+	const summary = all.plan.changes.filter((change) => change.section === "currentAssessment");
+	const mixed = saveIterationChangeDecisions(
+		value.cwd,
+		dataset,
+		value.run,
+		{
+			planId: all.plan.id,
+			revision: all.revision,
+			changeIds: summary.map((change) => change.id),
+			decision: "rejected",
+			note: "保留旧摘要",
+		},
+		"reviewer",
+	);
+	expect(mixed.errors.join(" ")).toContain("section:currentAssessment");
+	expect(mixed.preview).toBeNull();
+	const replay = getIterationChangeReview(
+		value.cwd,
+		dataset,
+		getFrameworkIteration(value.cwd, dataset, value.run.id),
+	)!;
+	expect(replay.decisions).toEqual(mixed.decisions);
+	expect(replay.events).toEqual(mixed.events);
+	expect(replay.errors).toEqual(mixed.errors);
+	await expect(
+		publishIterationChangeReview(
+			value.cwd,
+			dataset,
+			value.run,
+			{
+				planId: replay.plan.id,
+				revision: replay.revision,
+				acknowledgeWarnings: true,
+			},
+			AbortSignal.timeout(5000),
+		),
+	).rejects.toThrow("必须一致采纳或拒绝");
+	expect(getResearchFramework(value.cwd, dataset).versions).toHaveLength(1);
+	const repaired = acceptChanges(value, (change) => change.section === "currentAssessment");
+	expect(repaired.errors).toEqual([]);
+	expect(repaired.preview).toEqual(value.candidate);
+	await expect(
+		publishIterationChangeReview(
+			value.cwd,
+			dataset,
+			value.run,
+			{
+				planId: replay.plan.id,
+				revision: replay.revision,
+				acknowledgeWarnings: true,
+			},
+			AbortSignal.timeout(5000),
+		),
+	).rejects.toThrow("审查记录已变化");
+	const versionId = await publishIterationChangeReview(
+		value.cwd,
+		dataset,
+		value.run,
+		{
+			planId: repaired.plan.id,
+			revision: repaired.revision,
+			acknowledgeWarnings: false,
+		},
+		AbortSignal.timeout(5000),
+	);
+	expect(
+		getIterationChangeReview(value.cwd, dataset, getFrameworkIteration(value.cwd, dataset, value.run.id))?.publication
+			?.versionId,
+	).toBe(versionId);
+});
+
+it("keeps independent judgment groups separate despite shared observations and evidence", async () => {
+	const value = await ready(true, false);
+	decideAll(value, "rejected");
+	const review = acceptChanges(
+		value,
+		(change) => change.groupId === "judgments:demand" || change.path.at(-1) === "informationCutoff",
+	);
+	const demand = review.plan.changes.find((change) => change.path.includes("@id:demand"))!;
+	const margin = review.plan.changes.find((change) => change.path.includes("@id:margin"))!;
+	expect(demand.evidenceIds).toEqual(margin.evidenceIds);
+	expect(demand.observationIds).toEqual(margin.observationIds);
+	expect(demand.dependencies).not.toContain(margin.groupId);
+	expect(review.errors).toEqual([]);
+	expect(review.preview?.sections.investmentJudgments.items[1]).toEqual(
+		value.original.sections.investmentJudgments.items[1],
+	);
+	await publishIterationChangeReview(
+		value.cwd,
+		dataset,
+		value.run,
+		{
+			planId: review.plan.id,
+			revision: review.revision,
+			acknowledgeWarnings: true,
+		},
+		AbortSignal.timeout(5000),
+	);
+	expect(getResearchFramework(value.cwd, dataset).versions).toHaveLength(2);
+});
+
+it("binds reassigned monitoring rules to both the previous and next judgments", () => {
+	const value = setup(true, false);
+	value.candidate.sections.monitoring.rules[0].judgmentIds = ["margin"];
+	const changes = buildIterationChanges(value.original, value.candidate, impacts);
+	const rule = changes.find((change) => change.path.at(-1) === "judgmentIds")!;
+	expect(rule.judgmentIds).toEqual(["demand", "margin"]);
+	expect(rule.dependencies).toContain("judgments:demand");
+	expect(rule.dependencies).toContain("judgments:margin");
+	const decisions = Object.fromEntries(
+		changes.map((change) => [
+			change.id,
+			{
+				decision: change.groupId === "judgments:margin" ? ("rejected" as const) : ("accepted" as const),
+				note: "",
+				at: "",
+				actorId: "reviewer",
+			},
+		]),
+	);
+	const result = assembleIterationReview(value.original, value.candidate, impacts, facts, changes, decisions);
+	expect(result.errors.join(" ")).toContain("judgments:demand,margin");
+	expect(result.preview).toBeNull();
+});
+
+it("starts a new plan for legacy hint-only decisions without deleting their audit trail", async () => {
+	const value = await ready();
+	const current = getIterationChangeReview(value.cwd, dataset, value.run)!;
+	const legacyId = createHash("sha256")
+		.update(
+			JSON.stringify({
+				reviewFormat: 3,
+				runId: value.run.id,
+				basis: value.run.basisVersionId,
+				inputs: value.run.inputs,
+				modelId: value.run.modelId,
+				processorVersion: value.run.processorVersion,
+				candidate: value.run.artifacts.find((artifact) => artifact.stage === "revise")!.value,
+				impacts: value.run.artifacts.find((artifact) => artifact.stage === "impact")!.value,
+				observations: value.run.artifacts.find((artifact) => artifact.stage === "extract")!.value,
+			}),
+		)
+		.digest("hex");
+	expect(current.plan.id).not.toBe(legacyId);
+	withResearchDatabase(value.cwd, dataset, (db) => {
+		db.prepare("INSERT INTO framework_iteration_review_plans VALUES(?,?,?,?)").run(
+			legacyId,
+			value.run.id,
+			dataset,
+			JSON.stringify({ ...current.plan, id: legacyId }),
+		);
+		db.prepare("INSERT INTO framework_iteration_review_events VALUES(?,?,?)").run(
+			legacyId,
+			1,
+			JSON.stringify({
+				revision: 1,
+				changeIds: current.plan.changes.map((change) => change.id),
+				decision: "accepted",
+				note: "旧规则",
+				actorId: "reviewer",
+				at: new Date().toISOString(),
+			}),
+		);
+	});
+	await expect(
+		publishIterationChangeReview(
+			value.cwd,
+			dataset,
+			value.run,
+			{
+				planId: legacyId,
+				revision: 1,
+				acknowledgeWarnings: true,
+			},
+			AbortSignal.timeout(5000),
+		),
+	).rejects.toThrow("审查记录已变化");
+	const replay = getIterationChangeReview(value.cwd, dataset, value.run)!;
+	expect(replay.revision).toBe(0);
+	expect(Object.values(replay.decisions).every((decision) => decision.decision === "pending")).toBe(true);
+	expect(
+		listIterationChangeReviewHistory(value.cwd, dataset, value.run.id).find((entry) => entry.plan.id === legacyId)
+			?.events,
+	).toHaveLength(1);
+	expect(getResearchFramework(value.cwd, dataset).versions).toHaveLength(1);
 });

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import { createIterationEngine, recordIterationDiagnostic, recordIterationUsage, ResearchError, runFrameworkIteration, type FrameworkIteration } from "@earendil-works/pe-boot";
+import { createIterationEngine, executeIterationModelUpdate, freezeIterationModelBaseline, recordIterationDiagnostic, recordIterationUsage, ResearchError, runFrameworkIteration, type FrameworkIteration } from "@earendil-works/pe-boot";
 import { getPeGatewayRuntime } from "./pe-gateway/runtime";
 import { localAccountContext } from "./pe-gateway/local-context";
 import { PeModelServiceError } from "./pe-gateway/model-service";
@@ -11,6 +11,7 @@ import { platformRpcOptions } from "./pe-platform-runtime";
 import { readPeIngestJob, resolvePeProjectPaths } from "./pe-ingest";
 import { peProjectStorePaths } from "./pe-project-store";
 import type { PeProjectSummary } from "./pe-project-types";
+import { createServerIterationRuntime } from "../services/pe-research/iteration-runtime.mjs";
 
 export async function iterationPlatform(sessionId: string, modelId?: string, metadataOnly = false) {
   const gateway = getPeGatewayRuntime();
@@ -29,6 +30,7 @@ export async function iterationPlatform(sessionId: string, modelId?: string, met
 }
 
 export async function executeFrameworkIteration(project: PeProjectSummary, run: FrameworkIteration, sessionId: string, userId: string) {
+  freezeIterationModelBaseline(project.root, project.datasetId, run.id);
   const directories: string[] = [];
   const engine = createIterationEngine(project.root, project.datasetId, async (modelId) => {
     const authorized = await iterationPlatform(sessionId, modelId);
@@ -42,7 +44,7 @@ export async function executeFrameworkIteration(project: PeProjectSummary, run: 
   }, (usage) => { recordIterationUsage(project.root, project.datasetId, run.id, usage); }, (diagnostic) => { recordIterationDiagnostic(project.root, project.datasetId, run.id, diagnostic); });
   const paths = resolvePeProjectPaths(project, peProjectStorePaths().registryPath);
   try {
-    return await runFrameworkIteration(project.root, project.datasetId, run.id, engine, async (value, signal) => {
+    const result = await runFrameworkIteration(project.root, project.datasetId, run.id, engine, async (value, signal) => {
       if (!value.ingestJobId) throw new ResearchError(409, "上传未附加到运行，请重新提交资料。");
       for (;;) {
         signal.throwIfAborted();
@@ -54,7 +56,39 @@ export async function executeFrameworkIteration(project: PeProjectSummary, run: 
         await delay(1000, undefined, { signal });
       }
     }, new AbortController().signal);
+    if (["review_required", "published", "no_change"].includes(result.status)) {
+      await executeIterationModelUpdate(project.root, project.datasetId, run.id, AbortSignal.timeout(15 * 60_000));
+    }
+    return result;
   } finally {
     for (const directory of directories) rmSync(directory, { recursive: true, force: true });
   }
+}
+
+export async function resumeServerFrameworkIteration(project: PeProjectSummary, run: FrameworkIteration) {
+  freezeIterationModelBaseline(project.root, project.datasetId, run.id);
+  const signal = AbortSignal.timeout(20 * 60_000);
+  let runtime: Awaited<ReturnType<typeof createServerIterationRuntime>> | undefined;
+  async function engine() {
+    runtime ??= await createServerIterationRuntime(project.root, project.datasetId, run, signal);
+    return runtime.engine;
+  }
+  try {
+    const result = await runFrameworkIteration(project.root, project.datasetId, run.id, {
+      collect: async (...args) => {
+        const delegate = await engine();
+        if (!delegate.collect) throw new ResearchError(409, "信息源采集器不可用。");
+        return delegate.collect(...args);
+      },
+      extract: async (...args) => (await engine()).extract(...args),
+      impact: async (...args) => (await engine()).impact(...args),
+      revise: async (...args) => (await engine()).revise(...args),
+    }, async () => {
+      throw new ResearchError(409, "本轮尚未固定新资料，请取消后从追踪设置重新检查。");
+    }, signal);
+    if (["review_required", "published", "no_change"].includes(result.status)) {
+      await executeIterationModelUpdate(project.root, project.datasetId, run.id, AbortSignal.timeout(15 * 60_000));
+    }
+    return result;
+  } finally { runtime?.dispose(); }
 }
