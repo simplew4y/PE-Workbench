@@ -5,11 +5,25 @@ import { getFileIcon } from "./FileIcons";
 import { useI18n } from "@/hooks/useI18n";
 import type { FileViewerDisplayMode, FileViewerState } from "@/lib/file-viewer-state";
 
+export type SourceView = "original" | "parsed";
+
+export interface SourceTarget {
+  datasetId: string;
+  docId?: string;
+  versionNo?: number;
+  fileName: string;
+  originalPath: string | null;
+  parsedPath: string | null;
+}
+
 export interface Tab {
   id: string;
   label: string;
   filePath: string;
   sourceSessionId?: string | null;
+  source?: SourceTarget;
+  sourceView?: SourceView;
+  sourceStates?: Partial<Record<SourceView, FileViewerState>>;
   initialDisplayMode?: FileViewerDisplayMode;
   viewerState?: FileViewerState;
   viewerRevision?: number;

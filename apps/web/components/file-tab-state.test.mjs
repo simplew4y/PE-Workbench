@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { openFileTab, saveFileViewerState } from "./file-tab-state.ts";
+import { openFileTab, openSourceTab, refreshSourceTabs, saveFileViewerState, sourceTabId, switchSourceView } from "./file-tab-state.ts";
 
 const tabA = {
   id: "file:/repo/a.ts",
@@ -95,4 +95,47 @@ test("a remounted viewer ignores the previous revision's late cleanup", () => {
   const stale = saveFileViewerState(reopened, tabA.id, 0, tabA.viewerState);
   assert.strictEqual(stale, reopened);
   assert.equal(stale[0].viewerState.displayMode, "diff");
+});
+
+test("source tabs open originals while parsing, refresh in place, and retain both views on cleanup", () => {
+  const source = { datasetId: "a", docId: "report", versionNo: 1, fileName: "report.pdf",
+    originalPath: "/a/report.pdf", parsedPath: null };
+  const id = sourceTabId(source);
+  let tabs = openSourceTab([tabB], source);
+  assert.equal(tabs[1].filePath, source.originalPath);
+  const ready = { ...source, parsedPath: "/a/report.md" };
+  tabs = refreshSourceTabs(tabs, [ready]);
+  const originalRevision = tabs[1].viewerRevision;
+  tabs = switchSourceView(tabs, id, "parsed");
+  assert.equal(tabs.length, 2);
+  assert.equal(tabs[1].filePath, ready.parsedPath);
+  tabs = saveFileViewerState(tabs, id, originalRevision, tabA.viewerState,
+    { view: "original", path: source.originalPath });
+  assert.equal(tabs[1].viewerState, undefined);
+  const parsedRevision = tabs[1].viewerRevision;
+  tabs = switchSourceView(tabs, id, "original");
+  assert.deepEqual(tabs[1].viewerState, tabA.viewerState);
+  const parsedState = { ...tabA.viewerState, scrollTop: 90, textPage: 3 };
+  tabs = saveFileViewerState(tabs, id, parsedRevision, parsedState, { view: "parsed", path: ready.parsedPath });
+  tabs = switchSourceView(tabs, id, "parsed");
+  assert.deepEqual(tabs[1].viewerState, parsedState);
+  assert.strictEqual(tabs[0], tabB);
+  assert.equal(openSourceTab(tabs, ready).length, 2);
+  const replaced = refreshSourceTabs(tabs, [{ ...ready, parsedPath: "/a/new.md" }]);
+  assert.equal(replaced[1].viewerState, undefined);
+  assert.strictEqual(saveFileViewerState(replaced, id, parsedRevision, parsedState,
+    { view: "parsed", path: ready.parsedPath }), replaced);
+  const closed = tabs.filter((tab) => tab.id !== id);
+  assert.strictEqual(saveFileViewerState(closed, id, parsedRevision, parsedState), closed);
+});
+
+test("source identity separates projects and versions and missing originals never substitute parsed text", () => {
+  const source = { datasetId: "a", docId: "report", versionNo: 1, fileName: "report.pdf",
+    originalPath: null, parsedPath: "/a/report.md" };
+  assert.notEqual(sourceTabId(source), sourceTabId({ ...source, datasetId: "b" }));
+  assert.notEqual(sourceTabId(source), sourceTabId({ ...source, versionNo: 2 }));
+  assert.notEqual(sourceTabId({ ...source, docId: undefined, originalPath: "/a/report.pdf" }),
+    sourceTabId({ ...source, docId: undefined, originalPath: "/b/report.pdf" }));
+  assert.equal(openSourceTab([], source)[0].filePath, "");
+  assert.equal(openSourceTab([], source, "parsed")[0].filePath, source.parsedPath);
 });

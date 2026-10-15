@@ -1,11 +1,13 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { ProviderConfig } from "@earendil-works/pi-coding-agent";
-import { buildPeSystemPrompt, PE_LAZY_TOOL_NAMES, registerPeTools } from "@earendil-works/pe-boot";
+import { buildPeSystemPrompt, PE_LAZY_TOOL_NAMES, registerPeTools, withPeSourceScope } from "@earendil-works/pe-boot";
 import { createAgentSessionFromServices, createAgentSessionServices, getAgentDir, initTheme, SessionManager, SettingsManager, Theme, type ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import { KeybindingsManager as TuiKeybindingsManager, TUI_KEYBINDINGS } from "@earendil-works/pi-tui";
 import { randomUUID } from "crypto";
 import { existsSync, realpathSync, writeFileSync } from "fs";
 import { resolve } from "path";
+import { validateSourceSelection } from "./pe-source-selection-server";
+import { sourceScopeMessage } from "./pe-source-selection";
 import { validateAgentImages } from "./image-attachments";
 import { prepareSessionDocuments, validateSessionDocuments } from "./session-document-processor";
 import type { AttachedDocument } from "./session-attachments";
@@ -517,6 +519,12 @@ export class AgentSessionWrapper {
           if (this.inner.isBashRunning) {
             throw new Error("Cannot send a prompt while a shell command is running");
           }
+          const queuedPrompt = Boolean(command.streamingBehavior) && this.isRunning();
+          if (command.sourceScope !== undefined && this.isRunning() && !queuedPrompt) {
+            throw new Error("当前回答尚未结束，资料选择将在下一次普通提问生效");
+          }
+          const sourceScope = queuedPrompt ? undefined : validateSourceSelection(this.cwd, command.sourceScope);
+          const promptMessage = sourceScopeMessage(command.message as string, sourceScope);
           const promptImages = command.images as Array<{ type: "image"; data: string; mimeType: string }> | undefined;
           const streamingBehavior = command.streamingBehavior as "steer" | "followUp" | undefined;
           let preflightAccepted = false;
@@ -549,7 +557,7 @@ export class AgentSessionWrapper {
           notifyRunningChange();
           let prompt: Promise<void>;
           try {
-            prompt = this.inner.prompt(command.message as string, {
+            prompt = withPeSourceScope(sourceScope, () => this.inner.prompt(promptMessage, {
               ...(promptImages?.length ? { images: promptImages } : {}),
               ...(streamingBehavior ? { streamingBehavior } : {}),
               source: "rpc",
@@ -558,7 +566,7 @@ export class AgentSessionWrapper {
               preflightResult: (success) => {
                 if (success) acceptPreflight();
               },
-            });
+            }));
           } catch (error) {
             finishPrompt();
             throw error;

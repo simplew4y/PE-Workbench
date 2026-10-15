@@ -9,7 +9,7 @@ test("uses the PE project registry instead of arbitrary directory selection", ()
   assert.match(source, /<PeResearchUpload/);
   assert.match(source, /<PeProjectDocuments/);
   assert.match(source, /project=\{selectedRegisteredProject\}/);
-  assert.match(source, /onOpenFile=\{onOpenFile\}/);
+  assert.match(source, /onOpenSource=\{onOpenSource\}/);
   assert.match(source, /setDocumentRefreshKey/);
   assert.match(source, /<PeProjectDeleteDialog/);
   assert.match(source, /method: "DELETE"/);
@@ -19,9 +19,9 @@ test("uses the PE project registry instead of arbitrary directory selection", ()
   assert.doesNotMatch(source, /<DirectoryPicker/);
   assert.doesNotMatch(source, /fetch\("\/api\/cwd\/validate"/);
   assert.doesNotMatch(source, /fetch\(`\/api\/worktrees/);
-  assert.match(source, /<FileExplorer/);
-  assert.match(source, /loadExplorerOpen/);
-  assert.match(source, /saveExplorerOpen/);
+  assert.doesNotMatch(source, /<FileExplorer/);
+  assert.doesNotMatch(source, /loadExplorerOpen/);
+  assert.doesNotMatch(source, /saveExplorerOpen/);
   assert.doesNotMatch(source, /openUploadPicker/);
   assert.doesNotMatch(source, /openResearchUploadPicker/);
   assert.match(source, /<PeProjectCreateDialog/);

@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect, useLayoutEffect, useMemo, useReducer } from "react";
+import type { PeSourceScope } from "@earendil-works/pe-boot";
+import { sourceScopeMessage } from "@/lib/pe-source-selection";
 import type {
   AgentMessage,
   BlockingExtensionUiRequest,
@@ -140,6 +142,7 @@ export type BuiltinSlashCommandResult =
   | { handled: true; message?: string; error?: string; action?: "openSessionStats" };
 
 export interface UseAgentSessionOptions {
+  sourceScope?: PeSourceScope | null;
   session: SessionInfo | null;
   sessionRunning?: boolean;
   newSessionCwd: string | null;
@@ -1362,6 +1365,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       }
     }
 
+    if (opts.sourceScope === null) {
+      addNotice({ type: "error", message: "来源列表尚未加载完成，请稍后重试" });
+      restoreSubmission(message, images, composerDraftKey, documents);
+      return;
+    }
+    const sourceScope = opts.sourceScope ? structuredClone(opts.sourceScope) : undefined;
+    const displayMessage = sourceScopeMessage(message, sourceScope);
     const promptRunId = promptRunIdRef.current + 1;
     cancelEventStreamGrace();
     rpcPromptPendingRef.current = true;
@@ -1370,8 +1380,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     const userMsg: AgentMessage = {
       role: "user",
       content: imageBlocks?.length
-        ? [...((message.trim() || documents?.length) ? [{ type: "text" as const, text: [message, ...(documents?.map((document) => `[附件: ${document.name}]`) ?? [])].filter(Boolean).join("\n") }] : []), ...imageBlocks]
-        : [message, ...(documents?.map((document) => `[附件: ${document.name}]`) ?? [])].filter(Boolean).join("\n"),
+        ? [...((message.trim() || documents?.length) ? [{ type: "text" as const, text: [displayMessage, ...(documents?.map((document) => `[附件: ${document.name}]`) ?? [])].filter(Boolean).join("\n") }] : []), ...imageBlocks]
+        : [displayMessage, ...(documents?.map((document) => `[附件: ${document.name}]`) ?? [])].filter(Boolean).join("\n"),
       timestamp: Date.now(),
     };
     setMessages((prev) => [...prev, userMsg]);
@@ -1404,6 +1414,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         await sendAgentCommand(sid, {
           type: "prompt",
           message,
+          ...(sourceScope ? { sourceScope } : {}),
           ...(piImages?.length ? { images: piImages } : {}),
           ...(documents?.length ? { documents } : {}),
         });
@@ -1415,6 +1426,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         await sendAgentCommand(session.id, {
           type: "prompt",
           message,
+          ...(sourceScope ? { sourceScope } : {}),
           ...(piImages?.length ? { images: piImages } : {}),
           ...(documents?.length ? { documents } : {}),
         });
@@ -1457,7 +1469,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       setAgentPhase(null);
       dispatch({ type: "end" });
     }
-  }, [isNew, newSessionCwd, newSessionModel, session, ensureNewSession, ensureEventsConnected, promoteNewSession, waitForPromptSettlement, addNotice, cancelEventStreamGrace, closeEvents, composerDraftKey, reconcileAgentState, restoreSubmission]);
+  }, [opts.sourceScope, isNew, newSessionCwd, newSessionModel, session, ensureNewSession, ensureEventsConnected, promoteNewSession, waitForPromptSettlement, addNotice, cancelEventStreamGrace, closeEvents, composerDraftKey, reconcileAgentState, restoreSubmission]);
 
   const executeBash = useCallback(async (command: string, excludeFromContext: boolean) => {
     if (agentRunningRef.current || bashRunningRef.current) return;
@@ -1768,12 +1780,19 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       addNotice({ type: "error", message: "No active session for the queued message" });
       return;
     }
+    if (opts.sourceScope === null) {
+      restore();
+      addNotice({ type: "error", message: "来源列表尚未加载完成，请稍后重试" });
+      return;
+    }
+    const sourceScope = opts.sourceScope ? structuredClone(opts.sourceScope) : undefined;
     const piImages = images?.map((img) => ({ type: "image" as const, data: img.data, mimeType: img.mimeType }));
     try {
       await sendAgentCommand(sid, {
         type: "prompt",
         message,
         streamingBehavior: behavior,
+        ...(sourceScope ? { sourceScope } : {}),
         ...(piImages?.length ? { images: piImages } : {}),
         ...(documents?.length ? { documents } : {}),
       });
@@ -1788,7 +1807,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         message: e instanceof Error ? e.message : String(e),
       });
     }
-  }, [addNotice, composerDraftKey, restoreSubmission]);
+  }, [opts.sourceScope, addNotice, composerDraftKey, restoreSubmission]);
 
   const handleSteer = useCallback(async (message: string, images?: AttachedImage[], documents?: AttachedDocument[]) => {
     await sendStreamingPrompt(message, "steer", images, documents);

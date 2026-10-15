@@ -3,11 +3,13 @@
 import { useState, useCallback, useRef, useEffect, useLayoutEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useGlobalKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
+import type { PeSourceScope } from "@earendil-works/pe-boot";
 import { SessionSidebar } from "./SessionSidebar";
 import { ChatWindow } from "./ChatWindow";
 import { FileViewer } from "./FileViewer";
-import { TabBar, type Tab } from "./TabBar";
-import { openFileTab, saveFileViewerState } from "./file-tab-state";
+import { TabBar, type SourceTarget, type SourceView, type Tab } from "./TabBar";
+import { openFileTab, openSourceTab, refreshSourceTabs, saveFileViewerState, sourceTabId, switchSourceView } from "./file-tab-state";
+import sourceStyles from "./PeProjectDocuments.module.css";
 import { ModelsConfig } from "./ModelsConfig";
 import { SkillsConfig } from "./SkillsConfig";
 import { PluginsConfig } from "./PluginsConfig";
@@ -21,7 +23,7 @@ import { useResizablePanel } from "@/hooks/useResizablePanel";
 import { useAudio } from "@/hooks/useAudio";
 import { copyText } from "@/lib/clipboard";
 import { getFileName } from "@/lib/file-paths";
-import { buildAtMentionText, buildFileAtMentionsText, buildFileLineMentionText } from "@/lib/file-fuzzy";
+import { buildAtMentionText, buildFileLineMentionText } from "@/lib/file-fuzzy";
 import {
   claimExtensionAttentionNotification,
   shouldShowBrowserNotification,
@@ -397,20 +399,15 @@ export function AppShell() {
     tabId: string,
     viewerRevision: number,
     viewerState: FileViewerState,
+    sourceSnapshot?: { view: SourceView; path: string },
   ) => {
-    setFileTabs((prev) => saveFileViewerState(prev, tabId, viewerRevision, viewerState));
+    setFileTabs((prev) => saveFileViewerState(prev, tabId, viewerRevision, viewerState, sourceSnapshot));
   }, []);
 
   // Same @mention format as the chat input's @ autocomplete, so the agent's
   // read tool resolves it the same way (it strips the @ prefix).
   const handleAtMention = useCallback((relativePath: string, isDir: boolean) => {
     chatInputRef.current?.insertText(buildAtMentionText(relativePath, isDir));
-    if (isMobile) { setRightPanelOpen(false); setSidebarOpen(false); }
-  }, [isMobile]);
-
-  const handleAtMentions = useCallback((relativePaths: string[]) => {
-    const mentions = buildFileAtMentionsText(relativePaths);
-    if (mentions) chatInputRef.current?.insertText(mentions);
     if (isMobile) { setRightPanelOpen(false); setSidebarOpen(false); }
   }, [isMobile]);
 
@@ -774,10 +771,6 @@ export function AppShell() {
     setAutoNameStatus({ kind: "idle" });
   }, [selectedSession?.id]);
 
-  const handleExplorerRefresh = useCallback(() => {
-    setExplorerRefreshKey((k) => k + 1);
-  }, []);
-
   const handleSessionForked = useCallback((newSessionId: string) => {
     invalidateWorkspaceRestore();
     activeNewSessionDraftKeyRef.current = null;
@@ -844,6 +837,27 @@ export function AppShell() {
     // On mobile the file panel is full-screen; close the drawer so it shows.
     if (isMobile) setSidebarOpen(false);
   }, [isMobile]);
+
+  const [sourceSelections, setSourceSelections] = useState<Record<string, string[]>>({});
+  const [sourceScopes, setSourceScopes] = useState<Record<string, PeSourceScope>>({});
+  const handleSelectionChange = useCallback((root: string, keys: string[]) => {
+    setSourceSelections((current) => ({ ...current, [root]: keys }));
+  }, []);
+  const handleScopeChange = useCallback((root: string, scope: PeSourceScope) => {
+    setSourceScopes((current) => JSON.stringify(current[root]) === JSON.stringify(scope)
+      ? current : { ...current, [root]: scope });
+  }, []);
+
+  const handleOpenSource = useCallback((source: SourceTarget, view: SourceView = "original") => {
+    setFileTabs((tabs) => openSourceTab(tabs, source, view));
+    setActiveFileTabId(sourceTabId(source));
+    setRightPanelOpen(true);
+    if (isMobile) setSidebarOpen(false);
+  }, [isMobile]);
+
+  const handleSourcesChanged = useCallback((sources: SourceTarget[]) => {
+    setFileTabs((tabs) => refreshSourceTabs(tabs, sources));
+  }, []);
 
   const handleOpenLinkedFile = useCallback((filePath: string) => {
     handleOpenFile(filePath, getFileName(filePath), { sourceSessionId: selectedSession?.id ?? null });
@@ -980,11 +994,12 @@ export function AppShell() {
         onSessionDeleted={handleSessionDeleted}
         selectedCwd={selectedSession?.cwd ?? newSessionCwd ?? null}
         onCwdChange={handleCwdChange}
-        onOpenFile={handleOpenFile}
-        explorerRefreshKey={explorerRefreshKey}
-        onExplorerRefresh={handleExplorerRefresh}
-        onAtMention={handleAtMention}
-        onAtMentions={handleAtMentions}
+        activeSourceId={rightPanelOpen && activeFileTab?.source ? activeFileTab.id : null}
+        sourceSelections={sourceSelections}
+        onSelectionChange={handleSelectionChange}
+        onScopeChange={handleScopeChange}
+        onOpenSource={handleOpenSource}
+        onSourcesChanged={handleSourcesChanged}
         onBackgroundTaskDone={handleBackgroundTaskDone}
         onRunningSessionIdsChange={handleRunningSessionIdsChange}
       />
@@ -2091,6 +2106,7 @@ export function AppShell() {
         <div style={{ flex: 1, overflow: "hidden", position: "relative" }}>
           {showChat ? (
             <ChatWindow
+              sourceScope={activeCwd ? sourceScopes[activeCwd] ?? null : null}
               key={sessionKey}
               session={selectedSession}
               sessionRunning={Boolean(selectedSession && runningSessionIds.has(selectedSession.id))}
@@ -2230,6 +2246,20 @@ export function AppShell() {
         </div>
 
         {/* Only the active viewer is mounted. Lightweight per-tab state is restored on activation. */}
+        {activeFileTab?.source && (
+          <div className={sourceStyles.toolbar} role="group" aria-label={translate("projectDocuments.view")}>
+            <button type="button" aria-pressed={activeFileTab.sourceView === "original"}
+              onClick={() => setFileTabs((tabs) => switchSourceView(tabs, activeFileTab.id, "original"))}>
+              {translate("projectDocuments.original")}
+            </button>
+            <button type="button" aria-pressed={activeFileTab.sourceView === "parsed"}
+              disabled={!activeFileTab.source.parsedPath}
+              title={!activeFileTab.source.parsedPath ? translate("projectDocuments.parsedUnavailable") : undefined}
+              onClick={() => setFileTabs((tabs) => switchSourceView(tabs, activeFileTab.id, "parsed"))}>
+              {translate("projectDocuments.parsed")}
+            </button>
+          </div>
+        )}
         <div style={{ flex: 1, overflow: "hidden", paddingBottom: "env(safe-area-inset-bottom)" }}>
           {activeFileTab?.filePath ? (
             <FileViewer
@@ -2245,6 +2275,7 @@ export function AppShell() {
                 activeFileTab.id,
                 activeFileTab.viewerRevision ?? 0,
                 viewerState,
+                activeFileTab.sourceView ? { view: activeFileTab.sourceView, path: activeFileTab.filePath } : undefined,
               )}
               onMentionLines={rightPanelOpen ? handleFileLineMention : undefined}
               onAtMention={handleAtMention}
@@ -2256,7 +2287,9 @@ export function AppShell() {
             />
           ) : (
             <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-dim)", fontSize: 12 }}>
-               {translate("files.noneOpen")}
+               {activeFileTab?.source
+                 ? translate(activeFileTab.sourceView === "parsed" ? "projectDocuments.parsedUnavailable" : "projectDocuments.originalUnavailable")
+                 : translate("files.noneOpen")}
             </div>
           )}
         </div>

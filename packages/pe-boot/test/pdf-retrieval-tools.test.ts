@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { initializePeCollectionDatabase } from "../src/collection-schema.ts";
 import { resolvePeEvidenceSource } from "../src/evidence.ts";
 import { sourceId } from "../src/source.ts";
+import { withPeSourceScope } from "../src/source-scope.ts";
 import { buildPeSystemPrompt } from "../src/system-prompt.ts";
 import { registerPeTools } from "../src/tools/index.ts";
 import { savePeMemo } from "../src/tools/memo-storage.ts";
@@ -226,6 +227,28 @@ afterEach(() => {
 });
 
 describe("PE page-level PDF retrieval", () => {
+	it("limits listing, search and direct reads to the prompt source snapshot", () => {
+		const root = createVersionedPageFixture();
+		addCatalogPdf(root, { docId: "excluded", filename: "Other.pdf" });
+		withPeSourceScope(
+			{
+				datasetId: "dataset-new",
+				documents: [{ docId: "doc-v2", versionNo: 2, filename: "selected.pdf" }],
+			},
+			() => {
+				expect(listPePdfDocuments(root).documents.map((doc) => doc.doc_id)).toEqual(["doc-v2"]);
+				expect(searchPePdfPages(root, { queries: ["AIDC"] }).documents.map((doc) => doc.doc_id)).toEqual([
+					"doc-v2",
+				]);
+				expect(() => readPePdfPages(root, { docId: "excluded", pageStart: 1 })).toThrow();
+			},
+		);
+		withPeSourceScope({ datasetId: "dataset-new", documents: [] }, () => {
+			expect(searchPePdfPages(root, { queries: ["AIDC"] }).documents).toEqual([]);
+		});
+		expect(listPePdfDocuments(root).documents.map((doc) => doc.doc_id)).toContain("excluded");
+	});
+
 	it("paginates beyond 200 matches without ranking by document hit count", () => {
 		const root = createVersionedPageFixture();
 		addCatalogPdf(root, { docId: "first", filename: "AAA.pdf" });
