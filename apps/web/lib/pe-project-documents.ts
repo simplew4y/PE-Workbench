@@ -1,3 +1,4 @@
+import { sourceSelectionKey } from "./pe-source-selection";
 import { statSync } from "node:fs";
 import type { PeIngestFileResult, PeIngestInputFile, PeIngestJobResult, PeIngestStatus } from "./pe-ingest/contracts";
 import { resolvePeProjectPaths, resolveProjectFile } from "./pe-ingest/paths";
@@ -156,6 +157,8 @@ export function listPeProjectDocuments(
   findActivePeIngestJob(paths);
   const database = openPeCollectionDatabase(paths.collectionPath);
   try {
+    database.exec("CREATE TABLE IF NOT EXISTS web_source_preferences (source_key TEXT PRIMARY KEY, display_name TEXT, removed INTEGER NOT NULL DEFAULT 0)");
+    const preferences = database.prepare("SELECT source_key, display_name, removed FROM web_source_preferences").all() as unknown as Array<{ source_key: string; display_name: string | null; removed: number }>;
     const documentRows = database.prepare(`
       SELECT
         d.doc_id, d.file_type, d.registration_kind, d.version_no, d.is_current,
@@ -200,9 +203,7 @@ export function listPeProjectDocuments(
           targetPrice: row.target_price?.trim() || undefined,
         } : {}),
         fileType: row.file_type,
-        ...(row.file_type !== "pdf" || row.registration_kind === "catalog" ? {
-          docId: row.doc_id, fileType: row.file_type, versionNo: Number(row.version_no), isCurrent: row.is_current === 1,
-        } : {}),
+        docId: row.doc_id, versionNo: Number(row.version_no) || 1, isCurrent: row.is_current !== 0,
         status: documentStatus(row.status),
         pageCount: Number(row.page_count) || 0,
         sizeBytes: rawFile?.sizeBytes ?? null,
@@ -290,7 +291,44 @@ export function listPeProjectDocuments(
         && document.status === "failed";
     }
     documents.sort((left, right) => right.uploadedAt.localeCompare(left.uploadedAt));
-    return { documents, currentCount: documentRows.filter((document) => document.is_current === 1).length };
+    const visible = documents.filter((document) => {
+      const key = document.rawRelativePath ?? sourceSelectionKey(document);
+      const preference = preferences.find((item) => item.source_key === key);
+      if (preference?.removed) return false;
+      if (preference?.display_name) document.title = preference.display_name;
+      return true;
+    });
+    return { documents: visible, currentCount: visible.filter((document) => document.isCurrent !== false).length };
+  } finally {
+    database.close();
+  }
+}
+
+export function updatePeSource(
+  datasetId: string, key: string, action: "rename" | "remove", name: string | undefined,
+  options: PeProjectDocumentOptions = {},
+): void {
+  if (action === "rename" && (!name?.trim() || name.trim().length > 200)) throw new Error("显示名称须为 1–200 个字符");
+  const document = listPeProjectDocuments(datasetId, options).documents.find((item) => sourceSelectionKey(item) === key);
+  if (!document) throw new Error("来源不存在，请刷新列表");
+  const project = getPeProject(datasetId, options);
+  const paths = resolvePeProjectPaths(project, peProjectStorePaths(options).registryPath);
+  const database = openPeCollectionDatabase(paths.collectionPath);
+  try {
+    database.exec("BEGIN IMMEDIATE");
+    const preferenceKey = document.rawRelativePath ?? sourceSelectionKey(document);
+    if (action === "rename") {
+      database.prepare("INSERT INTO web_source_preferences (source_key, display_name) VALUES (?, ?) ON CONFLICT(source_key) DO UPDATE SET display_name=excluded.display_name")
+        .run(preferenceKey, name!.trim());
+    } else {
+      database.prepare("INSERT INTO web_source_preferences (source_key, removed) VALUES (?, 1) ON CONFLICT(source_key) DO UPDATE SET removed=1").run(preferenceKey);
+      if (document.docId) database.prepare("UPDATE documents SET deleted_at=? WHERE doc_id=? AND dataset_id=?")
+        .run(new Date().toISOString(), document.docId, datasetId);
+    }
+    database.exec("COMMIT");
+  } catch (error) {
+    database.exec("ROLLBACK");
+    throw error;
   } finally {
     database.close();
   }

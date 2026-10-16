@@ -136,7 +136,7 @@ export function PeResearchUpload({ project, onComplete, onBusyChange, onDocument
 
   const disabled = busy || !project;
   return (
-    <div style={{ marginTop: 10 }}>
+    <div style={{ marginTop: 6 }}>
       <input
         ref={inputRef}
         type="file"
@@ -151,18 +151,18 @@ export function PeResearchUpload({ project, onComplete, onBusyChange, onDocument
         disabled={disabled}
         style={{
           width: "100%",
-          minHeight: 38,
+          minHeight: 32,
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
           gap: 7,
-          border: "1px solid rgba(37,99,235,0.4)",
-          borderRadius: 7,
-          background: "rgba(37,99,235,0.08)",
-          color: project ? "var(--accent)" : "var(--text-dim)",
+          border: "1px solid var(--border)",
+          borderRadius: 999,
+          background: "var(--bg-hover)",
+          color: project ? "var(--text)" : "var(--text-dim)",
           cursor: busy ? "wait" : project ? "pointer" : "not-allowed",
           fontSize: 12,
-          fontWeight: 650,
+          fontWeight: 500,
           opacity: disabled ? 0.65 : 1,
         }}
         title={project ? t("researchUpload.title") : t("researchUpload.noProject")}
@@ -173,7 +173,7 @@ export function PeResearchUpload({ project, onComplete, onBusyChange, onDocument
           </svg>
         ) : (
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M12 3v12" /><path d="m7 8 5-5 5 5" /><path d="M5 20h14" />
+            <path d="M12 5v14M5 12h14" />
           </svg>
         )}
         {busy ? t("researchUpload.busy") : t("researchUpload.action")}

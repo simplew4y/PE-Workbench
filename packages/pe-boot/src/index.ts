@@ -54,6 +54,7 @@ export {
 	runNextResearchJob,
 } from "./research/watch.ts";
 export * from "./source.ts";
+export { type PeSourceScope, withPeSourceScope } from "./source-scope.ts";
 export { buildPeSystemPrompt, buildToolsList } from "./system-prompt.ts";
 export { peDocumentOpenTool } from "./tools/document-open.ts";
 export { discoverPeDrivers, peDriverDiscoverTool } from "./tools/driver-discover.ts";

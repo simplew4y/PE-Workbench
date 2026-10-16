@@ -7,7 +7,8 @@ import test from "node:test";
 import { createJiti } from "jiti";
 
 const jiti = createJiti(import.meta.url, { tsconfigPaths: true });
-const { listPeProjectDocuments } = await jiti.import("./pe-project-documents.ts");
+const { validateSourceSelection } = await jiti.import("./pe-source-selection-server.ts");
+const { listPeProjectDocuments, updatePeSource } = await jiti.import("./pe-project-documents.ts");
 const { createPeProject, peProjectStorePaths } = await jiti.import("./pe-project-store.ts");
 const { saveParsedPeDocument } = await jiti.import("./pe-ingest/repository.ts");
 const { resolvePeProjectPaths } = await jiti.import("./pe-ingest/paths.ts");
@@ -71,7 +72,7 @@ function parsedDocument(paths) {
   };
 }
 
-test("lists indexed, running, and failed project files without exposing evidence IDs", (t) => {
+test("lists indexed, running, and failed project files with document versions but without exposing page evidence IDs", (t) => {
   const { options, project, paths } = fixture(t);
   fs.writeFileSync(path.join(project.root, "raw", "年度报告.pdf"), "%PDF-test");
   fs.writeFileSync(path.join(project.root, "meta", "text", "年度报告.md"), "# 年度报告");
@@ -152,12 +153,21 @@ test("lists indexed, running, and failed project files without exposing evidence
   const running = catalog.documents.find((document) => document.filename === "电话会.pdf");
   assert.equal(running.status, "running");
   assert.equal(running.markdownRelativePath, null);
+  for (const entry of catalog.documents) {
+    const docId = entry.docId ?? "pending:" + (entry.rawRelativePath ?? entry.filename);
+    assert.equal(validateSourceSelection(project.root, { datasetId: project.datasetId,
+      documents: [{ docId, versionNo: entry.versionNo ?? 1, filename: entry.filename }],
+    }, options).documents[0].docId, docId);
+  }
 
   const failed = catalog.documents.find((document) => document.filename === "损坏文件.pdf");
   assert.equal(failed.status, "failed");
   assert.deepEqual(failed.warnings, ["PDF 无法解析: [local path]"]);
   assert.doesNotMatch(JSON.stringify(catalog), /\/home\/private/u);
-  assert.doesNotMatch(JSON.stringify(catalog), /doc_internal_only|page_internal_only/u);
+  assert.equal(indexed.docId, "doc_internal_only");
+  assert.equal(indexed.versionNo, 1);
+  assert.equal(indexed.isCurrent, true);
+  assert.doesNotMatch(JSON.stringify(catalog), /page_internal_only/u);
 });
 
 test("does not return preview paths that fail workspace validation", (t) => {
@@ -204,4 +214,51 @@ test("upgrades an existing PDF project before querying Excel metadata", (t) => {
   } finally {
     migrated.close();
   }
+});
+
+test("validates source ownership and versions while allowing every parsing status", (t) => {
+  const { options, project, paths } = fixture(t);
+  fs.writeFileSync(path.join(project.root, "raw", "年度报告.pdf"), "%PDF-test");
+  fs.writeFileSync(path.join(project.root, "meta", "text", "年度报告.md"), "# 年度报告");
+  const document = parsedDocument(paths);
+  document.warnings = [];
+  document.pages[0].textQuality = "good";
+  saveParsedPeDocument(paths, document);
+  const request = { datasetId: project.datasetId, documents: [
+    { docId: document.docId, versionNo: 1, filename: "client name is untrusted" },
+  ] };
+  assert.equal(validateSourceSelection(project.root, request, options).documents[0].filename, "年度报告.pdf");
+  assert.deepEqual(validateSourceSelection(project.root, { ...request, documents: [] }, options).documents, []);
+  assert.throws(() => validateSourceSelection(project.root + "/other", request, options), /不一致/);
+  assert.throws(() => validateSourceSelection(project.root, { ...request,
+    documents: [{ ...request.documents[0], versionNo: 2 }] }, options), /不可用/);
+  assert.throws(() => validateSourceSelection(project.root, { ...request,
+    documents: [request.documents[0], request.documents[0]] }, options), /不可用/);
+  const database = new DatabaseSync(paths.collectionPath);
+  database.exec("UPDATE documents SET status='running'");
+  database.close();
+  assert.equal(validateSourceSelection(project.root, request, options).documents.length, 1);
+});
+
+test("source actions persist display names and remove retrieval entries without deleting originals", (t) => {
+  const { options, project, paths } = fixture(t);
+  const raw = path.join(project.root, "raw", "年度报告.pdf");
+  fs.writeFileSync(raw, "%PDF-test");
+  saveParsedPeDocument(paths, parsedDocument(paths));
+  const key = JSON.stringify(["doc_internal_only", 1]);
+  updatePeSource(project.datasetId, key, "rename", "新名称", options);
+  const renamed = listPeProjectDocuments(project.datasetId, options).documents[0];
+  assert.equal(renamed.title, "新名称");
+  assert.equal(renamed.filename, "年度报告.pdf");
+  assert.throws(() => updatePeSource(project.datasetId, key, "rename", " ", options));
+  assert.throws(() => updatePeSource(project.datasetId, "unknown", "remove", undefined, options));
+  updatePeSource(project.datasetId, key, "remove", undefined, options);
+  assert.equal(listPeProjectDocuments(project.datasetId, options).documents.length, 0);
+  assert.equal(fs.existsSync(raw), true);
+  const db = new DatabaseSync(paths.collectionPath);
+  try { assert.ok(db.prepare("SELECT deleted_at FROM documents WHERE doc_id=?").get("doc_internal_only").deleted_at); }
+  finally { db.close(); }
+  assert.throws(() => validateSourceSelection(project.root, { datasetId: project.datasetId,
+    documents: [{ docId: "doc_internal_only", versionNo: 1, filename: "年度报告.pdf" }],
+  }, options), /不可用/);
 });

@@ -17,7 +17,7 @@ type State = { status: "loading" | "disabled" } | { status: "error"; message: st
 function ProjectConsensus({ project, refreshKey }: { project: PeProjectSummary; refreshKey: number }) {
   const { t } = useI18n();
   const [state, setState] = useState<State>({ status: "loading" });
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
   const [reload, setReload] = useState(0);
   const datasetId = project.datasetId;
 

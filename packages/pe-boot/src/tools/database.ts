@@ -3,6 +3,7 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { portablePeFilename } from "../document-filenames.ts";
 import { sourceId } from "../source.ts";
+import { applyPeSourceScope } from "../source-scope.ts";
 
 export { DOCUMENT_SCHEMA } from "../collection-schema.ts";
 export { registerPeDocuments } from "../documents.ts";
@@ -170,6 +171,7 @@ function openResolvedPeDataset(
 		if (expectedDatasetId && expectedDatasetId !== datasetId) {
 			throw new Error(`dataset_id ${expectedDatasetId} does not match the current project dataset ${datasetId}`);
 		}
+		if (readOnly) applyPeSourceScope(database, datasetId);
 		return { database, datasetId, workspaceRoot: location.workspaceRoot };
 	} catch (error) {
 		database.close();
