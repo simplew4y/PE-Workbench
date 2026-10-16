@@ -24,6 +24,7 @@ function text(value: unknown): string {
 
 function failure(error: unknown) {
   const status = error instanceof ResearchError ? error.status : error instanceof SyntaxError ? 400 : 500;
+  if (status === 500) console.error("Research workflow request failed", error);
   return noStoreJson({ error: status === 500 ? "追踪配置或模型服务暂不可用，请检查项目和运行环境。" : error instanceof Error ? error.message : "请求失败。" }, { status });
 }
 
