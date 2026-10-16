@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { createJiti } from "jiti";
-import { createFrameworkIteration, createResearchDraft, initializePeCollectionDatabase, publishResearchDraft } from "@earendil-works/pe-boot";
+import { createFrameworkIteration, createResearchDraft, informationSourceConfig, initializePeCollectionDatabase, publishResearchDraft } from "@earendil-works/pe-boot";
 import { availability, createServerIterationRuntime, serverIterationRuntimeStatus } from "./iteration-runtime.mjs";
 
 const environment = {
@@ -35,7 +35,13 @@ test("server runtime sends its explicit key and extra body to a local mock, not 
   const server = createServer(async (request, response) => {
     let body = "";
     for await (const chunk of request) body += chunk;
-    requests.push({ authorization: request.headers.authorization, body: JSON.parse(body) });
+    const payload = JSON.parse(body);
+    requests.push({ authorization: request.headers.authorization, body: payload });
+    if (payload.response_format?.type === "json_object" && !/json/i.test(JSON.stringify(payload.messages))) {
+      response.writeHead(400, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: { message: "Prompt must contain the word 'json' to use json_object", type: "invalid_request_error" } }));
+      return;
+    }
     response.writeHead(401, { "content-type": "application/json" });
     response.end(JSON.stringify({ error: { message: "local mock denies access", type: "authentication_error" } }));
   });
@@ -58,12 +64,24 @@ test("server runtime sends its explicit key and extra body to a local mock, not 
   await assert.rejects(createServerIterationRuntime(cwd, datasetId, { ...run, modelId: "other-user-model" }, new AbortController().signal), /不一致/);
   const runtime = await createServerIterationRuntime(cwd, datasetId, run, new AbortController().signal);
   t.after(() => runtime.dispose());
-  await assert.rejects(runtime.engine.extract(run, basis, AbortSignal.timeout(10000)));
-  assert.equal(requests.length, 1);
-  assert.equal(requests[0].authorization, "Bearer test-server-key");
-  assert.equal(requests[0].body.model, "test-model");
-  assert.deepEqual(requests[0].body.thinking, { type: "disabled" });
-  assert.deepEqual(requests[0].body.response_format, { type: "json_object" });
-  assert.equal(requests[0].body.stream, true);
-  assert.ok(requests[0].body.tools.some((tool) => tool.function.name === "pe_iteration_submit"));
+  const observations = { observations: [], coverage: [] };
+  const impacts = { substantive: false, summary: "没有变化", impacts: [], gaps: [] };
+  const sourceRun = { ...run, sourceMode: "sources", sourceConfig: informationSourceConfig("测试公司", "000001.SZ", ["wind-financials"]) };
+  for (const invoke of [
+    () => runtime.engine.prepare(run, basis, AbortSignal.timeout(10000)),
+    () => runtime.engine.collect(sourceRun, basis, AbortSignal.timeout(10000)),
+    () => runtime.engine.extract(run, basis, AbortSignal.timeout(10000)),
+    () => runtime.engine.impact(run, basis, observations, AbortSignal.timeout(10000)),
+    () => runtime.engine.revise(run, basis, observations, impacts, AbortSignal.timeout(10000)),
+  ]) await assert.rejects(invoke(), /平台授权失效/, "the mock's JSON-mode validation must pass before its deliberate authentication rejection");
+  assert.equal(requests.length, 5);
+  for (const request of requests) {
+    assert.equal(request.authorization, "Bearer test-server-key");
+    assert.equal(request.body.model, "test-model");
+    assert.deepEqual(request.body.thinking, { type: "disabled" });
+    assert.deepEqual(request.body.response_format, { type: "json_object" });
+    assert.match(JSON.stringify(request.body.messages), /json/i, "all five stages must explicitly instruct JSON in message content");
+    assert.equal(request.body.stream, true);
+    assert.ok(request.body.tools.some((tool) => tool.function.name === "pe_iteration_submit"));
+  }
 });

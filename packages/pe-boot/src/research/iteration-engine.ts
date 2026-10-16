@@ -92,6 +92,7 @@ export function createIterationEngine(
 		},
 		signal: AbortSignal,
 	): Promise<Static<T>> {
+		prompt = `工具参数使用符合各工具 schema 的 JSON 对象；完成阶段必须调用 pe_iteration_submit，普通 JSON 文本不能代替工具提交。\n${prompt}`;
 		if (name === "prepare")
 			prompt = `identitySources在项目或框架已有明确公司代码时可为空；否则须原样引用项目资料中公司名称与证券代码的原文，并附读取工具返回的evidenceId，不据文件名猜证券身份。\n${prompt}`;
 		if (run.monitorRunId && name !== "prepare") {
