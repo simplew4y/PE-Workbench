@@ -11,7 +11,7 @@ const require = createRequire(import.meta.url);
 test("both actions work with no model selection, mappings or date", async () => {
   const source = readFileSync(new URL("./PeFrameworkUpdates.tsx", import.meta.url), "utf8");
   const names = [...source.matchAll(/const \[([\w]+),[^\n]+?= useState/g)].map(match => match[1]);
-  const snapshot = { monitor: { revision: 0, config: null, runs: [], manualRequested: false }, modelResult: null, serverRuntime: { available: true } };
+  const snapshot = { monitor: { revision: 0, config: null, runs: [], manualRequested: false }, modelResult: null, serverRuntime: { available: true }, frameworkRuntime: { available: true } };
   const code = ts.transpileModule(source, { compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   for (const action of ["立即更新", "开启自动更新"]) {
     let cursor = 0;

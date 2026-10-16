@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { loadHermesMaterials, runHermesPipeline, validatePlan, validateRevision } from "./hermes_framework_pipeline.mjs";
+import { loadHermesMaterials, runHermesPipeline, validatePlan } from "./hermes_framework_pipeline.mjs";
 
 function framework() {
 	return { schemaVersion: 2, title: "Hermès 投资框架", sections: {
@@ -27,22 +27,8 @@ test("only validates the fields required to send a Wind query", () => {
 	assert.throws(() => validatePlan({ queries: [{ category: "quote", query: "RMS.PA 最新股价" }] }), /证券代码/);
 });
 
-test("checks framework format without checking evidence, judgments or section relationships", () => {
-	const value = framework();
-	value.sections.monitoring.rules.push({ judgmentIds: ["not-a-known-judgment"], evidenceIds: ["W5 F"] });
-	assert.equal(validateRevision(value), value);
-	delete value.sections.monitoring;
-	assert.throws(() => validateRevision(value), /七节/);
-});
-
-test("requires prose fields for readable reports without adding financial content checks", () => {
-	const value = framework();
-	delete value.sections.businessModel.markdown;
-	assert.throws(() => validateRevision(value), /markdown/);
-});
-
-test("loads the current Hermes framework and explicit supporting files", () => {
-	const input = loadHermesMaterials();
+test("loads the current Hermes framework and explicit supporting files", async () => {
+	const input = await loadHermesMaterials();
 	assert.ok(input.baseline.versionId);
 	assert.ok(input.documents.some((document) => document.path.endsWith("H1-2026.txt") && document.content.length > 1000));
 });
@@ -55,6 +41,20 @@ test("prepare-only invokes neither paid service", async () => {
 			windFetcher: async () => { throw new Error("unexpected Wind call"); },
 		});
 		assert.equal(JSON.parse(readFileSync(join(output, "run.json"), "utf8")).status, "prepared");
+	} finally { rmSync(output, { recursive: true, force: true }); }
+});
+
+test("project company parameters replace Hermes in both prompts", async () => {
+	const output = mkdtempSync(join(tmpdir(), "project-pipeline-"));
+	try {
+		await runHermesPipeline({ output, materials: { ...materials, company: "测试银行", ticker: "600000.SH" }, model: "deepseek-test",
+			complete: async (stage, messages) => {
+				assert.doesNotMatch(messages[0].content, /公司固定为Hermès|评价Hermès|证券RMS.PA/);
+				if (stage === "plan") assert.match(messages[0].content, /测试银行.*600000.SH/);
+				return response(stage === "plan" ? plan : framework());
+			}, windFetcher: async () => ({ content: [{ type: "text", text: "公司披露" }] }),
+		});
+		assert.doesNotMatch(readFileSync(join(output, "summary.md"), "utf8"), /Hermès 投资观点/);
 	} finally { rmSync(output, { recursive: true, force: true }); }
 });
 
@@ -78,31 +78,38 @@ test("uses exactly two LLM calls and saves generated references even when Wind f
 		});
 		assert.deepEqual(stages, ["plan", "revision"]);
 		const saved = JSON.parse(readFileSync(join(output, "framework.json"), "utf8"));
-		assert.deepEqual(saved.sections.currentAssessment.evidenceIds, ["W5 F"]);
+		assert.equal(saved.reportMarkdown, JSON.stringify(framework()));
 		assert.match(readFileSync(join(output, "summary.md"), "utf8"), /本轮新总结/);
 		assert.match(readFileSync(join(output, "summary.md"), "utf8"), /本轮新判断/);
 		const report = readFileSync(join(output, "framework.md"), "utf8");
-		assert.match(report, /## 三、公司如何创造价值/);
+		assert.equal(report, JSON.stringify(framework()));
 		assert.match(report, /客户愿意为稀缺产品付费/);
-		assert.doesNotMatch(report, /\*\*(?:evidenceIds|summary|status)\*\*|W5 F/);
+		assert.match(report, /W5 F/);
 		assert.ok(existsSync(join(output, "wind-W1.json")));
 		assert.equal(JSON.parse(readFileSync(join(output, "run.json"), "utf8")).status, "completed");
 	} finally { rmSync(output, { recursive: true, force: true }); }
 });
 
-test("invalid JSON stops the run without an automatic repair call", async () => {
+test("free prose, incomplete fields and malformed JSON are saved verbatim without a repair call", async () => {
+	for (const content of ["# 新版框架\n\n自由生成的投资判断。", '{"sections":{"currentAssessment":{"summary":"已有判断但无markdown"}}}', "{broken"]) {
 	const output = mkdtempSync(join(tmpdir(), "hermes-invalid-json-"));
 	let calls = 0;
 	try {
-		await assert.rejects(runHermesPipeline({ output, materials, model: "deepseek-test",
-			complete: async (stage) => { calls++; return stage === "plan" ? response(plan) : { choices: [{ message: { content: "{broken" } }] }; },
+		await runHermesPipeline({ output, materials, model: "deepseek-test",
+			complete: async (stage, _messages, options) => {
+				calls++;
+				assert.equal(options.response_format?.type, stage === "plan" ? "json_object" : undefined);
+				return stage === "plan" ? response(plan) : { choices: [{ message: { content } }] };
+			},
 			windFetcher: async () => ({ content: [{ type: "text", text: "Wind原文" }] }),
-		}), SyntaxError);
+		});
 		assert.equal(calls, 2);
 		assert.equal(existsSync(join(output, "revision-2-request.json")), false);
-		assert.equal(existsSync(join(output, "framework.json")), false);
-		assert.equal(JSON.parse(readFileSync(join(output, "run.json"), "utf8")).status, "failed");
+		assert.equal(readFileSync(join(output, "framework.md"), "utf8"), content);
+		assert.equal(JSON.parse(readFileSync(join(output, "framework.json"), "utf8")).reportMarkdown, content);
+		assert.equal(JSON.parse(readFileSync(join(output, "run.json"), "utf8")).status, "completed");
 	} finally { rmSync(output, { recursive: true, force: true }); }
+	}
 });
 
 test("resume reuses Wind and makes one generation call, ignoring old analysis validation", async () => {

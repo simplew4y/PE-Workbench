@@ -123,3 +123,15 @@ test("version diff includes added, removed, evidence-only and metadata changes",
   assert.equal(transition[0].id, "report-document");
   assert.equal(transition[0].fields[0].after, reportExports.frameworkReportMarkdown(content));
 });
+
+test("pipeline prose renders directly and changes in prose appear in the version comparison", () => {
+  const before = { ...content, reportMarkdown: "# 公司框架\n\n## 四、投资判断\n\n原判断" };
+  const after = { ...before, reportMarkdown: "# 公司框架\n\n## 四、投资判断\n\n新判断与失效条件" };
+  const html = renderToStaticMarkup(React.createElement(exports.FrameworkText, { cwd: "/project", content: after }));
+  assert.equal(renderedDocuments.at(-1).markdown, after.reportMarkdown);
+  assert.match(html, /新判断与失效条件/);
+  const changes = reportExports.frameworkVersionDiff(before, after);
+  assert.equal(changes.length, 1);
+  assert.equal(changes[0].fields[0].after, after.reportMarkdown);
+  assert.equal(reportExports.frameworkVersionDiff(after, after).length, 0);
+});

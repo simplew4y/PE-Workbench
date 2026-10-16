@@ -5,12 +5,14 @@ import {
   requestResearchMonitorRun, ResearchError, saveIterationModelConfig, saveResearchMonitor,
   type SaveIterationModelConfigInput,
   resetStoppedMonitorIterations,
+  migrateFrameworkScriptMonitor,
 } from "@earendil-works/pe-boot";
 import { iterationRequestContext } from "@/lib/framework-iteration-access";
 import { noStoreJson } from "@/lib/pe-gateway/route-helpers";
 import { listPeProjectDocuments } from "@/lib/pe-project-documents";
 import { ensureResearchMonitorWorker } from "@/lib/research-monitor-worker";
 import { serverIterationRuntimeStatus } from "@/services/pe-research/iteration-runtime.mjs";
+import { frameworkPipelineStatus } from "@/services/pe-research/framework-pipeline.mjs";
 import type { PeProjectSummary } from "@/lib/pe-project-types";
 
 export const runtime = "nodejs";
@@ -29,15 +31,15 @@ function failure(error: unknown) {
 }
 
 function saveAutomaticUpdates(project: PeProjectSummary, enabled: boolean, revision: number) {
-  const server = serverIterationRuntimeStatus();
+  const server = frameworkPipelineStatus();
   if (!server.available || !server.modelId) throw new ResearchError(409, server.reason || "后台分析服务暂不可用，请稍后重试。");
   const state = getResearchFramework(project.root, project.datasetId);
   const current = state.versions.find((version) => version.id === state.currentVersionId);
   if (!current) throw new ResearchError(409, "请先保存一份投资框架。");
   return saveResearchMonitor(project.root, project.datasetId, {
-    pipeline: "iteration", runtime: "server", modelId: server.modelId, updatePolicy: "direct", automaticSetup: true,
+    pipeline: "script", runtime: "server", modelId: server.modelId, updatePolicy: "direct",
     company: { name: project.companyName, ticker: project.companyTicker }, enabled, mode: "auto", intervalHours: 168,
-    objective: "自动读取现有框架和项目最新文件，识别模型、估值日期及关键输入，结合Wind更新框架与模型，并用简短中文说明变化。", queries: [], includeMemos: false,
+    objective: "读取当前空间的投资框架和资料，调用两轮DeepSeek脚本规划Wind查询并直接生成七节新版框架。", queries: [], includeMemos: false,
   }, revision);
 }
 
@@ -45,8 +47,9 @@ export async function GET(request: NextRequest) {
   try {
     const params = request.nextUrl.searchParams;
     const { project } = await iterationRequestContext(request, text(params.get("datasetId")));
+    migrateFrameworkScriptMonitor(project.root, project.datasetId);
     let monitor = getResearchMonitor(project.root, project.datasetId);
-    if (monitor.config?.automaticSetup && monitor.runs[0]?.status === "running" && !monitor.workerOnline) {
+    if ((monitor.config?.automaticSetup || monitor.config?.pipeline === "script") && monitor.runs[0]?.status === "running" && !monitor.workerOnline) {
       resetStoppedMonitorIterations(project.root, project.datasetId);
       monitor = getResearchMonitor(project.root, project.datasetId);
     }
@@ -82,6 +85,7 @@ export async function GET(request: NextRequest) {
       monitor,
       latestRunId: runId,
       serverRuntime: serverIterationRuntimeStatus(),
+      frameworkRuntime: frameworkPipelineStatus(),
     });
   } catch (error) { return failure(error); }
 }
@@ -105,12 +109,12 @@ export async function POST(request: NextRequest) {
       }
       case "updates-run": {
         const monitor = getResearchMonitor(root, datasetId);
-        if (!serverIterationRuntimeStatus().available) throw new ResearchError(409, "后台分析模型不可用。");
+        if (!frameworkPipelineStatus().available) throw new ResearchError(409, "DeepSeek框架更新服务不可用。");
         if (!resetStoppedMonitorIterations(root, datasetId) || monitor.manualRequested) {
           await ensureResearchMonitorWorker(root, datasetId);
           return noStoreJson({ monitor: getResearchMonitor(root, datasetId) }, { status: 202 });
         }
-        if (!monitor.config?.automaticSetup || monitor.config.modelId !== serverIterationRuntimeStatus().modelId) saveAutomaticUpdates(project, monitor.config?.enabled ?? false, monitor.revision);
+        if (monitor.config?.pipeline !== "script" || monitor.config.modelId !== frameworkPipelineStatus().modelId) saveAutomaticUpdates(project, monitor.config?.enabled ?? false, monitor.revision);
         requestResearchMonitorRun(root, datasetId);
         await ensureResearchMonitorWorker(root, datasetId);
         return noStoreJson({ monitor: getResearchMonitor(root, datasetId) }, { status: 202 });

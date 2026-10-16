@@ -430,7 +430,8 @@ function publishResearchDraftWithEvidence(
 					.prepare(`SELECT 1 FROM research_monitor_runs r
 				JOIN research_monitor_plans p ON p.dataset_id=r.dataset_id
 				WHERE r.dataset_id=? AND r.run_id=? AND r.status='running' AND r.lease_until>?
-				AND p.enabled=1 AND p.revision=r.plan_revision AND json_extract(p.config_json,'$.mode')='auto'`)
+				AND (p.enabled=1 OR (json_extract(r.result_json,'$.manual')=1 AND json_extract(p.config_json,'$.pipeline')='script'))
+				AND p.revision=r.plan_revision AND json_extract(p.config_json,'$.mode')='auto'`)
 					.get(datasetId, input.monitorRunId, Date.now())
 			)
 				throw new ResearchError(409, "Monitor paused, changed, or lease expired; draft preserved");

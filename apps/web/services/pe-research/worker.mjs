@@ -2,11 +2,12 @@ import { realpathSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { setTimeout } from "node:timers/promises";
 import { parseArgs } from "node:util";
-import { createPiResearchEngine, getResearchMonitor, getStockTracking, runDueStockTrackers, runResearchMonitor, runNextResearchJob } from "@earendil-works/pe-boot";
+import { createPiResearchEngine, getResearchMonitor, getStockTracking, migrateFrameworkScriptMonitor, runDueStockTrackers, runResearchMonitor, runNextResearchJob } from "@earendil-works/pe-boot";
 import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import lockfile from "proper-lockfile";
 import { join } from "node:path";
 import { createServerIterationRuntime } from "./iteration-runtime.mjs";
+import { createFrameworkPipelineEngine } from "./framework-pipeline.mjs";
 
 const { values } = parseArgs({ options: {
   registry: { type: "string" }, dataset: { type: "string" }, once: { type: "boolean", default: false },
@@ -34,6 +35,8 @@ try {
     if (!release) release = await lockfile.lock(join(cwd, "meta/collection.sqlite3"), { lockfilePath: join(cwd, "meta/research-worker.lock"), stale: 30_000, update: 10_000, onCompromised: () => controller.abort() });
     // Price collection and deterministic valuation do not require an LLM account.
     const engine = { generate: async (...args) => {
+      const plan = getResearchMonitor(cwd, values.dataset).config;
+      if (plan?.pipeline === "script") return createFrameworkPipelineEngine(cwd, values.dataset, plan).generate(...args);
       const settings = SettingsManager.create(cwd);
       const provider = process.env.PE_RESEARCH_PROVIDER || settings.getDefaultProvider();
       const model = process.env.PE_RESEARCH_MODEL || settings.getDefaultModel();
@@ -43,6 +46,7 @@ try {
     } };
     let processed = false;
     if (values.monitor) {
+      migrateFrameworkScriptMonitor(cwd, values.dataset);
       const monitor = getResearchMonitor(cwd, values.dataset);
       const researchEnabled = !!monitor.config?.enabled || monitor.manualRequested;
       const trackingEnabled = getStockTracking(cwd, values.dataset).trackers.some((tracker) => tracker.config.enabled);

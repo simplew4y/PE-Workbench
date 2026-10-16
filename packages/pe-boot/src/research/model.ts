@@ -43,6 +43,7 @@ export const FrameworkContentSchema = Type.Object(
 	{
 		schemaVersion: Type.Literal(2),
 		title: Type.String({ minLength: 1, maxLength: 200, pattern: "\\S" }),
+		reportMarkdown: Type.Optional(Type.String({ minLength: 1, maxLength: 200_000, pattern: "\\S" })),
 		sections: Type.Object(
 			{
 				researchSetup: Type.Object(
@@ -298,7 +299,7 @@ export function validateFrameworkContent(value: unknown): FrameworkContent {
 			"Investment frameworks require schemaVersion 2 and all seven sections; read the current tool schema and submit the complete document",
 		);
 	const items = value.sections.investmentJudgments.items;
-	if (items.length === 0 && value.sections.evidenceAndChanges.coverageGaps.length === 0)
+	if (items.length === 0 && value.sections.evidenceAndChanges.coverageGaps.length === 0 && !value.reportMarkdown)
 		throw new ResearchError(400, "A framework without investment judgments must explain its evidence gaps");
 	const ids = new Set(items.map((item) => item.id));
 	if (ids.size !== items.length) throw new ResearchError(400, "Framework item IDs must be unique");

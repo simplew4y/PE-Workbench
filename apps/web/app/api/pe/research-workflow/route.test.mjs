@@ -17,7 +17,8 @@ const { frameworkFixture } = await jiti.import("../../../../../../packages/pe-bo
 test("workflow reads and writes enforce origin, identity, revision and explicit background-cost acknowledgement", async (context) => {
   const root = mkdtempSync(join(tmpdir(), "pe-workflow-route-"));
   const environment = {
-    PI_CODING_AGENT_DIR: root, PE_MULTI_USER_MODE: "0", PE_INGEST_LLM_MODEL: "test-model",
+    PI_CODING_AGENT_DIR: root, PE_MULTI_USER_MODE: "0", PE_INGEST_LLM_MODEL: "deepseek-test",
+    DEEPSEEK_API_KEY: "", DEEPSEEK_MODEL: "", DEEPSEEK_BASE_URL: "",
     PE_INGEST_LLM_BASE_URL: "https://example.invalid/v1", PE_INGEST_LLM_API_KEY: "never-send-test-key", PE_INGEST_LLM_EXTRA_BODY: "{}",
   };
   const previous = Object.fromEntries(Object.keys(environment).map((key) => [key, process.env[key]]));
@@ -96,6 +97,7 @@ test("workflow reads and writes enforce origin, identity, revision and explicit 
   process.env.PE_INGEST_LLM_MODEL = "test-model";
   const draft = createResearchDraft(project.root, project.datasetId, frameworkFixture(), [], null);
   const basis = publishResearchDraft(project.root, project.datasetId, { draftId: draft.id, revision: 1, expectedVersionId: null, requestId: "initial" });
+  process.env.PE_INGEST_LLM_MODEL = "deepseek-test";
   const direct = { action: "updates-save", applyUpdates: true, enabled: false, revision: 6 };
   assert.equal((await request({ ...direct, applyUpdates: false })).status, 400);
   const savedDirect = await request(direct);
@@ -105,7 +107,7 @@ test("workflow reads and writes enforce origin, identity, revision and explicit 
   assert.equal(updated.monitor.config.updatePolicy, "direct");
   assert.equal(updated.monitor.config.intervalHours, 168);
   assert.equal(updated.monitor.config.enabled, false);
-  assert.equal(updated.monitor.config.automaticSetup, true);
+  assert.equal(updated.monitor.config.pipeline, "script");
   assert.equal(updated.monitor.config.sourceConfig, undefined, "identity and query dates are discovered from source files, not supplied by the user");
   assert.equal((await request(direct)).status, 409, "direct settings also enforce revision");
   const db = new DatabaseSync(join(project.root, "meta/collection.sqlite3"));
@@ -134,7 +136,7 @@ test("workflow reads and writes enforce origin, identity, revision and explicit 
   const automatic = await request({ action: "updates-run", datasetId: automaticProject.datasetId });
   assert.equal(automatic.status, 202, "a saved legacy framework works without resaving, model selection, mapping, date, or schedule");
   const automaticState = await automatic.json();
-  assert.equal(automaticState.monitor.config.automaticSetup, true);
+  assert.equal(automaticState.monitor.config.pipeline, "script");
   assert.equal(automaticState.monitor.config.enabled, false, "a manual update does not silently enable weekly updates");
   assert.equal(automaticState.monitor.manualRequested, true);
   assert.equal((await request({ action: "updates-run", datasetId: automaticProject.datasetId })).status, 202, "double clicks reuse the queued update");

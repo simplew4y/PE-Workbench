@@ -12,7 +12,7 @@ import { researchTransaction, withResearchDatabase } from "./storage.ts";
 import type { ResearchEngine, ResearchJobInput } from "./watch.ts";
 
 export interface MonitorConfig {
-	pipeline?: "iteration";
+	pipeline?: "iteration" | "script";
 	updatePolicy?: "direct";
 	automaticSetup?: boolean;
 	company?: { name: string; ticker: string };
@@ -35,7 +35,8 @@ export interface MonitorEvent {
 	evidenceId?: string;
 }
 export interface MonitorRun {
-	pipeline?: "iteration";
+	pipeline?: "iteration" | "script";
+	manual?: boolean;
 	iterationId?: string;
 	id: string;
 	startedAt: string;
@@ -105,9 +106,11 @@ export function saveResearchMonitor(
 		throw new ResearchError(400, "Invalid monitoring reprocess option");
 	if (!value || typeof value !== "object") throw new ResearchError(400, "Invalid monitoring plan");
 	const c = value as MonitorConfig;
-	if (c.pipeline !== undefined && c.pipeline !== "iteration")
+	if (c.pipeline !== undefined && c.pipeline !== "iteration" && c.pipeline !== "script")
 		throw new ResearchError(400, "Unknown monitoring pipeline");
-	if (c.pipeline === "iteration") {
+	if (c.pipeline === "iteration" || c.pipeline === "script") {
+		if (c.pipeline === "script" && (c.mode !== "auto" || c.updatePolicy !== "direct"))
+			throw new ResearchError(400, "Script monitoring requires direct updates");
 		if (
 			c.automaticSetup !== undefined &&
 			(c.automaticSetup !== true || c.updatePolicy !== "direct" || c.mode !== "auto")
@@ -115,7 +118,7 @@ export function saveResearchMonitor(
 			throw new ResearchError(400, "Automatic setup requires direct updates");
 		if (
 			c.company !== undefined &&
-			(!c.automaticSetup ||
+			((!c.automaticSetup && c.pipeline !== "script") ||
 				!c.company ||
 				typeof c.company.name !== "string" ||
 				typeof c.company.ticker !== "string" ||
@@ -171,11 +174,12 @@ export function saveResearchMonitor(
 	)
 		throw new ResearchError(400, "Invalid plan: interval 1–168 hours, at most one query per Wind category");
 	const config: MonitorConfig = {
-		...(c.pipeline === "iteration"
+		...(c.pipeline === "iteration" || c.pipeline === "script"
 			? {
 					pipeline: c.pipeline,
 					...(c.updatePolicy ? { updatePolicy: c.updatePolicy } : {}),
 					...(c.automaticSetup ? { automaticSetup: true, ...(c.company ? { company: c.company } : {}) } : {}),
+					...(c.pipeline === "script" && c.company ? { company: c.company } : {}),
 					modelId: c.modelId!.trim(),
 					runtime: c.runtime,
 					...(c.sourceConfig ? { sourceConfig: c.sourceConfig } : {}),
@@ -225,13 +229,13 @@ export function requestResearchMonitorRun(cwd: string, datasetId: string): void 
 				.prepare("SELECT config_json,revision FROM research_monitor_plans WHERE dataset_id=?")
 				.get(datasetId);
 			const config = row ? (JSON.parse(String(row.config_json)) as MonitorConfig) : null;
-			if (config?.pipeline === "iteration" && config.updatePolicy === "direct") {
+			if ((config?.pipeline === "iteration" || config?.pipeline === "script") && config.updatePolicy === "direct") {
 				if (
 					db
 						.prepare(
-							"SELECT 1 FROM research_monitor_runs WHERE dataset_id=? AND status NOT IN ('published','no_change','rejected','cancelled')",
+							"SELECT 1 FROM research_monitor_runs WHERE dataset_id=? AND status NOT IN ('published','no_change','rejected','cancelled') AND (?='iteration' OR status='running')",
 						)
-						.get(datasetId)
+						.get(datasetId, config.pipeline)
 				)
 					throw new ResearchError(409, "上一轮尚未完成，请先处理或结束上一轮。");
 				db.prepare(
@@ -245,6 +249,28 @@ export function requestResearchMonitorRun(cwd: string, datasetId: string): void 
 					.run(Date.now(), datasetId).changes !== 1
 			)
 				throw new ResearchError(409, "Enable monitoring first");
+		}),
+	);
+}
+
+/** Upgrade only the old one-click page plans, retaining the user's timer and enabled state. */
+export function migrateFrameworkScriptMonitor(cwd: string, datasetId: string): void {
+	database(cwd, datasetId, (db) =>
+		researchTransaction(db, () => {
+			const row = db
+				.prepare("SELECT config_json,revision FROM research_monitor_plans WHERE dataset_id=?")
+				.get(datasetId);
+			if (!row) return;
+			const config = JSON.parse(String(row.config_json)) as MonitorConfig;
+			if (config.pipeline !== "iteration" || !config.automaticSetup || config.updatePolicy !== "direct") return;
+			config.pipeline = "script";
+			delete config.automaticSetup;
+			db.prepare(
+				"UPDATE research_monitor_plans SET config_json=?,revision=revision+1,cursor_json='',heartbeat_at=NULL WHERE dataset_id=?",
+			).run(JSON.stringify(config), datasetId);
+			db.prepare(
+				"UPDATE research_monitor_manual_requests SET plan_revision=? WHERE dataset_id=? AND plan_revision=?",
+			).run(Number(row.revision) + 1, datasetId, row.revision);
 		}),
 	);
 }
@@ -307,7 +333,8 @@ export async function runResearchMonitor(
 				);
 			}
 			const row = db
-				.prepare("SELECT * FROM research_monitor_plans WHERE dataset_id=? AND enabled=1 AND next_run_at<=?")
+				.prepare(`SELECT * FROM research_monitor_plans p WHERE dataset_id=? AND ((enabled=1 AND next_run_at<=?)
+				OR EXISTS(SELECT 1 FROM research_monitor_manual_requests m WHERE m.dataset_id=p.dataset_id AND m.plan_revision=p.revision))`)
 				.get(datasetId, now);
 			if (
 				!row ||
@@ -315,6 +342,10 @@ export async function runResearchMonitor(
 			)
 				return null;
 			const run: MonitorRun = {
+				...(JSON.parse(String(row.config_json)).pipeline === "script" ? { pipeline: "script" as const } : {}),
+				manual: !!db
+					.prepare("SELECT 1 FROM research_monitor_manual_requests WHERE dataset_id=? AND plan_revision=?")
+					.get(datasetId, row.revision),
 				id: randomUUID(),
 				startedAt: new Date(now).toISOString(),
 				finishedAt: null,
@@ -325,7 +356,7 @@ export async function runResearchMonitor(
 				run.id,
 				datasetId,
 				row.revision,
-				now + 600_000,
+				now + (run.pipeline === "script" ? 1_200_000 : 600_000),
 				JSON.stringify(run),
 				run.startedAt,
 			);
@@ -333,6 +364,7 @@ export async function runResearchMonitor(
 				now + 3600_000 * (JSON.parse(String(row.config_json)) as MonitorConfig).intervalHours,
 				datasetId,
 			);
+			db.prepare("DELETE FROM research_monitor_manual_requests WHERE dataset_id=?").run(datasetId);
 			return {
 				run,
 				config: JSON.parse(String(row.config_json)) as MonitorConfig,
@@ -344,16 +376,20 @@ export async function runResearchMonitor(
 	if (!claim) return false;
 	const { run, config, revision } = claim;
 	const stopped = new AbortController();
-	const runSignal = AbortSignal.any([signal, stopped.signal, AbortSignal.timeout(540_000)]);
+	const runSignal = AbortSignal.any([
+		signal,
+		stopped.signal,
+		AbortSignal.timeout(run.pipeline === "script" ? 1_140_000 : 540_000),
+	]);
 	const heartbeat = setInterval(() => {
 		try {
 			database(cwd, datasetId, (db) => {
 				if (
 					db
 						.prepare(
-							"UPDATE research_monitor_plans SET heartbeat_at=? WHERE dataset_id=? AND revision=? AND enabled=1",
+							"UPDATE research_monitor_plans SET heartbeat_at=? WHERE dataset_id=? AND revision=? AND (enabled=1 OR ?=1)",
 						)
-						.run(Date.now(), datasetId, claim.revision).changes !== 1
+						.run(Date.now(), datasetId, claim.revision, Number(run.manual === true)).changes !== 1
 				)
 					stopped.abort(new Error("Monitoring paused or settings changed"));
 			});
@@ -382,8 +418,9 @@ export async function runResearchMonitor(
 		database(cwd, datasetId, (db) => {
 			if (
 				!db
-					.prepare("SELECT 1 FROM research_monitor_plans WHERE dataset_id=? AND enabled=1 AND revision=?")
-					.get(datasetId, revision)
+					.prepare(`SELECT 1 FROM research_monitor_plans p JOIN research_monitor_runs r ON r.dataset_id=p.dataset_id
+					WHERE p.dataset_id=? AND (p.enabled=1 OR ?=1) AND p.revision=? AND r.run_id=? AND r.status='running' AND r.lease_until>?`)
+					.get(datasetId, Number(run.manual === true), revision, run.id, Date.now())
 			)
 				throw new ResearchError(409, "Monitoring paused or settings changed; results preserved");
 		});
@@ -447,18 +484,24 @@ export async function runResearchMonitor(
 			"checked",
 			`固定本轮 ${inputs.length} 份资料版本、${memos.length} 份 Memo。仅检测已完成入库的资料；未保存对话不会自动成为依据。`,
 		);
-		if (cursor === claim.cursor) {
+		if (cursor === claim.cursor && config.pipeline !== "script") {
 			run.status = run.events.some((e) => e.status === "failed") ? "source_error" : "no_change";
 		} else {
-			event("research", "running", "Pi SDK 在独立会话读取固定证据，比较当前框架；Memo 仅作为观点背景。");
+			event(
+				config.pipeline === "script" ? "analysis" : "research",
+				"running",
+				config.pipeline === "script"
+					? "正在运行框架更新脚本：规划查询、读取 Wind 数据、生成七节新版框架。"
+					: "Pi SDK 在独立会话读取固定证据，比较当前框架；Memo 仅作为观点背景。",
+			);
 			const content = await engine.generate(
 				run.input,
 				basis.content,
-				AbortSignal.any([runSignal, AbortSignal.timeout(300_000)]),
-				(detail) => event("evidence", "checked", detail),
+				AbortSignal.any([runSignal, AbortSignal.timeout(config.pipeline === "script" ? 1_080_000 : 300_000)]),
+				(detail) => event(config.pipeline === "script" ? "analysis" : "evidence", "checked", detail),
 			);
 			active();
-			run.changes = frameworkChanges(basis.content, content);
+			if (config.pipeline !== "script") run.changes = frameworkChanges(basis.content, content);
 			if (JSON.stringify(content) === JSON.stringify(basis.content)) {
 				event("research", "unchanged", "复盘未提出框架变更。");
 				run.status = run.events.some((e) => e.status === "failed") ? "source_error" : "no_change";
@@ -472,7 +515,11 @@ export async function runResearchMonitor(
 					inputs,
 				);
 				run.draftId = draft.id;
-				event("research", "draft", "变更草稿已保存，证据定位已校验。");
+				event(
+					"research",
+					"draft",
+					config.pipeline === "script" ? "七节正文已保存，准备显示新版框架。" : "变更草稿已保存，证据定位已校验。",
+				);
 				if (config.mode === "auto") {
 					const version = publishResearchDraft(cwd, datasetId, {
 						draftId: draft.id,

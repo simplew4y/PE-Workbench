@@ -11,6 +11,7 @@ interface Snapshot {
   modelResult: IterationModelUpdateResult | null;
   latestRunId: string | null;
   serverRuntime: { available: boolean; reason: string | null };
+  frameworkRuntime: { available: boolean; reason: string | null };
 }
 
 export function PeFrameworkUpdates({ project, monitor, framework, refresh }: {
@@ -46,6 +47,13 @@ export function PeFrameworkUpdates({ project, monitor, framework, refresh }: {
   const state = snapshot?.monitor ?? monitor;
   const plan = state.config;
   const latest = state.runs[0];
+  const latestVersion = useRef(framework.currentVersionId);
+  useEffect(() => {
+    if (latest?.status === "published" && latest.versionId && latest.versionId !== latestVersion.current) {
+      latestVersion.current = latest.versionId;
+      refresh();
+    }
+  }, [latest?.status, latest?.versionId, refresh]);
   const running = latest?.status === "running" || state.manualRequested;
   const weekly = plan?.updatePolicy === "direct" && plan.enabled;
   const model = snapshot?.modelResult;
@@ -61,7 +69,7 @@ export function PeFrameworkUpdates({ project, monitor, framework, refresh }: {
     try {
       let message = "设置已保存。";
       if (action === "pause") await post("monitor-pause", { revision: state.revision });
-      else if (action === "run") { await post("updates-run"); message = "正在读取现有框架和项目文件，自动核对模型、日期和所需数据。"; }
+      else if (action === "run") { await post("updates-run"); message = "正在读取当前空间资料和 Wind 数据，生成新版投资框架。"; }
       else {
         const saved = await post("updates-save", { enabled: true, revision: state.revision, applyUpdates: true });
         if (saved.workerError) message = saved.workerError;
@@ -73,17 +81,17 @@ export function PeFrameworkUpdates({ project, monitor, framework, refresh }: {
     finally { inFlight.current = false; if (mounted.current) setBusy(false); }
   }
 
-  return <section className={styles.panel} aria-label="框架与模型更新">
+  return <section className={styles.panel} aria-label="投资框架更新">
     <header><h2>更新研究</h2><span>{weekly ? "每周更新" : "手动更新"}</span></header>
-    <p>读取项目最新文件和 Wind 数据，直接更新框架与模型，并保留旧版本。</p>
+    <p>读取当前空间资料和 Wind 数据，生成并显示新版投资框架，保留历史版本。</p>
     <div className={styles.actions}>
-      <button type="button" disabled={busy || !snapshot || !framework.currentVersionId || !!running || !snapshot.serverRuntime.available} onClick={() => void act("run")}>{running ? "正在更新…" : "立即更新"}</button>
-      <button type="button" disabled={busy || !snapshot || (!weekly && (!framework.currentVersionId || !!running || !snapshot.serverRuntime.available))} onClick={() => void act(weekly ? "pause" : "weekly")}>{weekly ? "关闭自动更新" : "开启自动更新"}</button>
+      <button type="button" disabled={busy || !snapshot || !framework.currentVersionId || !!running || !snapshot.frameworkRuntime.available} onClick={() => void act("run")}>{running ? "正在更新…" : "立即更新"}</button>
+      <button type="button" disabled={busy || !snapshot || (!weekly && (!framework.currentVersionId || !!running || !snapshot.frameworkRuntime.available))} onClick={() => void act(weekly ? "pause" : "weekly")}>{weekly ? "关闭自动更新" : "开启自动更新"}</button>
     </div>
     {weekly && state.nextRunAt && <p>下次：{new Date(state.nextRunAt).toLocaleString()}。本机休眠或服务关闭期间暂停执行。</p>}
     {weekly && !state.workerOnline && <p>后台未在线，点击“立即更新”可重启。</p>}
     {!framework.currentVersionId && <p>先在对话中保存一份投资框架。</p>}
-    {snapshot && !snapshot.serverRuntime.available && <p role="alert">暂时无法连接分析服务，请稍后重试。</p>}
+    {snapshot && !snapshot.frameworkRuntime.available && <p role="alert">{snapshot.frameworkRuntime.reason || "暂时无法连接分析服务，请稍后重试。"}</p>}
     {error && <p role="alert" className={styles.error}>{error}</p>}
     {notice && <p role="status" className={styles.notice}>{notice}</p>}
     {latest && <div aria-live="polite">
@@ -97,6 +105,6 @@ export function PeFrameworkUpdates({ project, monitor, framework, refresh }: {
       {model?.status === "candidate" && model.manifest?.validation.recalculated && Object.keys(model.manifest.outputs).length > 0 && <details><summary>模型重算结果</summary>{Object.entries(model.manifest.outputs).map(([name, value]) => <p key={name}>{name}：{value === null ? "未返回" : String(value)}</p>)}</details>}
     </div>}
     <details><summary>以前的更新记录</summary>{state.runs.map((run) => <div key={run.id}><p>{new Date(run.startedAt).toLocaleString()} · {run.status === "published" ? "框架已更新" : run.status === "no_change" ? "框架未调整" : run.status === "running" ? "更新中" : "本轮未完成更新"}</p>{run.events.filter((event) => ["analysis", "model"].includes(event.stage)).map((event, index) => <p key={index}>{event.detail}</p>)}</div>)}</details>
-    <p><a href={`/research-workbench?${new URLSearchParams({ datasetId: project.datasetId, ...(snapshot?.latestRunId ? { runId: snapshot.latestRunId } : {}) })}`}>查看完整记录</a></p>
+    {latest?.pipeline === "script" ? latest.versionId && <p><a href={`/api/pe/frameworks?${new URLSearchParams({ datasetId: project.datasetId, download: latest.versionId })}`}>下载本轮投资框架</a></p> : <p><a href={`/research-workbench?${new URLSearchParams({ datasetId: project.datasetId, ...(snapshot?.latestRunId ? { runId: snapshot.latestRunId } : {}) })}`}>查看完整记录</a></p>}
   </section>;
 }

@@ -78,7 +78,7 @@ export function FrameworkText({ content, cwd, downloadUrl }: { content: StoredFr
   const completeDocument = isFrameworkDocument(content);
   return <article className={`${styles.document} ${styles.framework}`}>
     <div className={styles.reportActions}>
-      <div role="group" aria-label="投资框架展示方式"><button type="button" aria-pressed={report} onClick={() => setReport(true)}>{completeDocument ? "完整投资框架" : "旧版框架全文"}</button><button type="button" aria-pressed={!report} onClick={() => setReport(false)}>按判断浏览</button></div>
+      <div role="group" aria-label="投资框架展示方式"><button type="button" aria-pressed={report} onClick={() => setReport(true)}>{completeDocument ? "完整投资框架" : "旧版框架全文"}</button>{!(completeDocument && content.reportMarkdown && allItems.length === 0) && <button type="button" aria-pressed={!report} onClick={() => setReport(false)}>按判断浏览</button>}</div>
       {downloadUrl ? <a href={downloadUrl} download>下载{completeDocument ? "完整投资框架" : "旧版框架"} · Markdown</a> : <button type="button" onClick={downloadReport}>下载{completeDocument ? "完整投资框架" : "旧版框架"} · Markdown</button>}
     </div>
     {report ? <MarkdownBody cwd={cwd} className={styles.reportBody} defaultMermaidPreview={completeDocument}>{frameworkReportMarkdown(content)}</MarkdownBody> : <>
@@ -177,8 +177,9 @@ export function PeFrameworkConfirmation({ proposal, research, sessionId, ensureE
 export function PeResearchRail({ research, model, agentUnavailable = false, notebook }: {
   research: Research; model?: { provider: string; modelId: string }; agentUnavailable?: boolean; notebook?: ReactNode;
 }) {
-  const { project, snapshot, view, setView, error } = research;
+  const { project, snapshot, view, setView, error, refresh: refreshResearch } = research;
   const [selectedVersion, setSelectedVersion] = useState<string | null>(null);
+  const showLatest = useCallback(() => { setSelectedVersion(null); refreshResearch(); }, [refreshResearch]);
   const current = snapshot?.framework.versions.find((entry) => entry.id === snapshot.framework.currentVersionId);
   const displayed = snapshot?.framework.versions.find((entry) => entry.id === selectedVersion) ?? current;
   if (!project && !error) return null;
@@ -186,7 +187,7 @@ export function PeResearchRail({ research, model, agentUnavailable = false, note
   return <ResearchRail selectedId={view} onSelect={(id) => setView(id === "framework" || id === "memo" || id === "tracking" || id === "notebook" ? id : null)} artifacts={[
     ...(notebook ? [{ id: "notebook", label: "研究积累", icon: <BookOpen size={18} />, subtitle: project?.name, content: notebook, footer: false as const }] : []),
     { id: "framework", label: "投资框架", icon: <BookOpen size={18} />, subtitle: `${project?.name ?? ""}${displayed ? ` · 阅读 v${displayed.version}${displayed.id === current?.id ? " · 最新版本" : " · 历史版本"}` : ""}`,
-      content: <>{failure}{project && snapshot?.monitor && view === "framework" && <PeFrameworkUpdates key={project.datasetId} project={project} monitor={snapshot.monitor} framework={snapshot.framework} refresh={research.refresh} />}{displayed && project ? <div className={styles.frameworkReader}><FrameworkTimeline key={project.datasetId} versions={snapshot?.framework.versions ?? []} selectedId={displayed.id} currentId={snapshot?.framework.currentVersionId ?? null} onSelect={setSelectedVersion} /><FrameworkText key={displayed.id} content={displayed.content} cwd={project.root} downloadUrl={`/api/pe/frameworks?${new URLSearchParams({ datasetId: project.datasetId, download: displayed.id })}`} /></div> : <div className={styles.empty}><h2>让判断在对话中成形</h2><p>和 Agent 讨论投资逻辑，生成后点击回复下方的「确定投资框架」。</p></div>}</> },
+      content: <>{failure}{project && snapshot?.monitor && view === "framework" && <PeFrameworkUpdates key={project.datasetId} project={project} monitor={snapshot.monitor} framework={snapshot.framework} refresh={showLatest} />}{displayed && project ? <div className={styles.frameworkReader}><FrameworkTimeline key={project.datasetId} versions={snapshot?.framework.versions ?? []} selectedId={displayed.id} currentId={snapshot?.framework.currentVersionId ?? null} onSelect={setSelectedVersion} /><FrameworkText key={displayed.id} content={displayed.content} cwd={project.root} downloadUrl={`/api/pe/frameworks?${new URLSearchParams({ datasetId: project.datasetId, download: displayed.id })}`} /></div> : <div className={styles.empty}><h2>让判断在对话中成形</h2><p>和 Agent 讨论投资逻辑，生成后点击回复下方的「确定投资框架」。</p></div>}</> },
     { id: "memo", label: "Memo", icon: <FileText size={18} />, subtitle: project?.name,
       content: <>{failure}{snapshot?.memos.length && project ? snapshot.memos.map((memo) => <article className={styles.document} key={memo.memo_version_id}><small>Memo · v{memo.version_no} · {memo.as_of_date}</small><h2>{memo.series_title}</h2>{memo.sections.map((section) => <section key={section.section_id}><h3>{section.title}</h3><MarkdownBody cwd={project.root}>{section.content}</MarkdownBody>{section.needs_review && <small>待进一步验证</small>}{section.evidence_ids.map((id, i) => <PeSourceCitation key={id} cwd={project.root} evidenceId={id}>来源 {i + 1}</PeSourceCitation>)}</section>)}</article>) : <div className={styles.empty}><h2>研究沉淀成文</h2><p>在对话中让 Agent 生成 Memo，完成后会自动出现在这里。</p></div>}</> },
     { id: "tracking", label: "股票追踪", icon: <ChartNoAxesCombined size={18} />, subtitle: project?.name, wide: true, footer: false,

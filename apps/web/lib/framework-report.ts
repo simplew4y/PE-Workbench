@@ -45,6 +45,9 @@ export function frameworkVersionDiff(before: StoredFrameworkContent, after: Stor
   }
   const changes: Change[] = [];
   if (beforeDocument && afterDocument) {
+    if ((before.reportMarkdown || after.reportMarkdown) && frameworkReportMarkdown(before) !== frameworkReportMarkdown(after)) {
+      return [{ id: "report-document", title: "框架全文", kind: "修改", fields: [{ label: "框架全文", before: frameworkReportMarkdown(before), after: frameworkReportMarkdown(after) }] }];
+    }
     if (before.title !== after.title) changes.push({ id: "report-title", title: "报告标题", kind: "修改", fields: [{ label: "报告标题", before: before.title, after: after.title }] });
     for (const key of Object.keys(sectionNames) as (keyof typeof sectionNames)[]) {
       const previous = before.sections[key];

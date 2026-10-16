@@ -79,6 +79,7 @@ const kindNames = {
 const confidenceNames = { high: "高", medium: "中", low: "低", undetermined: "待判断" };
 
 export function renderInvestmentFrameworkMarkdown(content: StoredFrameworkContent): string {
+	if (isFrameworkDocument(content) && content.reportMarkdown) return content.reportMarkdown;
 	if (!isFrameworkDocument(content)) {
 		return `${[
 			`# 📝 ${prose(content.title)}`,
