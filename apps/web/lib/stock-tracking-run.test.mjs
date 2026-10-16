@@ -3,11 +3,12 @@ import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { createJiti } from "jiti";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import { getStockTracking, sourceId } from "@earendil-works/pe-boot";
+import { registerPeDocuments, preparePeDocument } from "@earendil-works/pe-boot/documents";
+import { workbookBytes } from "./pe-ingest/test-fixtures.mjs";
 
 const jiti = createJiti(import.meta.url, { tsconfigPaths: true,
   alias: { "@earendil-works/pe-boot": fileURLToPath(new URL("../../../packages/pe-boot/src/index.ts", import.meta.url)) },
@@ -64,16 +65,14 @@ test(`${rule.kind}: create and update fetch Wind before prediction; a later mode
   const project = createPeProject({ name: "后台追踪测试" });
   const outside = join(root, "outside-secret.txt");
   writeFileSync(outside, "MUST_NOT_READ");
-  const db = new DatabaseSync(join(project.root, "meta/collection.sqlite3"));
-  db.prepare("INSERT INTO documents(doc_id,dataset_id,original_filename,file_type,status,created_at,updated_at) VALUES('model',?,'model.xlsx','xlsx','completed','2026-01-01','2026-01-01')").run(project.datasetId);
-  db.prepare("INSERT INTO excel_cells(cell_id,dataset_id,doc_id,sheet_name,cell_ref,row_index,col_index,value_type,numeric_value,row_label,period,unit) VALUES('cell',?,'model','Valuation','B2',2,2,'number',100,'Target price','2027E','HKD/share')").run(project.datasetId);
-  db.close();
+  const document = registerPeDocuments(project.root, project.datasetId, [{ name: "model.xlsx", bytes: workbookBytes(100) }]).documents[0];
+  await preparePeDocument(project.root, { docId: document.doc_id });
   const formatDate = (date) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Hong_Kong" }).format(date);
   const yesterday = formatDate(new Date(Date.now() - 86400000));
   const config = {
     name: "测试股票", code: "0700.HK", currency: "HKD", enabled: false,
     startDate: formatDate(new Date(Date.now() - 365 * 86400000)), targetDate: formatDate(new Date(Date.now() + 365 * 86400000)), rule,
-    basis: { summary: "测试模型；没有目标价时仅追踪行情", evidenceIds: [sourceId({ docId: "model", location: { kind: "excel", sheet: "Valuation", range: "B2" } })] },
+    basis: { summary: "测试模型；没有目标价时仅追踪行情", evidenceIds: [sourceId({ docId: document.doc_id, location: { kind: "excel", sheet: "Model", range: "B1" } })] },
   };
   const requests = [];
   let quoteCalls = 0;
@@ -103,7 +102,8 @@ test(`${rule.kind}: create and update fetch Wind before prediction; a later mode
         lastContext = context;
         const workflows = context.messages.filter((message) => JSON.stringify(message.content).includes("PE workflows:"));
         assert.equal(workflows.length, 1, "tracking instructions are preloaded once, including the first model call");
-        assert.match(JSON.stringify(workflows[0].content), /第一步：判断公司类型/);
+        assert.match(JSON.stringify(workflows[0].content), /估值与定价框架/);
+        assert.match(JSON.stringify(workflows[0].content), /依据证据识别高成长/);
         for (const tool of context.tools ?? []) assert.ok(!["bash", "write", "edit", "pe_dataset_memo", "pe_research_note_save", "pe_investment_framework"].includes(tool.name));
         const predicting = context.messages.some((message) => message.role === "user" && JSON.stringify(message.content).includes("这是股票追踪的预测阶段"));
         let action;

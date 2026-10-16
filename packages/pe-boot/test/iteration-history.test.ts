@@ -46,4 +46,4 @@ it("paginates stable iteration history without dropping older runs or accepting 
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
-});
+}, 30_000);

@@ -92,7 +92,9 @@ test("legacy filename retries select the exact case-sensitive workbook identity"
   const database = new DatabaseSync(paths.collectionPath, { readOnly: true });
   try {
     for (const [index, document] of documents.entries()) {
-      assert.equal(database.prepare("SELECT numeric_value FROM excel_cells WHERE doc_id=? AND sheet_name='Model' AND cell_ref='B1'").get(document.doc_id).numeric_value, (index + 1) * 100);
+      const evidence = await resolvePeEvidenceSource(project.root, sourceId({ docId: document.doc_id, location: { kind: "excel", sheet: "Model", range: "B1" } }));
+      assert.equal(evidence.payload.doc_id, document.doc_id);
+      assert.equal(evidence.payload.cells.find((cell) => cell.cell_ref === "B1").raw_value, String((index + 1) * 100));
     }
     assert.equal(database.prepare("SELECT COUNT(*) AS n FROM documents").get().n, 2);
   } finally { database.close(); }
@@ -203,7 +205,13 @@ test("mixed uploads preserve PDF search, Excel version history, and share prepar
   const database = new DatabaseSync(paths.collectionPath, { readOnly: true });
   try {
     assert.equal(database.prepare("SELECT COUNT(*) AS n FROM pdf_pages_fts WHERE pdf_pages_fts MATCH 'revenue'").get().n, 1);
-    assert.equal(database.prepare("SELECT COUNT(*) AS n FROM excel_cells WHERE doc_id = ?").get(excel.docId).n, 3);
+    const evidence = await resolvePeEvidenceSource(project.root, sourceId({ docId: excel.docId, location: { kind: "excel", sheet: "Model", range: "A1:C1" } }));
+    assert.equal(evidence.payload.doc_id, excel.docId);
+    assert.equal(evidence.payload.version_no, 1);
+    assert.equal(evidence.payload.cells.find((cell) => cell.cell_ref === "A1").raw_value, "Revenue CNYm");
+    assert.equal(evidence.payload.cells.find((cell) => cell.cell_ref === "B1").raw_value, "100");
+    assert.equal(evidence.payload.cells.find((cell) => cell.cell_ref === "C1").formula, "=B1*2");
+    assert.equal(evidence.payload.cells.find((cell) => cell.cell_ref === "C1").cached_value, "200");
     assert.equal(database.prepare("SELECT COUNT(*) AS n FROM excel_defined_names WHERE doc_id = ?").get(excel.docId).n, 1);
   } finally { database.close(); }
   const registry = new DatabaseSync(registryPath, { readOnly: true });

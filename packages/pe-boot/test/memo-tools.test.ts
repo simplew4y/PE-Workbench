@@ -162,12 +162,22 @@ describe("PE Memo tools", () => {
 		const result = loadSkillsFromDir({ dir: join(packageDirectory, "skills"), source: "test" });
 		expect(result.diagnostics).toEqual([]);
 		expect(result.skills).toEqual([
+			expect.objectContaining({ name: "business-driver-model" }),
+			expect.objectContaining({ name: "expectations-valuation" }),
+			expect.objectContaining({ name: "falsification-monitoring" }),
+			expect.objectContaining({ name: "framework-reviewer" }),
+			expect.objectContaining({ name: "independent-investment-case" }),
+			expect.objectContaining({ name: "investment-framework-builder" }),
+
 			expect.objectContaining({ name: "pe-consensus-divergence" }),
 			expect.objectContaining({ name: "pe-document-retrieval" }),
+			expect.objectContaining({ name: "pe-financial-model-reader" }),
+			expect.objectContaining({ name: "pe-financial-model-understanding" }),
 			expect.objectContaining({
 				name: "pe-generative-ui",
 				description: expect.stringContaining("pre-registered native UI surfaces"),
 			}),
+			expect.objectContaining({ name: "pe-investment-research" }),
 			expect.objectContaining({
 				name: "pe-memo",
 				description: expect.stringContaining("persistent, evidence-backed PE Memo"),
@@ -175,6 +185,8 @@ describe("PE Memo tools", () => {
 			expect.objectContaining({ name: "pe-research-note" }),
 			expect.objectContaining({ name: "pe-valuation-model-explainer" }),
 			expect.objectContaining({ name: "pe-valuation-report" }),
+			expect.objectContaining({ name: "valuation-model-review" }),
+			expect.objectContaining({ name: "valuation-model-update" }),
 			expect.objectContaining({ name: "valuation-pricing-framework" }),
 		]);
 	});

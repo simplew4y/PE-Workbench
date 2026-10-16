@@ -152,6 +152,7 @@ describe("PE system prompt", () => {
 					"falsification-monitoring",
 					"framework-reviewer",
 					"valuation-model-review",
+					"valuation-model-update",
 					"pe-document-retrieval",
 					"pe-financial-model-reader",
 					"pe-financial-model-understanding",

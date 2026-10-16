@@ -67,13 +67,15 @@ describe("builtin providers", () => {
 	});
 
 	it("uses official Kimi K3 pricing for Moonshot providers", () => {
+		// Default 5m cache writes are separately metered since 2026-09-28.
+		// https://www.kimi.ai/academy/best-practices-for-context-caching
 		const models = builtinModels();
 		for (const provider of ["moonshotai", "moonshotai-cn"]) {
 			expect(models.getModel(provider, "kimi-k3")?.cost).toEqual({
 				input: 3,
 				output: 15,
 				cacheRead: 0.3,
-				cacheWrite: 0,
+				cacheWrite: 3,
 			});
 		}
 	});

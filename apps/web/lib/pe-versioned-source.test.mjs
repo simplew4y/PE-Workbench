@@ -46,10 +46,16 @@ test("Web resolves exact Excel versions and blank ranges after cache loss, prese
     await preparePeDocument(root, { docId: first.doc_id });
     const location = sourceId({ docId: first.doc_id, location: { kind: "excel", sheet: "估值模型", range: "B2" } });
     const db = new DatabaseSync(join(root, "meta", "collection.sqlite3"));
-    const cellId = db.prepare("SELECT cell_id FROM excel_cells WHERE doc_id=? AND cell_ref='B2'").get(first.doc_id).cell_id;
-    const factId = db.prepare("SELECT fact_id FROM metric_facts WHERE doc_id=? AND cell_ref='B2'").get(first.doc_id)?.fact_id;
-    assert.ok(factId, "Fixture must contain a candidate metric fact");
+    // Legacy releases persisted these IDs; current ingestion reads the original workbook instead.
+    const cellId = "legacy-cell", factId = "legacy-fact";
+    db.prepare("INSERT INTO excel_cells(cell_id,dataset_id,doc_id,sheet_name,cell_ref,row_index,col_index,value_type,numeric_value) VALUES(?,'dataset',?,'估值模型','B2',2,2,'number',2)").run(cellId, first.doc_id);
+    db.prepare("INSERT INTO metric_facts(fact_id,dataset_id,doc_id,metric_name,sheet_name,cell_ref,value_numeric) VALUES(?,'dataset',?,'Revenue','估值模型','B2',2)").run(factId, first.doc_id);
     db.close();
+    for (const id of [`cell:${cellId}`, `fact:${factId}`]) {
+      const legacy = await resolvePeEvidenceSource(root, id);
+      assert.equal(legacy.payload.doc_id, first.doc_id);
+      assert.equal(legacy.payload.cells.find((cell) => cell.cell_ref === "B2").raw_value, "2");
+    }
     const second = registerPeDocuments(root, "dataset", [{ name: "模型.xlsx", bytes: readFileSync(join(root, "4.xlsx")) }]).documents[0];
     assert.equal(second.version_no, 2);
     const historical = await resolvePeEvidenceSource(root, location);

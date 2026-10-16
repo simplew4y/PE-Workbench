@@ -154,7 +154,10 @@ it("renders only agent-selected outputs and keeps prose validation separate", as
 	const result = buildPeValuationReport(root, options);
 	expect(result.status, result.issues.join("\n")).toBe("ready");
 	expect(result.rendered_report).toContain("Selected model method");
-	expect(result.rendered_report).toContain("=B5/10");
+	// Formula evidence remains in the audit; the user-facing report shows business outputs.
+	expect(result.facts[0].cell).toMatchObject({ formula: "=B5/10" });
+	expect(result.rendered_report).not.toContain("=B5/10");
+	expect(result.rendered_report).toContain("120.00 CNY/股");
 	options.sections[0].analysis = "收入增长20%。";
 	expect(buildPeValuationReport(root, options)).toMatchObject({ status: "blocked", repair_scope: "sections" });
 	const empty = report(docId, []);
