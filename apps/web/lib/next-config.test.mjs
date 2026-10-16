@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { createJiti } from "jiti";
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const workspaceRoot = path.dirname(projectRoot);
+const workspaceRoot = path.resolve(projectRoot, "../..");
 
 test("scopes Next.js output file tracing to the shared local workspace", async () => {
   const config = await createJiti(import.meta.url).import("../next.config.ts", { default: true });

@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { buildPeSystemPrompt } from "../src/system-prompt.ts";
 import { peDatasetSearchTool, searchPeDataset } from "../src/tools/dataset-search.ts";
 import { getPeSourceDetail, peSourceDetailTool } from "../src/tools/source-detail.ts";
+import { writeWorkbookFixture } from "./workbook-source-fixture.ts";
 
 const temporaryDirectories: string[] = [];
 
@@ -26,7 +27,8 @@ function createDatasetFixture(datasetId = "dataset-1"): string {
 			version_no INTEGER NOT NULL DEFAULT 1,
 			is_current INTEGER NOT NULL DEFAULT 1,
 			lifecycle_state TEXT NOT NULL DEFAULT 'active',
-			deleted_at TEXT
+			deleted_at TEXT,
+			stored_path TEXT, raw_path TEXT, checksum TEXT, sha256 TEXT, status TEXT
 		);
 		CREATE TABLE chunks (
 			chunk_id TEXT PRIMARY KEY,
@@ -146,6 +148,13 @@ function createDatasetFixture(datasetId = "dataset-1"): string {
 	insertCell.run("cell-c5", datasetId, "C5", 3, "1200", "=SUM(C3:C4)", 1200, "=SUM(C3:C4)", "2026E", 1);
 	insertCell.run("cell-d5", datasetId, "D5", 4, "1400", "1400", 1400, null, "2027E", 0);
 	database.close();
+	writeWorkbookFixture(root, "doc-xlsx", [
+		{ sheet: "Forecast", cell: "B5", value: "Revenue" },
+		{ sheet: "Forecast", cell: "C3", value: 500 },
+		{ sheet: "Forecast", cell: "C4", value: 700 },
+		{ sheet: "Forecast", cell: "C5", value: "=SUM(C3:C4)", cached: 1200 },
+		{ sheet: "Forecast", cell: "D5", value: 1400 },
+	]);
 	return root;
 }
 
@@ -217,17 +226,20 @@ describe("PE retrieval tools", () => {
 
 	it("returns Excel formulas and a bounded cell window", () => {
 		const root = createDatasetFixture();
+		// Stale semantic cache must not override the original workbook's value.
+		const database = new DatabaseSync(join(root, "meta", "collection.sqlite3"));
+		database.exec("UPDATE excel_cells SET numeric_value=999 WHERE cell_ref='C5'");
+		database.close();
 		const result = getPeSourceDetail(root, { evidenceId: "fact:fact-revenue" });
 
 		expect(result).toMatchObject({
 			evidence_id: "fact:fact-revenue",
-			mode: "excel_window",
-			citation: "模型.xlsx Forecast!C5",
-			metric: { name: "Revenue", formula: "=SUM(C3:C4)" },
+			cell: { sheet_name: "Forecast", cell_ref: "C5", numeric_value: 1200, formula: "=SUM(C3:C4)" },
 			excel_cells: expect.arrayContaining([
 				expect.objectContaining({ cell_ref: "C5", numeric_value: 1200, formula: "=SUM(C3:C4)" }),
 			]),
 		});
+		expect(result.excel_cells).toHaveLength(1);
 	});
 
 	it("rejects a dataset ID that does not match the current workspace", () => {

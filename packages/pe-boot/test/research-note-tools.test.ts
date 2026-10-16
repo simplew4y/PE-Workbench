@@ -61,18 +61,30 @@ describe("PE Research Note tool", () => {
 		const result = loadSkillsFromDir({ dir: join(packageDirectory, "skills"), source: "test" });
 		expect(result.diagnostics).toEqual([]);
 		expect(result.skills.map((skill) => skill.name)).toEqual([
+			"business-driver-model",
+			"expectations-valuation",
+			"falsification-monitoring",
+			"framework-reviewer",
+			"independent-investment-case",
+			"investment-framework-builder",
+
 			"pe-consensus-divergence",
 			"pe-document-retrieval",
+			"pe-financial-model-reader",
+			"pe-financial-model-understanding",
 			"pe-generative-ui",
+			"pe-investment-research",
 			"pe-memo",
 			"pe-research-note",
 			"pe-valuation-model-explainer",
 			"pe-valuation-report",
+			"valuation-model-review",
+			"valuation-model-update",
 			"valuation-pricing-framework",
 		]);
 		expect(result.skills.find((skill) => skill.name === "pe-research-note")?.description).toContain("Research Note");
 		expect(result.skills.find((skill) => skill.name === "pe-valuation-model-explainer")?.description).toContain(
-			"估值模型",
+			"根据模型证据解释估值结果",
 		);
 	});
 

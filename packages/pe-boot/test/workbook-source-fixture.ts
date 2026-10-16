@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { preparePeDocument, registerPeDocuments } from "../src/documents.ts";
 import { excelPython } from "../src/excel-processing.ts";
@@ -17,10 +17,9 @@ export interface WorkbookFixtureCell {
 }
 
 /** Fixture changes create source bytes and update their catalog identity, never a production SQL fallback. */
-export function writeWorkbookFixture(root: string, docId: string, cells: WorkbookFixtureCell[]): void {
-	mkdirSync(join(root, "raw"), { recursive: true });
-	const path = join(root, "raw", `${docId}.xlsx`);
-	const script = join(root, "make-workbook.py");
+export function writeWorkbookFile(path: string, cells: WorkbookFixtureCell[]): void {
+	mkdirSync(dirname(path), { recursive: true });
+	const script = join(dirname(path), "make-workbook.py");
 	writeFileSync(
 		script,
 		`import io, json, sys, zipfile
@@ -57,6 +56,11 @@ with zipfile.ZipFile(buffer) as source, zipfile.ZipFile(sys.argv[1], 'w', zipfil
 	);
 	const generated = spawnSync(excelPython(), [script, path], { input: JSON.stringify(cells), encoding: "utf8" });
 	if (generated.status !== 0) throw new Error(generated.stderr || String(generated.error));
+}
+
+export function writeWorkbookFixture(root: string, docId: string, cells: WorkbookFixtureCell[]): void {
+	const path = join(root, "raw", `${docId}.xlsx`);
+	writeWorkbookFile(path, cells);
 	const checksum = createHash("sha256").update(readFileSync(path)).digest("hex");
 	const db = new DatabaseSync(join(root, "meta/collection.sqlite3"));
 	try {

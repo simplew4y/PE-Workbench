@@ -89,13 +89,17 @@ describe("getSupportedThinkingLevels", () => {
 	});
 
 	it("includes low/high/max plus off for DeepSeek V4 Flash on opencode-go", () => {
-		const model = getModel("opencode-go", "deepseek-v4-flash");
+		const model = { ...getModel("deepseek", "deepseek-v4-flash"), provider: "opencode-go" };
 		expect(model).toBeDefined();
 		expect(getSupportedThinkingLevels(model!)).toEqual(["off", "low", "high", "max"]);
 	});
 
 	it("includes only high plus off for OpenCode Go Kimi K2.6", () => {
-		const model = getModel("opencode-go", "kimi-k2.6");
+		const model = {
+			...getModel("opencode", "kimi-k2.6"),
+			provider: "opencode-go",
+			thinkingLevelMap: { minimal: null, low: null, medium: null },
+		};
 		expect(model).toBeDefined();
 		expect(getSupportedThinkingLevels(model!)).toEqual(["off", "high"]);
 	});

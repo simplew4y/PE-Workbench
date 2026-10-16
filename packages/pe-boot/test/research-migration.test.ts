@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { initializePeCollectionDatabase, openPeCollectionDatabase } from "../src/collection-schema.ts";
 import { resolvePeEvidenceRecord, resolvePeEvidenceReference } from "../src/evidence.ts";
 import { parseSourceId, sourceId } from "../src/source.ts";
+import { writeWorkbookFile } from "./workbook-source-fixture.ts";
 
 const roots: string[] = [];
 const oldDocId = "doc_0123456789abcdef01234567";
@@ -15,13 +17,19 @@ function project() {
 	const root = mkdtempSync(join(tmpdir(), "pe-research-upgrade-"));
 	roots.push(root);
 	mkdirSync(join(root, "meta"));
+	const workbookPath = join(root, "raw/Model.xlsx");
+	writeWorkbookFile(workbookPath, [
+		{ sheet: "DCF 中文", cell: "B1", value: 50 },
+		{ sheet: "DCF 中文", cell: "B2", value: "=B1*2", cached: 100 },
+	]);
+	const checksum = createHash("sha256").update(readFileSync(workbookPath)).digest("hex");
 	const path = join(root, "meta/collection.sqlite3");
 	const database = new DatabaseSync(path);
 	database.exec(readFileSync(new URL("./fixtures/research-schema-v3.sql", import.meta.url), "utf8"));
 	database.exec(`
 		INSERT INTO schema_metadata VALUES('pipeline_schema_version','3','before');
 		INSERT INTO project_metadata VALUES(1,'dataset','Research','before','before');
-		INSERT INTO documents VALUES('${oldDocId}','dataset','Model.xlsx','model.xlsx','raw/Model.xlsx','hash',
+		INSERT INTO documents VALUES('${oldDocId}','dataset','Model.xlsx','model.xlsx','raw/Model.xlsx','${checksum}',
 			'completed_with_warnings',0,'openpyxl','3.1.5','Model','','','','','[]','{}',
 			'meta/documents/Model.xlsx','meta/text/Model.xlsx.txt','','["missing formula cache"]','before','before',
 			'xlsx','Model.xlsx',100,'meta/text/Model.xlsx.txt');
@@ -46,7 +54,7 @@ function project() {
 		CREATE TABLE research_saved_notes(note_id TEXT PRIMARY KEY,evidence_ids_json TEXT NOT NULL);
 		INSERT INTO research_saved_notes VALUES('note','["${oldSourceId}","cell:old-cell","fact:old-fact"]');
 	`);
-	return { root, path, database };
+	return { root, path, database, checksum };
 }
 
 afterEach(() => {
@@ -55,7 +63,7 @@ afterEach(() => {
 
 describe("research v3 upgrade and durable citations", () => {
 	it("preserves every uploaded row, cache, lease and stored reference while adding v4 identity", () => {
-		const { root, path, database } = project();
+		const { root, path, database, checksum } = project();
 		const tables = [
 			"excel_workbooks",
 			"excel_sheets",
@@ -86,7 +94,7 @@ describe("research v3 upgrade and durable citations", () => {
 				is_current: 1,
 				lifecycle_state: "active",
 				stored_path: "raw/Model.xlsx",
-				checksum: "hash",
+				checksum,
 				registration_kind: "catalog",
 			});
 			expect(migrated.prepare("PRAGMA foreign_key_check").all()).toEqual([]);

@@ -498,7 +498,8 @@ describe("Cache Retention (PI_CACHE_RETENTION)", () => {
 			MODELS.opencode["kimi-k2.5"],
 			MODELS.opencode["kimi-k2.6"],
 			MODELS.opencode["minimax-m2.7"],
-			MODELS["opencode-go"]["kimi-k2.6"],
+			// Preserve the retired Go model's cache regression independently of the live catalog.
+			{ ...MODELS.opencode["kimi-k2.6"], provider: "opencode-go", baseUrl: "https://opencode.ai/zen/go/v1" },
 		] as const)("should omit long cache retention for $provider/$id", async (metadata) => {
 			const model = metadata as Model<"openai-completions">;
 			let capturedPayload: OpenAICompletionsCachePayload | undefined;

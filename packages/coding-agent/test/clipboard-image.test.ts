@@ -1,6 +1,16 @@
 import type { SpawnSyncReturns } from "child_process";
+import type * as fs from "fs";
 import { writeFileSync } from "fs";
 import { beforeEach, describe, expect, test, vi } from "vitest";
+
+vi.mock("fs", async (importOriginal) => {
+	const actual = await importOriginal<typeof fs>();
+	return {
+		...actual,
+		readFileSync: (...args: Parameters<typeof fs.readFileSync>) =>
+			args[0] === "/proc/version" ? "Linux test kernel" : actual.readFileSync(...args),
+	};
+});
 
 const mocks = vi.hoisted(() => {
 	return {

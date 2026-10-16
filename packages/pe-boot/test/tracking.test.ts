@@ -850,6 +850,7 @@ it("can pause with an unchanged expired forecast but rejects new or changed expi
 	).toThrow("future target date");
 });
 
+// Rebuilds five real workbooks through Python; allow the same budget as workbook integration tests.
 it("retains the last valid model on mismatched units, missing caches, bounds and excessive changes", async () => {
 	const root = project();
 	model(root);
@@ -871,7 +872,7 @@ it("retains the last valid model on mismatched units, missing caches, bounds and
 	result = await refreshStockTracker(root, datasetId, first.id, signal(), provider);
 	expect(result.error).toContain("幅度");
 	expect(result.valuation?.base).toBe(130);
-});
+}, 30_000);
 
 it("does not overwrite good prices on failure or accept a late response after a settings change", async () => {
 	const root = project();

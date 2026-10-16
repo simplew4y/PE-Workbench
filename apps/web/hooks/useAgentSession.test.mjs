@@ -245,7 +245,7 @@ test("post-accept prompt errors do not duplicate the user submission", () => {
   assert.doesNotMatch(promptErrorSource, /restoreSubmission/);
 });
 
-test("delegates event stream readiness and keeps streamed content out of the chat", () => {
+test("delegates event stream readiness and groups streamed content in process details", () => {
   const ensureSource = source.slice(
     source.indexOf("const ensureEventsConnected"),
     source.indexOf("const respondToExtensionUi"),
@@ -255,8 +255,10 @@ test("delegates event stream readiness and keeps streamed content out of the cha
   assert.match(source, /shouldMaintain: \(sid\)[\s\S]*?sessionIdRef\.current === sid/);
   assert.match(ensureSource, /eventConnectionRef\.current!\.ensureConnected\(sid\)/);
   assert.match(ensureSource, /eventConnectionRef\.current!\.maintain\(sid\)/);
-  assert.doesNotMatch(chatWindowSource, /message=\{streamState\.streamingMessage/);
-  assert.match(chatWindowSource, /\{agentRunning && \([\s\S]*?chat\.thinking/);
+  const processDetails = chatWindowSource.slice(chatWindowSource.indexOf("<ProcessDetailsGroup"), chatWindowSource.indexOf("</ProcessDetailsGroup>"));
+  assert.match(processDetails, /isLiveTail && streamState\.streamingMessage/);
+  assert.match(processDetails, /message=\{streamState\.streamingMessage\}/);
+  assert.match(processDetails, /chat\.waitingModel/);
 });
 
 test("uses one absolute agent-readiness deadline instead of a five-second transport deadline", () => {
@@ -308,7 +310,7 @@ test("keeps one reducer-owned assistant partial and consumes Pi JSON deltas", ()
   assert.doesNotMatch(messageEndSource, /streamState\.streamingMessage/);
 });
 
-test("tracks streamed tool execution progress without exposing it in the chat", () => {
+test("tracks streamed tool execution progress through the live activity summary", () => {
   const updateSource = source.slice(
     source.indexOf('case "tool_execution_update"'),
     source.indexOf('case "tool_execution_end"'),
@@ -317,7 +319,8 @@ test("tracks streamed tool execution progress without exposing it in the chat", 
   assert.match(updateSource, /getToolExecutionProgress\(event\.partialResult\)/);
   assert.match(updateSource, /tools: \[\.\.\.tools\.filter\([\s\S]*?, updated\]/);
   assert.doesNotMatch(chatWindowSource, /latest\?\.progress/);
-  assert.match(chatWindowSource, /\{agentRunning && \([\s\S]*?chat\.thinking/);
+  assert.match(chatWindowSource, /getChatActivity\(\{[\s\S]*?runningTools: isLiveTail && agentPhase\?\.kind === "running_tools" \? agentPhase\.tools : undefined/);
+  assert.match(chatWindowSource, /<ProcessDetailsGroup[\s\S]*?label=\{activity\}[\s\S]*?active=\{isLiveTail\}/);
 });
 
 test("plays the enabled sound once for each extension dialog", () => {
