@@ -7,6 +7,7 @@ import {
 	getResearchFramework,
 	publishResearchDraftAsync,
 } from "./framework.ts";
+import { frameworkUpdateBaseline } from "./framework-baseline.ts";
 import { getFrameworkIteration, validateIterationRevision } from "./iteration.ts";
 import type { FrameworkIteration, IterationImpacts, IterationObservations } from "./iteration-model.ts";
 import { type FrameworkContent, isFrameworkDocument, ResearchError, validateFrameworkContent } from "./model.ts";
@@ -284,9 +285,10 @@ function proposal(cwd: string, datasetId: string, run: FrameworkIteration) {
 	const observations = run.artifacts.find((artifact) => artifact.stage === "extract")?.value as
 		| IterationObservations
 		| undefined;
-	if (!basis || !isFrameworkDocument(basis) || !candidate || !impacts || !observations) return null;
+	if (!basis || (!isFrameworkDocument(basis) && !run.monitorRunId) || !candidate || !impacts || !observations)
+		return null;
 	return {
-		basis,
+		basis: frameworkUpdateBaseline(basis),
 		candidate: validateFrameworkContent(candidate),
 		impacts,
 		observations,

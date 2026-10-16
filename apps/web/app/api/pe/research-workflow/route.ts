@@ -1,6 +1,6 @@
 import { after, type NextRequest } from "next/server";
 import {
-  cancelFrameworkIteration, cancelResearchMonitorRun, executeIterationModelUpdate, getFrameworkIteration, getIterationModelConfig, getIterationModelUpdateResult, getResearchFramework, isFrameworkDocument,
+  cancelFrameworkIteration, cancelResearchMonitorRun, executeIterationModelUpdate, getFrameworkIteration, getIterationModelConfig, getIterationModelUpdateResult, getResearchFramework,
   getResearchMonitor, informationSourceConfig, listPeModelVersions, promoteIterationModelUpdate, readIterationModelWorkbook,
   requestResearchMonitorRun, ResearchError, saveIterationModelConfig, saveResearchMonitor,
   type SaveIterationModelConfigInput,
@@ -33,7 +33,7 @@ function saveAutomaticUpdates(project: PeProjectSummary, enabled: boolean, revis
   if (!server.available || !server.modelId) throw new ResearchError(409, server.reason || "后台分析服务暂不可用，请稍后重试。");
   const state = getResearchFramework(project.root, project.datasetId);
   const current = state.versions.find((version) => version.id === state.currentVersionId);
-  if (!current || !isFrameworkDocument(current.content)) throw new ResearchError(409, "请先保存一份完整投资框架。");
+  if (!current) throw new ResearchError(409, "请先保存一份投资框架。");
   return saveResearchMonitor(project.root, project.datasetId, {
     pipeline: "iteration", runtime: "server", modelId: server.modelId, updatePolicy: "direct", automaticSetup: true,
     company: { name: project.companyName, ticker: project.companyTicker }, enabled, mode: "auto", intervalHours: 168,

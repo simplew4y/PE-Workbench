@@ -46,6 +46,9 @@ test("workflow reads and writes enforce origin, identity, revision and explicit 
   assert.equal(snapshot.modelResult, null);
   assert.equal(snapshot.serverRuntime.available, true);
   assert.equal(JSON.stringify(snapshot).includes("never-send-test-key"), false);
+  const noFramework = await request({ action: "updates-run" });
+  assert.equal(noFramework.status, 409, "a project with no saved framework still cannot start an update");
+  assert.match((await noFramework.json()).error, /先保存一份投资框架/);
   const plan = { action: "monitor-save", enabled: false, collectSources: false, intervalHours: 24, revision: 0 };
   assert.equal((await request({ ...plan, enabled: true })).status, 409);
   assert.equal((await request(plan)).status, 200);
@@ -123,8 +126,13 @@ test("workflow reads and writes enforce origin, identity, revision and explicit 
   const automaticProject = createPeProject({ name: "Automatic only", companyName: "Test Company", companyTicker: "1234.HK" });
   const automaticDraft = createResearchDraft(automaticProject.root, automaticProject.datasetId, frameworkFixture(), [], null);
   publishResearchDraft(automaticProject.root, automaticProject.datasetId, { draftId: automaticDraft.id, revision: 1, expectedVersionId: null, requestId: "initial-auto" });
+  const automaticDb = new DatabaseSync(join(automaticProject.root, "meta/collection.sqlite3"));
+  const savedContent = { title: "Test Company 1234.HK 投资框架", objective: "追踪原有判断", horizon: "两年", items: [{ id: "demand", kind: "hypothesis", subject: "需求", claim: "增长待验证", rationale: "沿用已保存假设", verification: "核对收入", invalidation: "收入下滑", origin: "user", evidenceIds: [] }], coverageGaps: [] };
+  automaticDb.prepare("INSERT INTO research_versions VALUES('old-format',?,2,(SELECT current_version_id FROM research_frameworks WHERE dataset_id=?),?,'[]',?,'old-save','{}')").run(automaticProject.datasetId, automaticProject.datasetId, JSON.stringify(savedContent), "2026-09-14");
+  automaticDb.prepare("UPDATE research_frameworks SET current_version_id='old-format' WHERE dataset_id=?").run(automaticProject.datasetId);
+  automaticDb.close();
   const automatic = await request({ action: "updates-run", datasetId: automaticProject.datasetId });
-  assert.equal(automatic.status, 202, "one click works without any prior model selection, mapping, date, or saved schedule");
+  assert.equal(automatic.status, 202, "a saved legacy framework works without resaving, model selection, mapping, date, or schedule");
   const automaticState = await automatic.json();
   assert.equal(automaticState.monitor.config.automaticSetup, true);
   assert.equal(automaticState.monitor.config.enabled, false, "a manual update does not silently enable weekly updates");

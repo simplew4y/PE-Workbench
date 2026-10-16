@@ -16,9 +16,10 @@ import {
 } from "../tools/model-update.ts";
 import { readWorkbookFile, type WorkbookRequest } from "../workbook-reader.ts";
 import { captureResearchInputs, currentResearchVersion, getResearchFramework } from "./framework.ts";
+import { frameworkUpdateBaseline } from "./framework-baseline.ts";
 import { getFrameworkIteration, validateIterationAnalysis } from "./iteration.ts";
 import { type FrameworkIteration, validateIterationImpacts, validateIterationObservations } from "./iteration-model.ts";
-import { isFrameworkDocument, ResearchError } from "./model.ts";
+import { ResearchError } from "./model.ts";
 import { researchTransaction, withResearchDatabase } from "./storage.ts";
 
 const text = Type.String({ minLength: 1, maxLength: 500, pattern: "\\S" });
@@ -438,9 +439,9 @@ function proposals(
 	const basis = getResearchFramework(cwd, datasetId).versions.find(
 		(entry) => entry.id === run.basisVersionId,
 	)?.content;
-	if (!basis || !isFrameworkDocument(basis)) throw new ResearchError(409, "Missing framework baseline");
+	if (!basis) throw new ResearchError(409, "Missing framework baseline");
 	withResearchDatabase(cwd, datasetId, (connection) =>
-		validateIterationAnalysis(connection, run, basis, observations, impacts),
+		validateIterationAnalysis(connection, run, frameworkUpdateBaseline(basis), observations, impacts),
 	);
 	const matches = new Map<string, IterationModelProposal[]>();
 	for (const observation of observations.observations) {

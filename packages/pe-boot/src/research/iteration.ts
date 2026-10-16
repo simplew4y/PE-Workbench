@@ -24,6 +24,7 @@ import {
 	publishResearchDraftAsync,
 	validateResearchEvidence,
 } from "./framework.ts";
+import { frameworkUpdateBaseline } from "./framework-baseline.ts";
 import { equivalentComparisonPeriod } from "./iteration-impact.ts";
 import {
 	type FrameworkIteration,
@@ -268,10 +269,10 @@ export function createFrameworkIteration(
 			const basis = db
 				.prepare("SELECT content_json,inputs_json FROM research_versions WHERE dataset_id=? AND version_id=?")
 				.get(datasetId, input.basisVersionId);
-			if (!basis || !isFrameworkDocument(JSON.parse(String(basis.content_json))))
+			if (!basis || (!input.monitorRunId && !isFrameworkDocument(JSON.parse(String(basis.content_json)))))
 				throw new ResearchError(409, "请先在聊天中确认完整七节框架。");
 			if (input.sourceConfig) {
-				const content = JSON.parse(String(basis.content_json)) as FrameworkContent;
+				const content = frameworkUpdateBaseline(JSON.parse(String(basis.content_json)));
 				const codes = [
 					...new Set(
 						`${content.title}\n${content.sections.researchSetup.objective}`.match(
@@ -918,9 +919,10 @@ export async function runFrameworkIteration(
 					const storedBasis = getResearchFramework(cwd, datasetId).versions.find(
 						(v) => v.id === run.basisVersionId,
 					)!.content;
-					if (!isFrameworkDocument(storedBasis)) throw new ResearchError(409, "Complete framework required");
+					if (!isFrameworkDocument(storedBasis) && !run.monitorRunId)
+						throw new ResearchError(409, "Complete framework required");
 					validateIterationRevision(
-						storedBasis,
+						frameworkUpdateBaseline(storedBasis),
 						validateFrameworkContent(completed.value),
 						validateIterationImpacts(run.artifacts.find((a) => a.stage === "impact")?.value),
 						validateIterationObservations(run.artifacts.find((a) => a.stage === "extract")?.value),
@@ -1007,8 +1009,12 @@ export async function runFrameworkIteration(
 		}
 	}
 	try {
-		const basis = getResearchFramework(cwd, datasetId).versions.find((v) => v.id === run.basisVersionId)!.content;
-		if (!isFrameworkDocument(basis)) throw new ResearchError(409, "Complete framework required");
+		const storedBasis = getResearchFramework(cwd, datasetId).versions.find(
+			(v) => v.id === run.basisVersionId,
+		)!.content;
+		if (!isFrameworkDocument(storedBasis) && !run.monitorRunId)
+			throw new ResearchError(409, "Complete framework required");
+		const basis = frameworkUpdateBaseline(storedBasis);
 		if (run.automaticSetup) {
 			const setup = await stage("prepare", async (stageSignal) => {
 				if (!engine.prepare) throw new ResearchError(409, "自动读取模型的服务暂不可用，请稍后点击立即更新重试。");

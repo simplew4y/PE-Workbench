@@ -471,24 +471,63 @@ it("prefers ready filings over source collection and uses sources on a subsequen
 	cancelFrameworkIteration(cwd, dataset, run.id);
 });
 
-it("direct updates publish a complete framework in a normal project and retain plain change reasons", async () => {
-	const cwd = setup(true, { ...config, mode: "auto", updatePolicy: "direct", intervalHours: 168 });
-	setIterationTestProject(cwd, dataset, false);
-	await runResearchMonitor(cwd, dataset, legacy, AbortSignal.timeout(5000), oldFetch, async () => engine(true));
-	const run = getResearchMonitor(cwd, dataset).runs[0];
-	expect(run.status).toBe("published");
-	expect(run.changes?.[0]).toMatchObject({
-		before: expect.any(String),
-		after: expect.any(String),
-		reason: "新增财报披露收入",
-	});
-	const framework = getResearchFramework(cwd, dataset);
-	expect(framework.versions).toHaveLength(2);
-	const content = framework.versions[0].content;
-	expect(isFrameworkDocument(content)).toBe(true);
-	if (!isFrameworkDocument(content)) throw new Error("Expected complete framework");
-	expect(Object.keys(content.sections)).toHaveLength(7);
-});
+it.each([false, true])(
+	"direct updates use the saved framework, including legacy format %s, without resaving",
+	async (legacyFormat) => {
+		const cwd = setup(true, { ...config, mode: "auto", updatePolicy: "direct", intervalHours: 168 });
+		setIterationTestProject(cwd, dataset, false);
+		const original = getResearchFramework(cwd, dataset).versions[0];
+		if (legacyFormat) {
+			const content = frameworkFixture();
+			const saved = {
+				title: content.title,
+				objective: content.sections.researchSetup.objective,
+				horizon: content.sections.researchSetup.horizon,
+				items: content.sections.investmentJudgments.items.map(
+					({
+						counterEvidenceIds: _counter,
+						confidence: _confidence,
+						alternativeExplanations: _alternatives,
+						...item
+					}) => item,
+				),
+				coverageGaps: [],
+			};
+			withResearchDatabase(cwd, dataset, (db) => {
+				db.prepare("INSERT INTO research_versions VALUES('saved-legacy',?,2,?,?,?,?,'old-save','{}')").run(
+					dataset,
+					original.id,
+					JSON.stringify(saved),
+					"[]",
+					original.createdAt,
+				);
+				db.prepare("UPDATE research_frameworks SET current_version_id='saved-legacy' WHERE dataset_id=?").run(
+					dataset,
+				);
+			});
+		}
+		await runResearchMonitor(cwd, dataset, legacy, AbortSignal.timeout(5000), oldFetch, async () => engine(true));
+		const run = getResearchMonitor(cwd, dataset).runs[0];
+		expect(run.status).toBe("published");
+		expect(run.changes?.[0]).toMatchObject({
+			before: expect.any(String),
+			after: expect.any(String),
+			reason: "新增财报披露收入",
+		});
+		const framework = getResearchFramework(cwd, dataset);
+		expect(framework.versions).toHaveLength(legacyFormat ? 3 : 2);
+		if (legacyFormat) {
+			expect(framework.versions[0].parentVersionId).toBe("saved-legacy");
+			expect(framework.versions.find((version) => version.id === "saved-legacy")?.content).not.toHaveProperty(
+				"sections",
+			);
+		}
+		const content = framework.versions[0].content;
+		expect(isFrameworkDocument(content)).toBe(true);
+		if (!isFrameworkDocument(content)) throw new Error("Expected complete framework");
+		expect(Object.keys(content.sections)).toHaveLength(7);
+	},
+);
 
 it("manual direct updates run once while weekly scheduling stays disabled, combining project files and Wind", async () => {
 	const cwd = setup(true, {
