@@ -18,7 +18,7 @@ export const AutomaticSetupSchema = Type.Object(
 	{
 		companyName: Type.String({ minLength: 1, maxLength: 200 }),
 		companyTicker: text,
-		valuationDate: Type.String({ pattern: "^20\\d{2}-\\d{2}-\\d{2}$" }),
+		valuationDate: Type.Union([Type.String({ pattern: "^20\\d{2}-\\d{2}-\\d{2}$" }), Type.Null()]),
 		dateSource: Type.Union([workbookContextSourceSchema, Type.Null()]),
 		dateLabelSource: Type.Union([workbookContextSourceSchema, Type.Null()]),
 		identitySources: Type.Array(Type.Object({ evidenceId: text, quote: text }, { additionalProperties: false }), {
@@ -98,12 +98,15 @@ export function validateAutomaticSetup(
 		!documentedIdentity
 	)
 		throw new ResearchError(400, "公司名称尚未与现有框架对应，请继续核对原文。");
-	trackingPeriods(setup.valuationDate, shanghaiToday(new Date(run.createdAt)));
-	if (setup.model.valuationDate !== setup.valuationDate)
+	if (setup.valuationDate) trackingPeriods(setup.valuationDate, shanghaiToday(new Date(run.createdAt)));
+	if ((setup.model.valuationDate ?? null) !== setup.valuationDate)
 		throw new ResearchError(400, "模型日期与识别的估值日期不一致。");
 	if ((getIterationModelConfig(cwd, datasetId)?.revision ?? 0) !== setup.model.expectedRevision)
 		throw new ResearchError(409, "本轮识别期间模型已更新，请重新运行。");
-	if (setup.dateSource && setup.dateLabelSource) {
+	if (setup.valuationDate === null) {
+		if (setup.dateSource || setup.dateLabelSource)
+			throw new ResearchError(400, "估值日期未确认时保留空值，不得附上替代日期。");
+	} else if (setup.dateSource && setup.dateLabelSource) {
 		for (const context of [setup.dateSource, setup.dateLabelSource]) {
 			const result = readCurrentIterationWorkbook(cwd, datasetId, setup.model.docId, {
 				action: "read",

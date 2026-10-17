@@ -21,7 +21,7 @@ import { sourceId } from "../source.ts";
 import type { queryWind } from "../trusted-sources.ts";
 import { WorkbookRequestProperties } from "../workbook-reader.ts";
 import { formatWorkbookResultText } from "../workbook-text.ts";
-import { AutomaticSetupSchema, validateAutomaticSetup } from "./automatic-setup.ts";
+import { AutomaticSetupSchema } from "./automatic-setup.ts";
 import { captureResearchInputs, validateResearchEvidence } from "./framework.ts";
 import { validateIterationAnalysis, validateIterationRevision } from "./iteration.ts";
 import { IterationExtractionSubmissionSchema, mergeExtractionSubmission } from "./iteration-extraction.ts";
@@ -34,19 +34,24 @@ import {
 	type IterationObservations,
 	IterationObservationsSchema,
 } from "./iteration-model.ts";
-import {
-	freezeIterationModelBaseline,
-	getIterationModelConfig,
-	readCurrentIterationWorkbook,
-} from "./iteration-model-update.ts";
+import { freezeIterationModelBaseline, getIterationModelConfig } from "./iteration-model-update.ts";
 import { synchronizeIterationScope } from "./iteration-quality.ts";
-import { type FrameworkContent, FrameworkContentSchema, ResearchError, validateFrameworkContent } from "./model.ts";
+import { readIterationInput, validateIterationSetup } from "./iteration-reader.ts";
+import { IterationRevisionSubmissionSchema, mergeIterationRevision } from "./iteration-revision.ts";
+import { type FrameworkContent, FrameworkContentSchema, ResearchError } from "./model.ts";
 import { readResearchInput } from "./pi-engine.ts";
 import { withResearchDatabase } from "./storage.ts";
 
 const ReadSchema = Type.Object({
 	...WorkbookRequestProperties,
 	action: Type.Optional(WorkbookRequestProperties.action),
+	range: Type.Optional(
+		Type.String({
+			minLength: 1,
+			maxLength: 64,
+			description: 'Finite A1 only, e.g. "A1:D20". Put the worksheet name in sheet, never in range.',
+		}),
+	),
 	docId: Type.String(),
 	page: Type.Optional(Type.Integer({ minimum: 1 })),
 	lineStart: Type.Optional(Type.Integer({ minimum: 1 })),
@@ -93,16 +98,25 @@ export function createIterationEngine(
 		signal: AbortSignal,
 	): Promise<Static<T>> {
 		prompt = `工具参数使用符合各工具 schema 的 JSON 对象；完成阶段必须调用 pe_iteration_submit，普通 JSON 文本不能代替工具提交。\n${prompt}`;
+		if (name === "prepare") prompt = `已有existingModel时优先复用其经校验的映射；每项仍需实际读取。\n${prompt}`;
+		if (name === "revise")
+			prompt = `被校验拒绝后，只提交需纠正的判断字段或章节；本次会话中上次已提交的其他修改由服务端保留，合并后仍从原始基线检查全部证据与修改范围。若先前改错字段，明确提交原始值恢复它。\n${prompt}`;
 		if (name === "prepare")
-			prompt = `identitySources在项目或框架已有明确公司代码时可为空；否则须原样引用项目资料中公司名称与证券代码的原文，并附读取工具返回的evidenceId，不据文件名猜证券身份。\n${prompt}`;
+			prompt = `若existingModel仍对应当前模型且没有替代文件，优先批量读取它的映射单元格及表头，核对后复用；不要从头重复扫描全部工作表。sourceField仅在已有Wind原始返回中确认对应列名时填写，不用Excel行名或列名冒充供应商字段；未确认则省略。subject使用公司或分部名称，scope使用财务口径；分析理由写sensitivity，不写入subject或scope。\n${prompt}`;
+		if (name === "prepare")
+			prompt = `companyName使用资料中的完整名称原文，不额外括注别名。companyTicker仅填已有资料证明的一个完整证券代码，不能拼接多个市场、用引用中的代码证明另一个代码，或据文件名猜测。identitySources.quote必须逐字复制一段连续原文，不能用省略号拼接；证据中的名称和代码必须与提交完全对应。在项目或框架已有唯一明确代码时identitySources可为空。先建立最多8个最关键的可更新财务输入映射，不要罗列全部估值结果。优先选择可与已披露财务数据核对的历史期、当期收入或分部收入输入。仅可映射工具返回formula列为“-”的数值常量；若收入、利润等结果是公式，沿依赖追踪到真正的输入。公式与输出只能放model.outputs；没有恒等检查格时model.checks填空数组，不用当前目标价或企业价值的旧数值当检查阈值。model.outputs、model.checks必须放model内。找不到可靠估值基准日时valuationDate填null、model中省略valuationDate、两个日期来源填null，summary写“估值基准日未确认”；系统会按模型输入的报告期查询，不得用框架标题日期、保存日期、模型文件名或财报日期冒充估值日期。\n${prompt}`;
 		if (run.monitorRunId && name !== "prepare") {
 			const frozenModel = freezeIterationModelBaseline(cwd, datasetId, run.id);
 			prompt = `用简短、自然的中文说明本轮改了什么、为什么改、还有什么不能确定。不要堆术语。按“关键假设→所需指标→模型输入→敏感性”检查已有判断；只凭收入下降不能认定某地区销量下降，需要地区、销量及价格证据。旧期间重复数据不算新证据，未来披露、未结束季度、缺失单位或不可比口径不支持确定结论。模型输入映射（配置，不是新事实）：${JSON.stringify(frozenModel.config?.mappings ?? [])}。指标展示名可沿用映射中的subject和metric，但必须与原文含义一致；period、unit、scope及原文引用不能为了匹配映射而改写。未绑定的输入不要猜测单元格。\n${prompt}`;
 			if (name === "collect" && run.sourceConfig?.trackingWindow)
-				prompt = `本轮固定查询期间为${run.sourceConfig.defaultPeriods.join("、")}；截至${run.sourceConfig.trackingWindow.asOf}。忽略后文通用年度窗口，首查严格使用这些季度。先读取本轮项目文件，特别是新上传资料，结合框架关键假设、模型映射和敏感变量确定所需指标；Wind只接收主体、字段、期间和口径，不传框架全文、版本、投资目的或失效条件。\n${prompt}`;
+				prompt = `本轮固定查询期间为${run.sourceConfig.defaultPeriods.join("、")}；截至${run.sourceConfig.trackingWindow.asOf}。忽略后文通用年度窗口，首查严格使用这些季度。基线框架及模型输入已在准备阶段读取核验，先据其调用Wind；同时检查项目目录，对新上传且与判断相关的资料做必要读取，不重复扫描已核验模型。Wind只接收主体、字段、期间和口径，不传框架全文、版本、投资目的或失效条件。\n${prompt}`;
 			if (name === "revise")
 				prompt = `currentAssessment.changesSinceLastVersion用1至3句话说明本次修改；每条changes用“之前怎样、现在怎样、因为哪条新数据”表达，保留现有七节格式。未执行模型重算时不得把新目标价或收益率写成已核实结果；模型文件稍后由服务端重算，框架注明结果待核对。\n${prompt}`;
 		}
+		if (name === "collect")
+			prompt = `首查若无逐季数据，下一次只查一个明确报告期（优先最近已披露半年报）及1至2个核心指标；不要在同一补查中合并多个年度或半年标签，防止供应商把它们混成一个列名。再有预算时单独补查上一完整年度。\n${prompt}`;
+		if (name === "collect")
+			prompt = `若供应商无法返回逐季财务数据，补查明确的最近完整年度和最近已披露半年报，区分半年累计与单季；不要把半年数值写成第二季度单季。补查使用明确的报表标签（例如2025年年报、2026年半年报），同时要求币种与合并或分部口径；无法确认的季度仍保留缺口。\n${prompt}`;
 		if (name === "collect")
 			prompt = `首个Wind请求的实际报告期由服务端固定为sourceConfig.defaultPeriods，防止把基线旧中报误当最新；可自主选择相关指标。其后补查按periods参数执行。最新性仍需依据供应商返回核查，不能只看请求。若基线金额明确以人民币计量，可在查询currency指定CNY；其他币种只能来自明确的基线或已返回字段。补查同币种必须实际填写currency，不仅写在purpose；返回币种仍以原始响应为准。\n${prompt}`;
 		if (name === "extract" && run.sourceMode === "sources")
@@ -133,6 +147,7 @@ export function createIterationEngine(
 		let result: Static<T> | undefined;
 		let pendingExtraction: IterationObservations | undefined;
 		let pendingImpacts: IterationImpacts | undefined;
+		let pendingRevision: FrameworkContent | undefined;
 		const reads = new Map<string, string[]>();
 		const readEvidence = new Set<string>();
 		const metrics: IterationModelUsage = {
@@ -153,7 +168,7 @@ export function createIterationEngine(
 					name: "pe_iteration_read",
 					label: "Read frozen evidence",
 					description:
-						"Read frozen evidence. PDF: numbered pages. Excel: inspect, search, ranges, trace. Information source text: lineStart/lineEnd, follow nextLineStart. Cite exact source IDs and verify headers, labels, periods and units. No workbook recalculation.",
+						'Read frozen evidence. PDF: page. Excel: action="read", sheet="Quarterly sales", range="A1:D20" (range never includes sheet or !); batch with ranges:[{sheet,range}]. Information source text: start with lineStart=1, lineEnd=10, then follow nextLineStart within totalLines. Do not use lineStart/lineEnd for Excel or PDF. Cite exact source IDs and verify headers, periods and units. No workbook recalculation.',
 					parameters: ReadSchema,
 					async execute(_id, params) {
 						signal.throwIfAborted();
@@ -173,17 +188,31 @@ export function createIterationEngine(
 										]),
 									)
 								: run.inputs;
-						let value = readResearchInput(
-							cwd,
-							datasetId,
-							{ objective: prompt, inputs: readableInputs, asOf: run.createdAt },
-							params,
-						) as Record<string, unknown>;
-						if (name === "prepare" && value.file_type === "xlsx")
-							value = readCurrentIterationWorkbook(cwd, datasetId, params.docId, {
-								...params,
-								action: params.action ?? (params.range || params.ranges ? "read" : "inspect"),
-							});
+						const workbook = withResearchDatabase(cwd, datasetId, (db) =>
+							db
+								.prepare(
+									"SELECT file_type FROM documents WHERE dataset_id=? AND doc_id=? AND deleted_at IS NULL",
+								)
+								.get(datasetId, params.docId),
+						);
+						const value =
+							workbook && ["xlsx", "xlsm"].includes(String(workbook.file_type))
+								? await readIterationInput(
+										{
+											cwd,
+											datasetId,
+											input: { objective: prompt, inputs: readableInputs, asOf: run.createdAt },
+											params,
+											currentWorkbook: name === "prepare",
+										},
+										signal,
+									)
+								: (readResearchInput(
+										cwd,
+										datasetId,
+										{ objective: prompt, inputs: readableInputs, asOf: run.createdAt },
+										params,
+									) as Record<string, unknown>);
 						const { image, ...data } = value;
 						const text =
 							data.file_type === "xlsx" || data.file_type === "xlsm"
@@ -232,7 +261,7 @@ export function createIterationEngine(
 									: params;
 						if (!validator.Check(submitted)) throw new ResearchError(400, "Invalid stage result");
 						if (name === "prepare") {
-							const setup = validateAutomaticSetup(cwd, datasetId, run, context.basis, submitted);
+							const setup = await validateIterationSetup(cwd, datasetId, run, context.basis, submitted, signal);
 							const unread = setup.model.mappings.filter(
 								(mapping) =>
 									!readEvidence.has(
@@ -285,21 +314,18 @@ export function createIterationEngine(
 							);
 						}
 						if (name === "revise" && context.impacts) {
-							const candidate = validateFrameworkContent(
-								synchronizeIterationScope({
-									...context.basis,
-									sections: {
-										...context.basis.sections,
-										...(params as { sections: Partial<FrameworkContent["sections"]> }).sections,
-									},
-								}),
+							const candidate = synchronizeIterationScope(
+								mergeIterationRevision(pendingRevision ?? context.basis, params),
 							);
+							pendingRevision = candidate;
 							validateIterationRevision(context.basis, candidate, context.impacts, context.observations);
 							withResearchDatabase(cwd, datasetId, (db) =>
 								validateResearchEvidence(db, datasetId, candidate, run.inputs),
 							);
 						}
-						result = structuredClone(submitted);
+						result = pendingRevision
+							? ({ sections: structuredClone(pendingRevision.sections) } as Static<T>)
+							: structuredClone(submitted);
 						return { content: [{ type: "text", text: "Stage complete. Stop." }], details: {} };
 					},
 				}),
@@ -432,9 +458,27 @@ export function createIterationEngine(
 			signal.addEventListener("abort", abort, { once: true });
 			try {
 				signal.throwIfAborted();
-				await session.prompt(JSON.stringify({ documents: run.inputs, newDocIds: run.newDocIds, context }), {
-					expandPromptTemplates: false,
-				});
+				const promptContext =
+					name === "prepare"
+						? {
+								...context,
+								basis: {
+									title: context.basis.title,
+									sections: {
+										researchSetup: context.basis.sections.researchSetup,
+										businessModel: context.basis.sections.businessModel,
+										investmentJudgments: context.basis.sections.investmentJudgments,
+										valuation: context.basis.sections.valuation,
+									},
+								},
+							}
+						: context;
+				await session.prompt(
+					JSON.stringify({ documents: run.inputs, newDocIds: run.newDocIds, context: promptContext }),
+					{
+						expandPromptTemplates: false,
+					},
+				);
 				await session.waitForIdle();
 				for (
 					let reminder = 1;
@@ -509,7 +553,7 @@ export function createIterationEngine(
 				run,
 				"prepare",
 				AutomaticSetupSchema,
-				"自动完成本轮研究准备，不要求用户选择文件、绑定输入或填写日期。context.preparation.files是项目当前文件目录，existingModel仅为上轮记录。先根据框架中引用的模型和文件内容确定当前估值模型；如果有新上传模型，读取后判断是否替代旧模型，不能只按文件名或上传时间猜测。用pe_iteration_read实际读取XLSX工作表、标签、期间表头、单位、可写数值输入与公式依赖，必要时读取相关PDF。读取XLSX返回model_version_id；model.baseVersionId须沿用它，确保基于已采用的最新模型。模型原值必须来自当前版本，不能用原件旧值。context.preparation.existingModel.revision或0填model.expectedRevision。自动建立“关键假设→所需数据→模型输入→敏感性”的对应：每个mapping写准确的sheet/cell/expectedValue、指标、期间、单位、合并或分部范围、币种、实际或假设角色，并关联judgmentIds和原模型已有的敏感性；不要写公式、标签或输出格。读取具体输入格后再提交，不把表头当输入。outputs选择已有估值结果公式，使用简短中文key；checks仅设置真正的恒等关系或模型已有检查，不将旧估值作为重算后必须相等的值。自动找公司全名、完整Wind代码和估值日期，不向用户重新索取已有信息；优先框架和项目明确的公司身份，不能混用其他证券。valuationDate和model.valuationDate须一致；dateSource与dateLabelSource原样复制模型日期和业务标签的sheet/cell/text，日期原文可为ISO日期或年月日，禁止用文件名、上传时间、财报报告期替代。若框架估值情景asOf已有明确基准日，可将两个日期来源填null并沿用该日期。所有新写的summary和sensitivity使用简短自然的中文；summary说明系统找到了哪个模型、日期和关键输入。识别存在疑点时继续查已有文件，不编造资料。只提交识别结果，后续Wind取数和写回由系统执行。",
+				"自动完成本轮研究准备，不要求用户选择文件、绑定输入或填写日期。context.preparation.files是文件目录，existingModel仅为上轮记录。根据框架引用和文件内容选当前模型；新上传模型须核对内容是否替代旧模型，不能只看文件名。用pe_iteration_read读取xlsx/xlsm工作表、期间表头、单位、可写输入及公式依赖；需要时读取PDF和已保存的Wind资料。model.baseVersionId沿用读取返回的model_version_id，expectedRevision用existingModel.revision或0。每个mapping须实际读取原值，写准确的sheet/cell/expectedValue、subject/metric、期间分类、单位、业务范围、币种、实际或假设角色，关联已有judgmentIds并用简短中文写sensitivity。完整年度属于cumulative，季度须核对单季或累计。只映射可更新的输入，使用model.outputs记录已有估值公式。查找估值日期最多两次；找不到可靠日期就填null并继续，不反复搜索。日期已确认时dateSource与dateLabelSource须复制单元格原文及业务标签；若框架valuation.scenarios.asOf已有明确基准日，可沿用并将来源置空。summary控制在3句内，说明选用模型、关键输入和日期已确认或未确认。完成必要读取后立即提交；本阶段不采集新财务数据、不重算或写回文件。",
 				{
 					basis,
 					preparation: {
@@ -608,14 +652,17 @@ export function createIterationEngine(
 				run,
 				"revise",
 				Type.Object(
-					{ sections: Type.Object(sections, { additionalProperties: false }) },
+					{
+						sections: Type.Optional(Type.Partial(Type.Object(sections, { additionalProperties: false }))),
+						judgmentUpdates: IterationRevisionSubmissionSchema.properties.judgmentUpdates,
+					},
 					{ additionalProperties: false },
 				),
-				"依据已保存影响分析修订工具schema列出的sections章节，返回这些章节的完整内容。服务端保留title、schemaVersion和未涉及的章节，并组装完整七节候选。保持稳定ID，仅修改proposedChange涉及的judgmentIds；未涉及条目逐字段原样保留。researchSetup必须同步新增资料后的范围说明，保留原研究目标、期限和偏好；不要保留只使用旧研报的限制。informationCutoff由服务端置空，实际冻结资料清单以运行inputs为准，不把上传日期当披露日期。currentAssessment与evidenceAndChanges可补充本轮变化。逐项落实proposedChange指定的章节和判断，否则提交将被拒绝。数值回查context.observations的期间、单位及quote，影响文字不是新的事实来源；1十亿元=10亿元，1百万元=0.01亿元。汽车等分部不等于汽车独立盈亏，不把管理层归因写成已证明因果，不把累计或期后交付计入本季度。修改判断必须在changes关联原ID和新证据；新增判断用新ID，origin=user只用于用户真实提出的假设。证据不足记为问题而非事实，不改变原Excel，不凭空重算估值。forecastComparisons.marketExpectation只记录有证据的市场一致预期；单个研究员预测不能放在这个字段，没有一致预期证据时填null，研究员预测及其与原预测的差异写在ownForecast、difference和summary中。",
+				"依据影响分析只提交发生变化的sections，省略未改章节。投资判断优先用judgmentUpdates:[{id,patch}]提交改动字段，例如rationale、verification或evidenceIds；不要重发未改判断或整份报告，服务端原样保留其余内容并组装完整七节框架。只修改proposedChange涉及的judgmentIds，不能改ID。其他提交的章节须是该章节完整对象。researchSetup同步新增资料范围，保留目标、期限和偏好；informationCutoff由服务端置空，不把上传日期当披露日期。currentAssessment和修改说明用简短自然中文；evidenceAndChanges.changes关联原判断ID、新证据，说明之前怎样、现在怎样、为什么。逐项落实proposedChange指定章节；若未改估值情景，省略valuation。数值回查observations的期间、单位和quote，影响文字不是新事实；1十亿元=10亿元，1百万元=0.01亿元。不把归因写成已证明因果，不混用累计和单季度。证据不足记为问题，不改变Excel、不编造估值。仅有明确市场一致预期证据时才填marketExpectation，个别研究员预测写ownForecast或summary。",
 				{ basis, observations, impacts },
 				signal,
 			);
-			return validateFrameworkContent({ ...basis, sections: { ...basis.sections, ...patch.sections } });
+			return mergeIterationRevision(basis, patch);
 		},
 	};
 }

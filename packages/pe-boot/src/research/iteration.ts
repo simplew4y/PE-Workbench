@@ -15,7 +15,6 @@ import {
 import { readInformationView } from "../information-source-store.ts";
 import { parseSourceId } from "../source.ts";
 import { readWindSnapshot } from "../trusted-sources.ts";
-import { validateAutomaticSetup } from "./automatic-setup.ts";
 import {
 	captureResearchInputs,
 	currentResearchVersion,
@@ -49,6 +48,7 @@ import {
 	validateLinkedObservationText,
 	validateObservationContext,
 } from "./iteration-quality.ts";
+import { validateIterationSetup } from "./iteration-reader.ts";
 import { type FrameworkContent, isFrameworkDocument, ResearchError, validateFrameworkContent } from "./model.ts";
 import { researchTransaction, withResearchDatabase } from "./storage.ts";
 import { shanghaiToday, trackingPeriods } from "./tracking-periods.ts";
@@ -970,7 +970,7 @@ export async function runFrameworkIteration(
 				save(db, run);
 			}),
 		);
-		const stageSignal = AbortSignal.any([signal, AbortSignal.timeout(300_000)]);
+		const stageSignal = AbortSignal.any([signal, AbortSignal.timeout(name === "prepare" ? 600_000 : 300_000)]);
 		for (let attempt = 0; ; attempt++) {
 			const attemptId = randomUUID();
 			database(cwd, datasetId, (db) =>
@@ -1001,7 +1001,9 @@ export async function runFrameworkIteration(
 					stageSignal.aborted ||
 					error instanceof ResearchError ||
 					!(error instanceof Error) ||
-					!/ECONNRESET|ETIMEDOUT|network|fetch failed|\b(502|503|504)\b/i.test(error.message)
+					!/ECONNRESET|ETIMEDOUT|network|fetch failed|connection error|request timed out|^terminated$|\b(502|503|504)\b/i.test(
+						error.message,
+					)
 				)
 					throw error;
 				await delay(1000 * (attempt + 1), undefined, { signal: stageSignal });
@@ -1018,7 +1020,14 @@ export async function runFrameworkIteration(
 		if (run.automaticSetup) {
 			const setup = await stage("prepare", async (stageSignal) => {
 				if (!engine.prepare) throw new ResearchError(409, "自动读取模型的服务暂不可用，请稍后点击立即更新重试。");
-				return validateAutomaticSetup(cwd, datasetId, run, basis, await engine.prepare(run, basis, stageSignal));
+				return validateIterationSetup(
+					cwd,
+					datasetId,
+					run,
+					basis,
+					await engine.prepare(run, basis, stageSignal),
+					stageSignal,
+				);
 			});
 			if (!run.preparedModelRevision) {
 				const model = saveIterationModelConfig(cwd, datasetId, setup.model);
@@ -1028,8 +1037,21 @@ export async function runFrameworkIteration(
 			}
 			run.sourceConfig = informationSourceConfig(setup.companyName, setup.companyTicker, ["wind-financials"]);
 			const asOf = shanghaiToday(new Date(run.createdAt));
-			run.sourceConfig.trackingWindow = { valuationDate: setup.valuationDate, asOf };
-			run.sourceConfig.defaultPeriods = trackingPeriods(setup.valuationDate, asOf);
+			// An unknown valuation date must stay unknown. Financial coverage can still
+			// start from the model's mapped reporting years, including a prior-year base.
+			const years = setup.model.mappings.flatMap((mapping) => {
+				const year = /20\d{2}/u.exec(mapping.period)?.[0];
+				return year && Number(year) <= Number(asOf.slice(0, 4)) ? [Number(year)] : [];
+			});
+			const startDate =
+				setup.valuationDate ??
+				`${Math.min(Number(asOf.slice(0, 4)) - 1, ...(years.length ? years : [Number(asOf.slice(0, 4)) - 3]))}-01-01`;
+			run.sourceConfig.trackingWindow = {
+				valuationDate: setup.valuationDate,
+				...(setup.valuationDate ? {} : { startDate }),
+				asOf,
+			};
+			run.sourceConfig.defaultPeriods = trackingPeriods(startDate, asOf);
 			run.sourceMode = "sources";
 			database(cwd, datasetId, (db) =>
 				researchTransaction(db, () => {

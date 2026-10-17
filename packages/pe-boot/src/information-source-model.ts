@@ -3,8 +3,8 @@ import { Type } from "typebox";
 import { ResearchError } from "./research/model.ts";
 import { trackingPeriods } from "./research/tracking-periods.ts";
 
-export const INFORMATION_SOURCE_VERSION = "8";
-export const INFORMATION_VIEW_VERSION = "7";
+export const INFORMATION_SOURCE_VERSION = "9";
+export const INFORMATION_VIEW_VERSION = "8";
 export const INFORMATION_SOURCE_ADAPTERS = [
 	{ id: "wind-financials", name: "Wind 财务数据", provider: "wind" },
 ] as const;
@@ -17,7 +17,7 @@ export interface InformationSourceConfig {
 	maxQueries: number;
 	maxTurns: number;
 	defaultPeriods: string[];
-	trackingWindow?: { valuationDate: string; asOf: string };
+	trackingWindow?: { valuationDate: string | null; startDate?: string; asOf: string };
 	queryPolicy?: "judgment-definitions-v1";
 }
 export function informationSourceConfig(
@@ -45,7 +45,9 @@ export function informationSourceConfig(
 }
 export function assertInformationSourceConfig(config: InformationSourceConfig): void {
 	if (config.trackingWindow) {
-		const periods = trackingPeriods(config.trackingWindow.valuationDate, config.trackingWindow.asOf);
+		const start = config.trackingWindow.valuationDate ?? config.trackingWindow.startDate;
+		if (!start) throw new ResearchError(400, "查询窗口缺少起始日期。");
+		const periods = trackingPeriods(start, config.trackingWindow.asOf);
 		if (
 			config.version !== INFORMATION_SOURCE_VERSION ||
 			config.viewVersion !== INFORMATION_VIEW_VERSION ||
@@ -92,9 +94,9 @@ export const InformationQuerySchema = Type.Object(
 		}),
 		periods: Type.Array(Type.String({ minLength: 1, maxLength: 100 }), {
 			minItems: 1,
-			maxItems: 4,
+			maxItems: 100,
 			description:
-				"首个查询由服务端固定最近三个年度及最新已披露中报/季报窗口，这里的期间仅作为规划记录；其后补查按此参数查询具体期间，不能把基线旧中报称为最新。",
+				"首个查询由服务端固定defaultPeriods中的完整窗口；追踪窗口会逐项列出所有季度，最多100个。其后补查按此参数查询具体期间，不能把基线旧中报称为最新。",
 		}),
 		definitionChecks: Type.Optional(
 			Type.Array(
@@ -284,12 +286,17 @@ export function renderWindFinancials(response: unknown, companyTicker: string): 
 					const explicitPeriod = [column.period, column.report_period, column.date].find(
 						(label): label is string => typeof label === "string" && !!label.trim(),
 					);
+					const metricPeriods = [
+						...metric.matchAll(
+							/(?:20\d{2}年?(?:年报|年度|全年|中报|半年报|[上下]半年|第?[一二三四1-4]季(?:度|报|末))|20\d{2}(?:H[12]|Q[1-4]|年)|(?:Q[1-4]|H[12])\s*FY\s*20\d{2}|FY\s*20\d{2})/giu,
+						),
+					].map((match) => match[0]);
 					const metricPeriod =
-						/20\d{2}年?\s*(?:到|至|-|~|～)\s*20\d{2}/u.test(metric) || /截至.*披露/iu.test(metric)
+						/20\d{2}年?\s*(?:到|至|-|~|～)\s*20\d{2}/u.test(metric) ||
+						/截至.*披露/iu.test(metric) ||
+						new Set(metricPeriods).size !== 1
 							? null
-							: (/(?:20\d{2}年?(?:年报|年度|全年|中报|半年报|[一二三四]季报)|20\d{2}(?:H[12]|Q[1-4]|年)|(?:Q[1-4]|H[12])\s*FY\s*20\d{2}|FY\s*20\d{2})/iu.exec(
-									metric,
-								)?.[0] ?? null);
+							: metricPeriods[0];
 					const fieldPeriodIndex = names.findIndex((name) =>
 						[`${metric}报告期`, `${metric}日期`, `${metric}时间`, `${metric}.时间`].includes(name),
 					);

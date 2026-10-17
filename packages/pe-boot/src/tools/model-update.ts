@@ -343,14 +343,14 @@ async function recalculateWorkbook(
 			"--nofirststartwizard",
 			`-env:UserInstallation=${pathToFileURL(profileDirectory).href}`,
 			"--convert-to",
-			"xlsx",
+			extname(inputPath) === ".xlsm" ? "xlsm:Calc MS Excel 2007 VBA XML" : "xlsx",
 			"--outdir",
 			outputDirectory,
 			inputPath,
 		],
 		{ signal, timeoutMs: 5 * 60_000, maxOutput: 256_000 },
 	);
-	const resultPath = join(outputDirectory, `${basename(inputPath, extname(inputPath))}.xlsx`);
+	const resultPath = join(outputDirectory, basename(inputPath));
 	if (!existsSync(resultPath)) throw new Error("LibreOffice did not produce the recalculated workbook");
 	return { path: resultPath, version: version.stdout.trim() || version.stderr.trim() || "unknown" };
 }
@@ -415,8 +415,8 @@ async function applyModelUpdate(
 		}
 	}
 	const prepared = await preparePeDocument(cwd, { docId: options.docId, datasetId: options.datasetId }, signal);
-	if (prepared.document.file_type !== "xlsx")
-		throw new Error("Controlled model updates currently support .xlsx workbooks only");
+	if (!["xlsx", "xlsm"].includes(String(prepared.document.file_type)))
+		throw new Error("Controlled model updates require .xlsx or .xlsm workbooks");
 	const reviewItems = options.reviewItems ?? [];
 	ensureChangesAreSupported(options.changes, reviewItems);
 	const initialReview = reviewAssumptionUpdates(reviewItems, options.hardValidationErrors ?? []);
@@ -447,7 +447,8 @@ async function applyModelUpdate(
 	const profileDirectory = join(temporaryRoot, "libreoffice-profile");
 	for (const directory of [preparedDirectory, baselineDirectory, recalculatedDirectory, profileDirectory])
 		mkdirSync(directory);
-	const workingFilename = `${basename(prepared.filePath, ".xlsx")}--${versionId}.xlsx`;
+	const extension = extname(prepared.filePath);
+	const workingFilename = `${basename(prepared.filePath, extension)}--${versionId}${extension}`;
 	const preparedPath = join(preparedDirectory, workingFilename);
 	const planPath = join(temporaryRoot, "plan.json");
 	const applyResultPath = join(temporaryRoot, "apply-result.json");
@@ -535,6 +536,8 @@ async function applyModelUpdate(
 					baseline.path,
 					"--updated",
 					selectedFile,
+					"--original",
+					sourcePath,
 					"--plan",
 					planPath,
 					"--result",

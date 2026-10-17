@@ -129,9 +129,16 @@ it.each(["tool", "text", "stubborn", "error"] as const)(
 				sections: {
 					researchSetup: candidate.sections.researchSetup,
 					currentAssessment: candidate.sections.currentAssessment,
-					investmentJudgments: candidate.sections.investmentJudgments,
+					...(completion === "tool" ? {} : { investmentJudgments: candidate.sections.investmentJudgments }),
 					evidenceAndChanges: candidate.sections.evidenceAndChanges,
 				},
+				...(completion === "tool"
+					? {
+							judgmentUpdates: [
+								{ id: "demand", patch: { claim: candidate.sections.investmentJudgments.items[0].claim } },
+							],
+						}
+					: {}),
 			};
 			runtime.registerNativeProvider({
 				id: "pe-platform",
@@ -186,8 +193,12 @@ it.each(["tool", "text", "stubborn", "error"] as const)(
 												: { impactUpdates: [{ index: 0, impact: impactOutput.impacts[0] }] }
 											: revision
 												? call === 0
-													? { ...patch, title: "Unauthorized title" }
-													: patch
+													? completion === "tool"
+														? { sections: patch.sections }
+														: { ...patch, title: "Unauthorized title" }
+													: completion === "tool"
+														? { judgmentUpdates: patch.judgmentUpdates }
+														: patch
 												: call === 0
 													? { docId: "new", page: 1 }
 													: call === 1

@@ -597,76 +597,83 @@ it("new project documents remain usable when Wind returns no data", async () => 
 	expect(getFrameworkIteration(cwd, dataset, run.iterationId!).reviewReasons.join()).toContain("Wind未返回数据");
 });
 
-it("automatically identifies the workbook, valuation date and model inputs before requesting Wind", async () => {
-	const cwd = setup(false, {
-		...config,
-		mode: "auto",
-		enabled: false,
-		updatePolicy: "direct",
-		automaticSetup: true,
-		company: { name: "测试公司", ticker: "000001.SZ" },
-	});
-	mkdirSync(join(cwd, "raw"));
-	const doc = registerPeDocuments(cwd, dataset, [
-		{ name: "model.xlsx", bytes: readFileSync(new URL("./fixtures/excel-parity.xlsx", import.meta.url)) },
-	]).documents[0];
-	withResearchDatabase(cwd, dataset, (db) =>
-		db.prepare("UPDATE documents SET status='completed' WHERE doc_id=?").run(doc.doc_id),
-	);
-	const prepare = vi.fn<NonNullable<IterationEngine["prepare"]>>(async () => ({
-		companyName: "测试公司",
-		companyTicker: "000001.SZ",
-		valuationDate: "2026-08-31",
-		summary: "已从模型原文识别估值日期与现金流输入。",
-		dateSource: { sheet: "Valuation", cell: "B1", text: "2026-08-31T00:00:00" },
-		dateLabelSource: { sheet: "Valuation", cell: "A1", text: "Valuation Date" },
-		identitySources: [],
-		model: {
-			expectedRevision: 0,
-			docId: String(doc.doc_id),
-			baseVersionId: null,
-			valuationDate: "2026-08-31",
-			mappings: [
-				{
-					id: "cash-flow",
-					subject: "测试公司",
-					metric: "Free cash flow",
-					period: "2026Q3",
-					periodKind: "single",
-					asOf: null,
-					unit: "CNY",
-					scope: "公司",
-					currency: "CNY",
-					role: "actual",
-					sheet: "DCF",
-					cell: "B2",
-					expectedValue: 100,
-					judgmentIds: ["demand"],
-					sensitivity: "现金流影响每股估值",
-				},
-			],
-			outputs: [{ key: "每股价值", sheet: "DCF", cell: "B7" }],
-		},
-	}));
-	const collect = vi.fn(async (run: FrameworkIteration) => {
-		expect(run.sourceConfig?.trackingWindow?.valuationDate).toBe("2026-08-31");
-		expect(run.sourceConfig?.defaultPeriods).toContain("2026年第四季度");
-		expect(modelUpdate.getIterationModelConfig(cwd, dataset)?.mappings[0].cell).toBe("B2");
-		return { docIds: [], warnings: ["本次没有新数据"], coverage: "empty" as const, summary: "没有新数据" };
-	});
-	requestResearchMonitorRun(cwd, dataset);
-	await runResearchMonitor(cwd, dataset, legacy, AbortSignal.timeout(10_000), oldFetch, async () => ({
-		...engine(),
-		prepare,
-		collect,
-		extract: async (run) => ({
-			observations: [],
-			coverage: run.newDocIds.map((docId) => ({ docId, readLocations: ["模型输入"], gaps: [] })),
-		}),
-	}));
-	expect(prepare).toHaveBeenCalledOnce();
-	expect(collect).toHaveBeenCalledOnce();
-	const run = getResearchMonitor(cwd, dataset).runs[0];
-	expect(run.status, run.error).toBe("no_change");
-	expect(modelUpdate.freezeIterationModelBaseline(cwd, dataset, run.iterationId!).error).toBeNull();
-});
+it.each([true, false])(
+	"automatically prepares model inputs with confirmed valuation date=%s before Wind",
+	async (confirmedDate) => {
+		const cwd = setup(false, {
+			...config,
+			mode: "auto",
+			enabled: false,
+			updatePolicy: "direct",
+			automaticSetup: true,
+			company: { name: "测试公司", ticker: "000001.SZ" },
+		});
+		mkdirSync(join(cwd, "raw"));
+		const doc = registerPeDocuments(cwd, dataset, [
+			{ name: "model.xlsx", bytes: readFileSync(new URL("./fixtures/excel-parity.xlsx", import.meta.url)) },
+		]).documents[0];
+		withResearchDatabase(cwd, dataset, (db) =>
+			db.prepare("UPDATE documents SET status='completed' WHERE doc_id=?").run(doc.doc_id),
+		);
+		const prepare = vi.fn<NonNullable<IterationEngine["prepare"]>>(async () => ({
+			companyName: "测试公司",
+			companyTicker: "000001.SZ",
+			valuationDate: confirmedDate ? "2026-08-31" : null,
+			summary: "已从模型原文识别估值日期与现金流输入。",
+			dateSource: confirmedDate ? { sheet: "Valuation", cell: "B1", text: "2026-08-31T00:00:00" } : null,
+			dateLabelSource: confirmedDate ? { sheet: "Valuation", cell: "A1", text: "Valuation Date" } : null,
+			identitySources: [],
+			model: {
+				expectedRevision: 0,
+				docId: String(doc.doc_id),
+				baseVersionId: null,
+				...(confirmedDate ? { valuationDate: "2026-08-31" } : {}),
+				mappings: [
+					{
+						id: "cash-flow",
+						subject: "测试公司",
+						metric: "Free cash flow",
+						period: "2026Q3",
+						periodKind: "single",
+						asOf: null,
+						unit: "CNY",
+						scope: "公司",
+						currency: "CNY",
+						role: "actual",
+						sheet: "DCF",
+						cell: "B2",
+						expectedValue: 100,
+						judgmentIds: ["demand"],
+						sensitivity: "现金流影响每股估值",
+					},
+				],
+				outputs: [{ key: "每股价值", sheet: "DCF", cell: "B7" }],
+			},
+		}));
+		const collect = vi.fn(async (run: FrameworkIteration) => {
+			expect(run.sourceConfig?.trackingWindow?.valuationDate).toBe(confirmedDate ? "2026-08-31" : null);
+			if (!confirmedDate) {
+				expect(run.sourceConfig?.trackingWindow?.startDate).toBe("2025-01-01");
+				expect(modelUpdate.getIterationModelConfig(cwd, dataset)?.valuationDate).toBeUndefined();
+			}
+			expect(run.sourceConfig?.defaultPeriods).toContain("2026年第四季度");
+			expect(modelUpdate.getIterationModelConfig(cwd, dataset)?.mappings[0].cell).toBe("B2");
+			return { docIds: [], warnings: ["本次没有新数据"], coverage: "empty" as const, summary: "没有新数据" };
+		});
+		requestResearchMonitorRun(cwd, dataset);
+		await runResearchMonitor(cwd, dataset, legacy, AbortSignal.timeout(10_000), oldFetch, async () => ({
+			...engine(),
+			prepare,
+			collect,
+			extract: async (run) => ({
+				observations: [],
+				coverage: run.newDocIds.map((docId) => ({ docId, readLocations: ["模型输入"], gaps: [] })),
+			}),
+		}));
+		expect(prepare).toHaveBeenCalledOnce();
+		expect(collect).toHaveBeenCalledOnce();
+		const run = getResearchMonitor(cwd, dataset).runs[0];
+		expect(run.status, run.error).toBe("no_change");
+		expect(modelUpdate.freezeIterationModelBaseline(cwd, dataset, run.iterationId!).error).toBeNull();
+	},
+);

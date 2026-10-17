@@ -61,9 +61,10 @@ export async function GET(request: NextRequest) {
     if (params.get("download") === "model") {
       if (!runId) throw new ResearchError(400, "请选择模型所属的运行轮次。");
       const file = readIterationModelWorkbook(project.root, project.datasetId, runId);
+      const extension = file.filename.toLowerCase().endsWith(".xlsm") ? "xlsm" : "xlsx";
       return new Response(new Uint8Array(file.bytes), { headers: {
         "Content-Type": file.contentType,
-        "Content-Disposition": `attachment; filename="model-${runId}.xlsx"; filename*=UTF-8''${encodeURIComponent(file.filename)}`,
+        "Content-Disposition": `attachment; filename="model-${runId}.${extension}"; filename*=UTF-8''${encodeURIComponent(file.filename)}`,
         "Cache-Control": "private, no-store",
       } });
     }
@@ -81,7 +82,7 @@ export async function GET(request: NextRequest) {
       modelVersions: versions,
       modelError,
       observations: run?.artifacts.find((artifact) => artifact.stage === "extract")?.value ?? null,
-      documents: listPeProjectDocuments(project.datasetId).documents.filter((document) => document.fileType === "xlsx" && document.isCurrent !== false && document.docId && ["completed", "completed_with_warnings"].includes(document.status)),
+      documents: listPeProjectDocuments(project.datasetId).documents.filter((document) => ["xlsx", "xlsm"].includes(document.fileType) && document.isCurrent !== false && document.docId && ["completed", "completed_with_warnings"].includes(document.status)),
       monitor,
       latestRunId: runId,
       serverRuntime: serverIterationRuntimeStatus(),

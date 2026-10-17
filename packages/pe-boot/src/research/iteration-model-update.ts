@@ -162,19 +162,25 @@ function workbook(cwd: string, storedPath: string, sha256: string, directory: "r
 		local.startsWith("..") ||
 		isAbsolute(local) ||
 		realpathSync(candidate) !== candidate ||
-		extname(candidate) !== ".xlsx" ||
+		![".xlsx", ".xlsm"].includes(extname(candidate)) ||
 		!statSync(candidate).isFile()
 	)
-		throw new ResearchError(403, "Workbook must be a regular .xlsx file inside its project root without symlinks");
+		throw new ResearchError(
+			403,
+			"Workbook must be a regular .xlsx or .xlsm file inside its project root without symlinks",
+		);
 	const bytes = readFileSync(candidate);
 	if (!/^[a-f0-9]{64}$/u.test(sha256) || hash(bytes) !== sha256)
 		throw new ResearchError(409, "Workbook SHA256 changed");
-	validatePeExcelUpload(bytes, "xlsx");
+	validatePeExcelUpload(bytes, extname(candidate).slice(1));
 	return {
 		bytes,
 		filename: basename(candidate),
 		sha256,
-		contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" as const,
+		contentType:
+			extname(candidate) === ".xlsm"
+				? "application/vnd.ms-excel.sheet.macroEnabled.12"
+				: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 	};
 }
 
@@ -184,8 +190,8 @@ function source(cwd: string, connection: DatabaseSync, datasetId: string, docId:
 			"SELECT * FROM documents WHERE dataset_id=? AND doc_id=? AND is_current=1 AND lifecycle_state='active' AND deleted_at IS NULL",
 		)
 		.get(datasetId, docId) as SqlRow | undefined;
-	if (!document || document.file_type !== "xlsx")
-		throw new ResearchError(409, "Register a current .xlsx model document first");
+	if (!document || !["xlsx", "xlsm"].includes(String(document.file_type)))
+		throw new ResearchError(409, "Register a current .xlsx or .xlsm model document first");
 	const documentSha256 = String(document.checksum || document.sha256);
 	workbook(cwd, String(document.stored_path || document.raw_path), documentSha256, "raw");
 	if ((currentModelVersionId(connection, datasetId, docId) ?? null) !== baseVersionId)
@@ -233,7 +239,7 @@ export function readCurrentIterationWorkbook(
 		}
 		return {
 			...result,
-			file_type: "xlsx",
+			file_type: extname(path).slice(1),
 			doc_id: docId,
 			original_filename: document.original_filename,
 			model_version_id: baseVersionId,

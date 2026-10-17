@@ -338,9 +338,9 @@ export async function fetchIterationInformation(
 			const checks =
 				query.definitionChecks ?? (config.queryPolicy ? ["period", "currency", "scope", "role", "definition"] : []);
 			const definitionRequest = checks.length
-				? `同时返回${checks.map((check) => definitions[check]).join("、")}，放在同一表格中该指标对应的独立字段（指标名.期间类型、指标名.币种、指标名.业务口径、指标名.数据角色、指标名.指标定义）；未知返回空，不凭查询要求补写定义。`
+				? `若有，附${checks.map((check) => definitions[check]).join("、")}；缺失说明项留空，保留已取得的财务数值，不补写未知定义。`
 				: "";
-			const actualQuery = `查询 ${config.companyName}（${config.companyTicker}）${actualPeriods.join("、")}的${query.metrics.join("、")}财务数据。${config.trackingWindow ? `仅返回截至${config.trackingWindow.asOf}已披露的数据，当前季度尚未结束或未披露时返回空；同时返回发布日期和原始来源链接。` : ""}${query.currency ? `请以${query.currency}计量并标明币种。` : ""}保留证券代码、每个指标的报告期、原始单位、币种、业务名称及实际或预测标识。没有数据返回空，不推算数值。${definitionRequest}`;
+			const actualQuery = `查询${config.companyName}（${config.companyTicker}）${actualPeriods.join("、")}的${query.metrics.join("、")}。${query.currency ? `金额使用${query.currency}。` : ""}保留证券代码、报告期、原始单位、币种、业务名称和报表类型。若有，返回发布日期、实际或预测标识、单季或累计口径、原始来源链接。${config.trackingWindow ? `仅返回截至${config.trackingWindow.asOf}已披露的数据，当前季度尚未结束或未披露时返回空。` : ""}没有数据返回空，不推算数值。${definitionRequest}`;
 			if (actualQuery.length > 2000)
 				throw new ResearchError(400, "查询内容超过 Wind 上限，请缩小指标和报告期范围。");
 			const id = informationHash(JSON.stringify([query.sourceId, actualQuery]));

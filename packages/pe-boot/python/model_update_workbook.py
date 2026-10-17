@@ -7,15 +7,71 @@ import argparse
 import hashlib
 import json
 import math
+import posixpath
 import re
+import zipfile
 from pathlib import Path
 from typing import Any
+from xml.dom import minidom
 
 from openpyxl import load_workbook
-from openpyxl.utils.cell import coordinate_from_string
+from openpyxl.utils.cell import coordinate_from_string, coordinate_to_tuple, range_boundaries
+
+from excel_formula_parser import extract_formula_references
 
 
 CELL_RE = re.compile(r"^[A-Z]{1,3}[1-9][0-9]{0,6}$")
+EXTERNAL_FORMULA_RE = re.compile(r"_xll\.|_xludf\.|\[(?:\d+|[^\]]+\.xls[xmb]?)\]", re.IGNORECASE)
+
+
+def validate_preserved_caches(workbook: Any, changes: list[dict[str, Any]]) -> None:
+    """Only keep unavailable add-in results whose inputs were not changed."""
+    changed = [(item["sheet"], coordinate_to_tuple(item["cell"])) for item in changes if not same_value(item["before"], item["after"])]
+    if not changed:
+        return
+    formulas = {sheet.title: {cell.coordinate: cell.value for cell in sheet._cells.values() if cell.data_type == "f"} for sheet in workbook.worksheets}
+    visited: set[tuple[str, str]] = set()
+
+    def inspect(sheet_name: str, formula: str) -> None:
+        key = (sheet_name, formula)
+        if key in visited:
+            return
+        visited.add(key)
+        if re.search(r"\b(?:INDIRECT|OFFSET)\s*\(", formula, re.IGNORECASE):
+            raise ValueError("Cannot verify dynamic dependencies of an unavailable formula cache")
+        names = dict(workbook.defined_names)
+        names.update(workbook[sheet_name].defined_names)
+        for ref in extract_formula_references(formula, source_sheet=sheet_name, defined_names=names):
+            if ref.external_workbook:
+                continue
+            if ref.reference_kind == "defined_name":
+                defined = next((value for name, value in names.items() if name.casefold() == str(ref.defined_name).casefold()), None)
+                if defined is None:
+                    raise ValueError("Cannot resolve an unavailable formula cache dependency")
+                inspect(sheet_name, "=" + str(defined.attr_text).lstrip("="))
+                continue
+            if ref.parse_status != "resolved" or not ref.target_range or ref.target_sheet not in formulas:
+                raise ValueError(f"Cannot verify unavailable formula cache dependency: {ref.raw_reference}")
+            left, top, right, bottom = range_boundaries(ref.target_range)
+            def contains(position: tuple[int, int]) -> bool:
+                row, column = position
+                return (left is None or column >= left) and (right is None or column <= right) and (top is None or row >= top) and (bottom is None or row <= bottom)
+            if any(sheet == ref.target_sheet and contains(position) for sheet, position in changed):
+                raise ValueError(f"Changed input affects an unavailable formula cache: {ref.target_sheet}!{ref.target_range}")
+            for address, dependency in formulas[ref.target_sheet].items():
+                if contains(coordinate_to_tuple(address)):
+                    if not isinstance(dependency, str):
+                        raise ValueError("Cannot verify array formula dependency of an unavailable cache")
+                    inspect(ref.target_sheet, dependency)
+
+    for sheet_name, cells in formulas.items():
+        for address, formula in cells.items():
+            expression = formula if isinstance(formula, str) else getattr(formula, "text", None)
+            if isinstance(expression, str) and EXTERNAL_FORMULA_RE.search(expression):
+                try:
+                    inspect(sheet_name, expression)
+                except ValueError as error:
+                    raise ValueError(f"Cannot preserve {sheet_name}!{address}: {error}") from error
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -107,8 +163,8 @@ def error_cells(workbook: Any) -> list[str]:
 
 
 def apply_changes(source: Path, plan_path: Path, destination: Path, result_path: Path) -> None:
-    if source.suffix.lower() != ".xlsx" or destination.suffix.lower() != ".xlsx":
-        raise ValueError("Controlled model updates currently support .xlsx workbooks only")
+    if source.suffix.lower() not in {".xlsx", ".xlsm"} or destination.suffix.lower() != source.suffix.lower():
+        raise ValueError("Controlled model updates preserve the source .xlsx or .xlsm format")
     plan = load_json(plan_path)
     changes = plan.get("changes")
     if not isinstance(changes, list) or not changes:
@@ -158,10 +214,92 @@ def apply_changes(source: Path, plan_path: Path, destination: Path, result_path:
         after_fingerprint, after_formula_count = formula_fingerprint(workbook)
         if before_fingerprint != after_fingerprint or formula_count != after_formula_count:
             raise ValueError("Formula cells changed while applying literal input updates")
-        workbook.calculation.fullCalcOnLoad = True
-        workbook.calculation.forceFullCalc = True
-        workbook.calculation.calcMode = "auto"
-        workbook.save(destination)
+        validate_preserved_caches(workbook, applied)
+        # Saving the entire book through openpyxl clears every formula cache,
+        # including Bloomberg add-in values unavailable to LibreOffice. Patch
+        # approved literal cells in the original ZIP, and invalidate ordinary
+        # formula caches so the calculation engine refreshes their results.
+        with zipfile.ZipFile(source) as original, zipfile.ZipFile(destination, "w") as target:
+            book_xml = minidom.parseString(original.read("xl/workbook.xml"))
+            rels_xml = minidom.parseString(original.read("xl/_rels/workbook.xml.rels"))
+            relations = {node.getAttribute("Id"): node.getAttribute("Target") for node in rels_xml.getElementsByTagNameNS("*", "Relationship")}
+            sheet_paths = {}
+            for node in book_xml.getElementsByTagNameNS("*", "sheet"):
+                path = relations[node.getAttributeNS("http://schemas.openxmlformats.org/officeDocument/2006/relationships", "id")]
+                sheet_paths[node.getAttribute("name")] = path.lstrip("/") if path.startswith("/") else posixpath.normpath(posixpath.join("xl", path))
+            book_xml.unlink()
+            rels_xml.unlink()
+            patches = {}
+            for change in applied:
+                patches.setdefault(sheet_paths[change["sheet"]], []).append(change)
+            ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+            for entry in original.infolist():
+                data = original.read(entry.filename)
+                if entry.filename in sheet_paths.values():
+                    document = minidom.parseString(data)
+                    def element(name: str) -> Any:
+                        prefix = document.documentElement.prefix
+                        return document.createElementNS(ns, f"{prefix}:{name}" if prefix else name)
+                    sheet_data_nodes = document.getElementsByTagNameNS(ns, "sheetData")
+                    if not sheet_data_nodes:
+                        document.unlink()
+                        target.writestr(entry, data)
+                        continue
+                    # Recompute ordinary formulas, but preserve add-in caches that
+                    # cannot be fetched by the local calculation engine.
+                    for formula in document.getElementsByTagNameNS(ns, "f"):
+                        expression = "".join(node.data for node in formula.childNodes if node.nodeType in {node.TEXT_NODE, node.CDATA_SECTION_NODE})
+                        if EXTERNAL_FORMULA_RE.search(expression):
+                            continue
+                        for node in list(formula.parentNode.childNodes):
+                            if node.nodeType == node.ELEMENT_NODE and node.localName == "v":
+                                formula.parentNode.removeChild(node)
+                    sheet_data = sheet_data_nodes[0]
+                    for change in patches.get(entry.filename, []):
+                        ref = change["cell"]
+                        row_number = int(re.search(r"\d+$", ref).group())
+                        row = next((node for node in sheet_data.childNodes if node.nodeType == node.ELEMENT_NODE and node.getAttribute("r") == str(row_number)), None)
+                        if row is None:
+                            row = element("row")
+                            row.setAttribute("r", str(row_number))
+                            before = next((node for node in sheet_data.childNodes if node.nodeType == node.ELEMENT_NODE and int(node.getAttribute("r")) > row_number), None)
+                            sheet_data.insertBefore(row, before)
+                        cell = next((node for node in row.childNodes if node.nodeType == node.ELEMENT_NODE and node.getAttribute("r") == ref), None)
+                        if cell is None:
+                            cell = element("c")
+                            cell.setAttribute("r", ref)
+                            column = coordinate_from_string(ref)[0]
+                            before = next((node for node in row.childNodes if node.nodeType == node.ELEMENT_NODE and (len(coordinate_from_string(node.getAttribute("r"))[0]), coordinate_from_string(node.getAttribute("r"))[0]) > (len(column), column)), None)
+                            row.insertBefore(cell, before)
+                        for node in list(cell.childNodes):
+                            if node.nodeType == node.ELEMENT_NODE and node.localName in {"v", "is"}:
+                                cell.removeChild(node)
+                        value = change["after"]
+                        if cell.hasAttribute("t"):
+                            cell.removeAttribute("t")
+                        if value is not None:
+                            if isinstance(value, str):
+                                cell.setAttribute("t", "inlineStr")
+                                inline = element("is")
+                                text = element("t")
+                                text.setAttribute("xml:space", "preserve")
+                                text.appendChild(document.createTextNode(value))
+                                inline.appendChild(text)
+                                before = next((node for node in cell.childNodes if node.nodeType == node.ELEMENT_NODE and node.localName == "extLst"), None)
+                                cell.insertBefore(inline, before)
+                            else:
+                                if isinstance(value, bool):
+                                    cell.setAttribute("t", "b")
+                                node = element("v")
+                                node.appendChild(document.createTextNode(str(int(value)) if isinstance(value, bool) else str(value)))
+                                before = next((child for child in cell.childNodes if child.nodeType == child.ELEMENT_NODE and child.localName == "extLst"), None)
+                                cell.insertBefore(node, before)
+                    dimensions = document.getElementsByTagNameNS(ns, "dimension")
+                    if dimensions and entry.filename in patches:
+                        dimensions[0].setAttribute("ref", workbook[patches[entry.filename][0]["sheet"]].calculate_dimension())
+                    data = document.toxml(encoding="utf-8")
+                    document.unlink()
+                target.writestr(entry, data)
         write_json(
             result_path,
             {
@@ -176,7 +314,12 @@ def apply_changes(source: Path, plan_path: Path, destination: Path, result_path:
         workbook.close()
 
 
-def inspect_workbooks(source: Path, updated: Path, plan_path: Path, result_path: Path) -> None:
+def inspect_workbooks(source: Path, updated: Path, original: Path, plan_path: Path, result_path: Path) -> None:
+    if original.suffix.lower() == ".xlsm":
+        with zipfile.ZipFile(original) as original_archive, zipfile.ZipFile(updated) as updated_archive:
+            for name in original_archive.namelist():
+                if "vba" in name.lower() and (name not in updated_archive.namelist() or original_archive.read(name) != updated_archive.read(name)):
+                    raise ValueError(f"Workbook VBA content changed during recalculation: {name}")
     plan = load_json(plan_path)
     outputs = plan.get("outputs", [])
     checks = plan.get("checks", [])
@@ -271,6 +414,7 @@ def main() -> None:
     inspect_parser = subparsers.add_parser("inspect")
     inspect_parser.add_argument("--source", required=True, type=Path)
     inspect_parser.add_argument("--updated", required=True, type=Path)
+    inspect_parser.add_argument("--original", required=True, type=Path)
     inspect_parser.add_argument("--plan", required=True, type=Path)
     inspect_parser.add_argument("--result", required=True, type=Path)
 
@@ -278,7 +422,7 @@ def main() -> None:
     if args.command == "apply":
         apply_changes(args.input, args.plan, args.output, args.result)
     else:
-        inspect_workbooks(args.source, args.updated, args.plan, args.result)
+        inspect_workbooks(args.source, args.updated, args.original, args.plan, args.result)
 
 
 if __name__ == "__main__":

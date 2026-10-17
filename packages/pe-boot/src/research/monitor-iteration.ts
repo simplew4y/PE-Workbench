@@ -202,7 +202,10 @@ export async function runResearchMonitorIteration(
 				sourceConfig = {
 					...sourceConfig,
 					trackingWindow,
-					defaultPeriods: trackingPeriods(trackingWindow.valuationDate, trackingWindow.asOf),
+					defaultPeriods: trackingPeriods(
+						trackingWindow.valuationDate ?? trackingWindow.startDate ?? "",
+						trackingWindow.asOf,
+					),
 				};
 			}
 			const manual = !!db

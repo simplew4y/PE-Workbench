@@ -451,7 +451,7 @@ export async function runResearchMonitor(
 		const inputs = database(cwd, datasetId, (db) => {
 			const ids = db
 				.prepare(`SELECT doc_id FROM documents WHERE dataset_id=? AND deleted_at IS NULL AND is_current=1
-				AND status IN ('completed','completed_with_warnings') AND (file_type IN ('pdf','xlsx','xlsm') OR parser_name IN ('wind_snapshot','official_filing_snapshot')) ORDER BY doc_id`)
+				AND status IN ('completed','completed_with_warnings') AND (file_type IN ('pdf','xlsx','xlsm') OR parser_name IN ('wind_snapshot','official_filing_snapshot','information_source_view')) ORDER BY doc_id`)
 				.all(datasetId)
 				.map((row) => String(row.doc_id));
 			return captureResearchInputs(

@@ -55,44 +55,55 @@ afterEach(() => {
 	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-it("sends every tracking quarter in chronological order, with a cutoff and no internal framework purpose", async () => {
-	const config = informationSourceConfig("Company", "0700.HK", ["wind-financials"]);
-	config.trackingWindow = { valuationDate: "2025-06-30", asOf: "2026-10-16" };
-	config.defaultPeriods = trackingPeriods(config.trackingWindow.valuationDate, config.trackingWindow.asOf);
-	const { root, run } = project(config);
-	let sent = "";
-	await runFrameworkIteration(
-		root,
-		"dataset_test",
-		run.id,
-		{
-			collect: async (value, _basis, signal) => {
-				await fetchIterationInformation(
-					root,
-					"dataset_test",
-					value,
-					{ ...query, purpose: "私有投资目的及框架版本" },
-					signal,
-					async (request) => {
-						sent = request.query;
-						return response();
-					},
-				);
-				return sourceCollectionResult(root, "dataset_test", value.id, "已保存");
+it.each(["2025-06-30", null])(
+	"sends every quarter using valuation date %s or an explicit data window",
+	async (valuationDate) => {
+		const config = informationSourceConfig("Company", "0700.HK", ["wind-financials"]);
+		config.trackingWindow = {
+			valuationDate,
+			...(valuationDate ? {} : { startDate: "2025-01-01" }),
+			asOf: "2026-10-16",
+		};
+		config.defaultPeriods = trackingPeriods(
+			valuationDate ?? config.trackingWindow.startDate!,
+			config.trackingWindow.asOf,
+		);
+		assertInformationSourceConfig(config);
+		const { root, run } = project(config);
+		let sent = "";
+		await runFrameworkIteration(
+			root,
+			"dataset_test",
+			run.id,
+			{
+				collect: async (value, _basis, signal) => {
+					await fetchIterationInformation(
+						root,
+						"dataset_test",
+						value,
+						{ ...query, periods: config.defaultPeriods, purpose: "私有投资目的及框架版本" },
+						signal,
+						async (request) => {
+							sent = request.query;
+							return response();
+						},
+					);
+					return sourceCollectionResult(root, "dataset_test", value.id, "已保存");
+				},
+				extract: async (value) => observations(root, value),
+				impact: async () => ({ substantive: false, summary: "数据口径未核实", impacts: [], gaps: [] }),
+				revise: async () => {
+					throw new Error("No revision expected");
+				},
 			},
-			extract: async (value) => observations(root, value),
-			impact: async () => ({ substantive: false, summary: "数据口径未核实", impacts: [], gaps: [] }),
-			revise: async () => {
-				throw new Error("No revision expected");
-			},
-		},
-		async () => ({ docIds: [], warnings: [] }),
-		AbortSignal.timeout(5000),
-	);
-	expect(sent).toContain(config.defaultPeriods.join("、"));
-	expect(sent).toContain("截至2026-10-16已披露");
-	expect(sent).not.toContain("私有投资目的及框架版本");
-});
+			async () => ({ docIds: [], warnings: [] }),
+			AbortSignal.timeout(5000),
+		);
+		expect(sent).toContain(config.defaultPeriods.join("、"));
+		expect(sent).toContain("截至2026-10-16已披露");
+		expect(sent).not.toContain("私有投资目的及框架版本");
+	},
+);
 const query: InformationQuery = {
 	sourceId: "wind-financials",
 	metrics: ["营业收入"],
@@ -316,6 +327,24 @@ it("renders full tables once and preserves field periods, nulls, original units 
 	expect(renderWindFinancials(response("AAPL.O"), "0700.HK").gaps.join()).toContain("证券代码不匹配");
 	expect(renderWindFinancials({ content: [{ text: "No data" }] }, "0700.HK").usable).toBe(false);
 });
+
+it.each(["2026年第二季度", "2026年2季度", "2026年2季末"])(
+	"preserves the complete quarter in %s without guessing single/cumulative",
+	(period) => {
+		const fact = renderWindFinancials(response("0700.HK", `${period}营业收入`), "0700.HK").facts[0];
+		expect(fact.period).toBe(period);
+		expect(fact.periodKind).toBe("unknown");
+	},
+);
+
+it.each(["2025年2季度到2026年3季度每季度的营业收入", "2025年第二季度至2025年第三季度营业收入"])(
+	"does not assign a single report period to %s",
+	(metric) => {
+		const fact = renderWindFinancials(response("0700.HK", metric), "0700.HK").facts[0];
+		expect(fact.period).toBeNull();
+		expect(fact.role).toBeNull();
+	},
+);
 
 it("rejects malformed header/row mappings and retains business labels instead of guessing", () => {
 	const payload = response();
@@ -941,7 +970,10 @@ it("checks explicit financial roles and requested/comparison currencies", async 
 		AbortSignal.timeout(5000),
 	);
 	expect(completed.status, completed.error ?? "").toBe("no_change");
-	expect(listInformationSourceQueries(root, "dataset_test", run.id)[0].actualQuery).toContain("以CNY计量");
+	const actualQuery = listInformationSourceQueries(root, "dataset_test", run.id)[0].actualQuery;
+	expect(actualQuery).toContain("金额使用CNY");
+	expect(actualQuery).toContain("缺失说明项留空，保留已取得的财务数值");
+	expect(actualQuery).not.toContain("指标名.");
 	expect(completed.reviewReasons.join()).toContain("以返回字段为准");
 	const extracted = observations(root, completed);
 	const badRole = structuredClone(extracted);

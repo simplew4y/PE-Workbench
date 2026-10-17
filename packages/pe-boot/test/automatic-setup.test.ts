@@ -93,6 +93,17 @@ it.each(["formula", "old-value", "wrong-date", "wrong-company", "outside-file"])
 	},
 );
 
+it("keeps an unconfirmed valuation date empty while validating the financial input mappings", async () => {
+	const { root, datasetId, basis, run, setup } = await fixture();
+	setup.valuationDate = null;
+	setup.dateSource = null;
+	setup.dateLabelSource = null;
+	delete setup.model.valuationDate;
+	expect(validateAutomaticSetup(root, datasetId, run, basis, setup).valuationDate).toBeNull();
+	setup.model.valuationDate = "2026-08-31";
+	expect(() => validateAutomaticSetup(root, datasetId, run, basis, setup)).toThrow("日期不一致");
+});
+
 it.each([null, "adopted-model"])(
 	"the restricted LLM reads writable inputs and discovers current version %s without configuration",
 	async (versionId) => {
